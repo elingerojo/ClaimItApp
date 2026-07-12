@@ -1,4 +1,12 @@
 
+# ClaimItApp
+
+### _"When you want to get rid of stuff before your moving and don't want or don't have the time to carry it to Goodwill places."_ 
+
+#### Just take a picture with your phone and your acquaintance gladly take care of it.
+
+---
+
 Here is the complete, consolidated master plan for your Virtual Moving Giveaway Application. This recap organizes every architectural decision, user experience flow, and database rule we agreed upon into a chronological blueprint, from your initial book photography to the final waitlist processing.
 
 ### Phase 1: The Database Schema & Concurrency Design ( Neon[^neon-term] PostgreSQL[^PostgreSQL-term] )
@@ -63,4 +71,4 @@ The user interface delivers a rich, highly visual, reactive grid using modern An
 
 [^SSE-term]: **SSE:** A web technology enabling a server to push real-time stream updates to a client over a single HTTP connection.
 
-[^Railway-term]: **Railway:** A cloud platform that simplifies application deployment and infrastructure management with minimal configuration. Learn more at the [Railway website](https://Railway.io).
+[^Railway-term]: **Railway:** A cloud platform that simplifies application deployment and infrastructure management with minimal configuration. Learn more at the [Railway website](https://Railway.com).
