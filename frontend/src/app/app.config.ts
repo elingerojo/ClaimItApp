@@ -7,4 +7,4 @@ export const appConfig: ApplicationConfig = {
   providers: [provideBrowserGlobalErrorListeners(), provideRouter(routes)],
 };
 
-export const railwayApiUrl: string = 'https://railway.app'; 
+export const railwayApiUrl: string = 'aakstrapi-production-2140.up.railway.app'; 

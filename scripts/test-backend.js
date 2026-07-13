@@ -7,11 +7,13 @@ const PRODUCTION_API_URL = 'https://railway.app';
 */
 
 
-// Ejemplo de uso:
+// Ejemplos de uso:
 // node test-backend.js https://app.railway.com
+// mode test-backend.js
 
 const args = process.argv.slice(2);
-const PRODUCTION_API_URL = args[2];  // Toma el URL del primer argumento de la línea de commando
+const apiURL = args[2]; // Opcionalmente toma el URL del primer argumento de la línea de commando
+const PRODUCTION_API_URL = apiURL || 'aakstrapi-production-2140.up.railway.app';  
 
 async function runDiagnostic() {
   console.log('🔍 Iniciando prueba de diagnóstico en el servidor de producción...');
