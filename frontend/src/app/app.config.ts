@@ -6,3 +6,5 @@ import { routes } from './app.routes';
 export const appConfig: ApplicationConfig = {
   providers: [provideBrowserGlobalErrorListeners(), provideRouter(routes)],
 };
+
+export const railwayApiUrl: string = 'https://railway.app'; 

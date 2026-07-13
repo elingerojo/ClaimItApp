@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms'; // 🧠 Requerido para enlazar [(n
 import { InventoryService } from '../../services/inventory';
 import { ItemCategory } from '@claimitapp/shared';
 import { upload } from '@vercel/blob/client'; // Helper oficial de Vercel para subir directo desde el navegador
+import { railwayApiUrl } from '../../app.config';
 
 @Component({
   selector: 'app-admin-panel',
@@ -32,7 +33,7 @@ export class AdminPanel {
     'Office', 'Utilities', 'Cleaning', 'Sports', 'Misc.'
   ];
 
-  private readonly apiUrl = 'https://railway.app';
+  private readonly apiUrl = railwayApiUrl;
 
   setToken(val: string): void {
     this.adminToken.set(val);

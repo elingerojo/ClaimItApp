@@ -1,5 +1,6 @@
 import { Component, signal, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { railwayApiUrl } from '../../app.config';
 
 export interface LedgerLog {
   username: string;
@@ -15,7 +16,7 @@ export interface LedgerLog {
   templateUrl: './activity-log.html' // 📂 Relative target mapping matches internal folder setup
 })
 export class ActivityLog implements OnInit {
-  private readonly apiUrl = 'https://railway.app';
+  private readonly apiUrl = railwayApiUrl;
   readonly activityLogs = signal<LedgerLog[]>([]);
 
   ngOnInit(): void {

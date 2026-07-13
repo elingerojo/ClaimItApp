@@ -1,5 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import { Item, ItemStatus } from '@claimitapp/shared';
+import { railwayApiUrl } from '../app.config';
 
 export interface ItemWithQueue extends Item {
   queue: Array<{ username: string; claimedAt: string }>;
@@ -9,7 +10,7 @@ export interface ItemWithQueue extends Item {
   providedIn: 'root'
 })
 export class InventoryService {
-  private readonly apiUrl = 'https://railway.app'; 
+  private readonly apiUrl = railwayApiUrl; 
 
   // Core application visual layer signaling pipeline
   private readonly itemsSignal = signal<ItemWithQueue[]>([]);
