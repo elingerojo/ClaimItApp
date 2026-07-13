@@ -25,7 +25,7 @@ The foundation of the app is a relational database designed to handle high concu
 
 - **Race-Condition Protection (Pessimistic Locking):** When a friend clicks "Claim," the database executes an atomic transaction block. It immediately locks that specific item row exclusively (`FOR UPDATE`). Any concurrent requests hitting at the exact same millisecond are forced to wait in a queue. The system evaluates the slots, logs the claim in order, updates the item's status enum, and safely commits the transaction, ensuring zero double-booking.
 
-### Phase 2: The Media Asset Pipeline & AI Ingestion (Vercel[^Vercel-term] Blob[^Blob-term]s)
+### Phase 2: The Media Asset Pipeline & AI Ingestion (Vercel[^Vercel-term] Blobs[^Blob-term])
 This phase eliminates manual data entry and catalog fatigue while you are busy packing up your house.
 
 - **Direct-to-Blob Mobile Upload:** From your private admin dashboard `/admin/upload` on your phone, you take a photo of an item or a batch of book covers. Your frontend requests a temporary, secure upload token from your backend, allowing your phone to upload the image directly to Vercel[^Vercel-term] Blobs. This bypasses your backend server completely, keeping it lightweight.
@@ -58,6 +58,36 @@ The user interface delivers a rich, highly visual, reactive grid using modern An
     - **The Automated Cascade:** The backend deletes that user's specific claim row. Because the queue relies strictly on the chronological database timestamps, **the first runner-up automatically cascades into the 👑 Primary slot** in real-time. The item's status automatically adjusts, and an integrated mail service (like Resend) fires an automated notification to the new winner letting them know the item is now theirs.
     
     This is the entire system roadmap approved for your virtual moving giveaway.
+
+    ### Funciones básicas
+
+
+| Acción / Función Básica | Archivo donde se define | Referencia en el Código / Punto de Entrada |
+| :--- | :--- | :--- |
+| **Ver catálogo de objetos y filtros** | `frontend/src/app/components/inventory-list/inventory-list.ts` | `readonly filteredItems = computed(() => {` |
+| **Registrar alias y contacto local** | `frontend/src/app/services/user.ts` | `saveSession(username: string, email: string...` |
+| **Reclamar objeto u unirse a lista** | `frontend/src/app/services/inventory.ts` | `async submitClaim(itemId: string, username...` |
+| **Bloqueo transaccional de slots (FIFS)** | `backend/src/controllers/claimsController.ts` | `export const createClaim = async (req: Request...` |
+| **Bloqueo Pesimista SQL anti-carreras** | `backend/src/controllers/claimsController.ts` | `SELECT id, status FROM items WHERE id = $1 FOR UPDATE` |
+| **Escuchar cambios en vivo (SSE Cliente)** | `frontend/src/app/services/inventory.ts` | `const eventSource = new EventSource(...` |
+| **Emitir cambios en vivo (SSE Servidor)**| `backend/src/config/sse.ts` | `export const broadcastSseEvent = (event...` |
+| **Ver historial global de actividad** | `frontend/src/app/components/activity-log/activity-log.ts` | `private async fetchLedgerHistory() {` |
+| **Solicitar firma para subir fotos** | `backend/src/controllers/uploadController.ts` | `const jsonResponse = await handleUpload({` |
+| **Analizar imagen con IA Vision** | `backend/src/controllers/analyzerController.ts` | `export const analyzeItem = async (req: Request...` |
+| **Insertar nuevo objeto al inventario** | `backend/src/controllers/itemsController.ts` | `INSERT INTO items (title, description...` |
+| **Ver tabla de control y waitlists** | `frontend/src/app/components/admin-panel/admin-panel.ts` | `readonly inventoryService = inject(InventoryService);` |
+| **Expulsar no-show y cascadear cola** | `backend/src/controllers/adminController.ts` | `export const evictClaimant = async (req: Request...` |
+
+### Deployment Plan
+
+
+| Etapa de Despliegue | Objetivo Principal | Herramienta / Script de Comprobación y Diagnóstico |
+| :--- | :--- | :--- |
+| **1. Base de Datos (Neon)** | Activar la base de datos PostgreSQL y migrar tablas, índices y los ENUMs de las 15 categorías. | Consulta DQL en la consola web de Neon o PGAdmin 4 que valide la estructura de datos y restricciones de claves foráneas. |
+| **2. Servidor API (Railway)** | Compilar y publicar el backend de Node/Express inyectando las variables de entorno divididas. | Script de diagnóstico `scripts/test-api.js` que realice un `fetch` a `/api/items` y verifique una respuesta HTTP 200 (Arreglo JSON). |
+| **3. Almacenamiento (Vercel Blobs)** | Levantar el bucket de archivos y sincronizar los tokens de firma y autorización con el backend. | Petición manual via script a `/api/admin/blob-token` enviando el `X-Admin-Token` para validar el formato de la firma devuelta por Vercel. |
+| **4. Frontend (Vercel Angular)** | Compilar la app de Angular v22 enlazando los servicios al dominio de Railway y abriendo el túnel SSE. | Inspección en la pestaña *Network* del navegador (F12) validando que la conexión a `/api/stream` mantenga el estado `EventStream` activo. |
+
 
  ---
  _Footnotes:_  

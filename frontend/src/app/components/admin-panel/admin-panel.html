@@ -1,0 +1,160 @@
+<div class="max-w-6xl mx-auto px-4 py-8 font-sans">
+  
+  <!-- Encabezado Principal -->
+  <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-100 pb-6 mb-8">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900 tracking-tight">Panel de Control de Administración</h1>
+      <p class="text-xs text-gray-500 mt-1">Sube nuevos objetos con tu cámara e IA, y gestiona las listas de espera de 48 horas.</p>
+    </div>
+    <div class="mt-4 md:mt-0">
+      <input 
+        type="password" 
+        placeholder="Ingresar X-Admin-Token" 
+        (input)="setToken($any($event.target).value)"
+        class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono w-64 shadow-sm"
+      />
+    </div>
+  </div>
+
+  <!-- SECCIÓN NUEVA: Formulario Inteligente de Ingestión con Cámara e IA -->
+  @if (adminToken()) {
+    <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-6 mb-8 grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+      
+      <!-- Lado Izquierdo: Disparador de la Cámara -->
+      <div class="flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-xl p-4 aspect-video md:aspect-square bg-gray-50 relative group">
+        @if (previewUrl()) {
+          <img [src]="previewUrl()" class="w-full h-full object-cover rounded-lg" />
+          <div class="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <span class="text-xs text-white font-medium">Cambiar Foto</span>
+          </div>
+        } @else {
+          <div class="text-center space-y-2">
+            <span class="text-2xl">📸</span>
+            <div class="text-xs font-bold text-gray-700">Tomar Foto del Objeto</div>
+            <div class="text-[10px] text-gray-400">Abre la cámara de tu celular directo</div>
+          </div>
+        }
+        <!-- Input invisible nativo que activa la cámara trasera en móviles -->
+        <input 
+          type="file" 
+          accept="image/*" 
+          capture="environment" 
+          (change)="onCameraCapture($event)"
+          [disabled]="isAiProcessing()"
+          class="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
+        />
+      </div>
+
+      <!-- Lado Derecho: Campos Inteligentes que Autorellena la IA -->
+      <div class="md:col-span-2 space-y-4">
+        @if (isAiProcessing()) {
+          <div class="bg-blue-50/50 border border-blue-100 text-blue-700 rounded-xl p-4 text-xs flex items-center gap-3 animate-pulse">
+            <span class="text-sm">⏳</span>
+            <div>
+              <div class="font-bold">Subiendo imagen y consultando con IA Vision...</div>
+              <div class="text-[10px] text-blue-500 mt-0.5">Esto tomará unos 3-5 segundos. Extrayendo textos y metadatos...</div>
+            </div>
+          </div>
+        }
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Título del Objeto</label>
+            <input type="text" [(ngModel)]="formTitle" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400" />
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Categoría</label>
+            <select [(ngModel)]="formCategory" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white">
+              @for (cat of categories; track cat) {
+                <option [value]="cat">{{ cat }}</option>
+              }
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Descripción / Estado</label>
+          <textarea rows="2" [(ngModel)]="formDescription" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400"></textarea>
+        </div>
+
+        <div>
+          <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Link de Información Externa (Goodreads / Amazon)</label>
+          <input type="text" [(ngModel)]="formInfoUrl" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono text-blue-600" />
+        </div>
+
+        <div class="flex justify-end pt-2">
+          <button 
+            (click)="onSaveItemToInventory()"
+            [disabled]="isAiProcessing() || !formTitle() || !uploadedBlobUrl()"
+            class="bg-green-600 hover:bg-green-700 text-white font-medium text-xs px-6 py-2.5 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+          >
+            💾 Guardar en Inventario Activo
+          </button>
+        </div>
+      </div>
+
+    </div>
+  }
+
+  <!-- TABLA DE CONTROL Y LISTAS DE ESPERA (Se mantiene igual) -->
+  <div class="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-left border-collapse">
+        <thead>
+          <tr class="bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <th class="px-6 py-4">Objeto</th>
+            <th class="px-6 py-4">Categoría</th>
+            <th class="px-6 py-4">Estado</th>
+            <th class="px-6 py-4">Línea de Espera (Click para expulsar)</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-50 text-xs text-gray-700">
+          @for (item of inventoryService.items(); track item.id) {
+            <tr class="hover:bg-gray-50/50 transition-colors">
+              <td class="px-6 py-4">
+                <div class="flex items-center space-x-3">
+                  <img [src]="item.imageUrl" class="w-10 h-10 object-cover rounded-md bg-gray-50 border border-gray-100" />
+                  <div>
+                    <div class="font-medium text-gray-900 text-sm">{{ item.title }}</div>
+                    <div class="text-[10px] text-gray-400 font-mono mt-0.5">{{ item.id }}</div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4">
+                <span class="px-2 py-0.5 bg-gray-100 rounded text-gray-600 font-medium">{{ item.category }}</span>
+              </td>
+              <td class="px-6 py-4">
+                <span [ngClass]="{
+                  'text-green-600 bg-green-50': item.status === 'available',
+                  'text-amber-600 bg-amber-50': item.status === 'waitlist_open',
+                  'text-red-600 bg-red-50': item.status === 'unavailable'
+                }" class="px-2 py-0.5 rounded font-medium capitalize">
+                  {{ item.status.replace('_', ' ') }}
+                </span>
+              </td>
+              <td class="px-6 py-4">
+                <div class="flex flex-wrap gap-2">
+                  @for (user of item.queue; track user.username; let idx = $index) {
+                    <button 
+                      (click)="handleEviction(item.id, user.username)"
+                      title="Click para remover usuario de la cola"
+                      class="flex items-center space-x-1.5 px-2 py-1 border border-gray-200 rounded-lg hover:border-red-200 hover:bg-red-50 transition-all text-left"
+                    >
+                      <span class="font-medium text-gray-900">
+                        {{ idx === 0 ? '👑' : '⏳' }} &#64;{{ user.username }}
+                      </span>
+                      <span class="text-[10px] text-gray-400 group-hover:text-red-500 font-mono">×</span>
+                    </button>
+                  } @empty {
+                    <span class="text-gray-400 italic">Sin reclamos activos</span>
+                  }
+                </div>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>

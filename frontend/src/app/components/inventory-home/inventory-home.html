@@ -1,0 +1,20 @@
+<div class="max-w-7xl mx-auto px-4 py-8 font-sans">
+  
+  <!-- Layout de Rejilla Responsivo Mobile-First -->
+  <!-- Movil: Una sola columna (Inventario primero, Log abajo) -->
+  <!-- Desktop (lg): 3 Columnas (2 para el Catálogo principal, 1 para la barra lateral) -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+    
+    <!-- Sección Principal (Main): Catálogo de Objetos -->
+    <main class="lg:col-span-2">
+      <app-inventory-list></app-inventory-list>
+    </main>
+
+    <!-- Barra Lateral (Aside): Flujo continuo de Mensajes en Vivo -->
+    <aside class="w-full lg:sticky lg:top-8">
+      <app-activity-log></app-activity-log>
+    </aside>
+
+  </div>
+
+</div>
