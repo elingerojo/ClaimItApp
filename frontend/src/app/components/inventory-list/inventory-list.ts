@@ -36,7 +36,7 @@ export class InventoryList {
     Accessories: "Accesorios",
     Bathroom: "Baño",
     Office: "Oficina",
-    Utilities: "Servicios", // Or "Utilidades" depending on context
+    Utilities: "Utilería", // Or "Servicios" depending on context
     Cleaning: "Limpieza",
     Sports: "Deportes",
     "Misc.": "Varios", // Handled as a string literal key due to the period

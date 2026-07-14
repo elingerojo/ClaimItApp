@@ -99,7 +99,7 @@
         <div class="p-5 flex-grow flex flex-col justify-between">
           <div>
             <div class="flex items-center justify-between mb-1">
-              <span class="text-[10px] uppercase font-bold tracking-wider text-gray-400">{{ item.category }}</span>
+              <span class="text-[10px] uppercase font-bold tracking-wider text-gray-400">{{ translationMap[item.category]?? item.category }}</span>
               @if (item.infoUrl) {
                 <a [href]="item.infoUrl" target="_blank" [title]="'Abrir página externa con más información sobre: ' + item.title" class="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5">Ver Info Externa ↗</a>
               }
