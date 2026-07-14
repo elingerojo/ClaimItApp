@@ -3,14 +3,15 @@
   <!-- Encabezado y Estado de Sesión del Usuario (Se mantiene igual) -->
   <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-100 pb-6 mb-2">
     <div>
-      <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight">Venta de Mudanza Privada</h1>
-      <p class="text-sm text-gray-500 mt-1">Elige lo que te guste. Regla de oro: El primero que llega, se lo queda.</p>
+      <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight">Limpia x Mudanza</h1>
+      <p class="text-sm text-gray-500 mt-1">Elige lo que te guste. Regla de oro: El primero que llega, se lo lleva.</p>
     </div>
     
     <div class="mt-4 md:mt-0 p-4 bg-gray-50 rounded-xl border border-gray-100">
       @if (!userService.isAuthenticated()) {
         <div class="flex flex-col sm:flex-row gap-2">
-          <input #usernameInput type="text" placeholder="Alias único (ej: JuanP)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
+          <span>Para identificar tu lista de separados, ingresa un nombre distintivo</span>
+          <input #usernameInput type="text" placeholder="Apodo o alias (ej: JuanP)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
           <input #emailInput type="email" placeholder="Correo (Opcional)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
           <input #phoneInput type="text" placeholder="Teléfono (Opcional)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
           <button (click)="userService.saveSession(usernameInput.value, emailInput.value, phoneInput.value)" class="text-xs bg-gray-900 text-white px-4 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors">
@@ -134,9 +135,9 @@
               class="w-full text-center text-xs py-2.5 font-medium rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               @if (!userService.isAuthenticated()) {
-                Registra tu alias arriba para obtenerlo gratis
+                Registra tu alias arriba para obtenerlo
               } @else {
-                {{ item.status === 'available' ? '🙋‍♂️ ¡Lo quiero! (Reclamar Principal)' : '⏳ Unirse a la Lista de Espera' }}
+                {{ item.status === 'available' ? '🙋‍♂️ ¡Anótenme, lo quiero!' : '⏳ Unirse a la Lista de Espera' }}
               }
             </button>
           }
