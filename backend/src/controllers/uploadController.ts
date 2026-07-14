@@ -23,7 +23,7 @@ export const getUploadToken = async (req: Request, res: Response): Promise<void>
     const jsonResponse = await handleUpload({
       body: req.body,
       request: req as any, // Cast required to align Express request shape with Vercel internal interfaces
-      token: process.env.BLOB_READ_WRITE_TOKEN,
+      // token: process.env.BLOB_READ_WRITE_TOKEN,
       onBeforeGenerateToken: async (pathname: string) => {
         // Enforce content-type security boundaries for your phone camera photos
         return {
