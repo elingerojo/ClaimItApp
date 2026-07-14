@@ -24,6 +24,23 @@ export class InventoryList {
     'Clothing', 'Bedding', 'Shoes', 'Accessories', 'Bathroom', 
     'Office', 'Utilities', 'Cleaning', 'Sports', 'Misc.'
   ];
+  readonly translationMap = {
+    Kitchen: "Cocina",
+    Electronics: "Electrónica",
+    Decor: "Decoración",
+    Books: "Libros",
+    Media: "Medios",
+    Clothing: "Ropa",
+    Bedding: "Blancos", // Or "Ropa de cama"
+    Shoes: "Zapatos",
+    Accessories: "Accesorios",
+    Bathroom: "Baño",
+    Office: "Oficina",
+    Utilities: "Servicios", // Or "Utilidades" depending on context
+    Cleaning: "Limpieza",
+    Sports: "Deportes",
+    "Misc.": "Varios", // Handled as a string literal key due to the period
+  } as const;
 
   // Pipeline combinado reactivo para calcular la rejilla en tiempo real
   readonly filteredItems = computed(() => {

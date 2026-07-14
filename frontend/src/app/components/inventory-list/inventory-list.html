@@ -43,7 +43,7 @@
         </button>
         @for (cat of categories; track cat) {
           <button (click)="onSelectCategory(cat)" [class]="activeCategory() === cat && !showOnlyMyClaims() ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
-            {{ cat }}
+            {{ translationMap[cat] }}
           </button>
         }
       </div>
@@ -134,7 +134,7 @@
               class="w-full text-center text-xs py-2.5 font-medium rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               @if (!userService.isAuthenticated()) {
-                Registra tu alias arriba para reclamar
+                Registra tu alias arriba para obtenerlo gratis
               } @else {
                 {{ item.status === 'available' ? '🙋‍♂️ ¡Lo quiero! (Reclamar Principal)' : '⏳ Unirse a la Lista de Espera' }}
               }
