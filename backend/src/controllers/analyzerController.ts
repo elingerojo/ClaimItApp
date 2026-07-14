@@ -26,19 +26,19 @@ export const analyzeItem = async (req: Request, res: Response): Promise<void> =>
       properties: {
         title: {
           type: Type.STRING,
-          description: 'A clean, short title for the item. Max 50 characters.',
+          description: 'Un título corto y claro para el objeto. Máximo 50 caracteres.',
         },
         category: {
           type: Type.STRING,
-          description: 'Must match exactly one of these 15 values: Kitchen, Electronics, Decor, Books, Media, Clothing, Bedding, Shoes, Accessories, Bathroom, Office, Utilities, Cleaning, Sports, Misc.',
+          description: 'Debe coincidir exactamente con uno de estos 15 valores: Kitchen, Electronics, Decor, Books, Media, Clothing, Bedding, Shoes, Accessories, Bathroom, Office, Utilities, Cleaning, Sports, Misc.',
         },
         description: {
           type: Type.STRING,
-          description: 'A brief, friendly 1-2 sentence summary of the object condition or book overview.',
+          description: 'Un resumen breve y amigable de 1-2 oraciones sobre el estado del objeto o resumen del libro. Responde en español.',
         },
         infoUrl: {
           type: Type.STRING,
-          description: 'A valid external search link (like Goodreads for books, Amazon, or a general product info link). Return null if not applicable.',
+          description: 'Un enlace de búsqueda externa válido (como Goodreads para libros, Amazon o un enlace general de información del producto). Devuelve null si no aplica.',
           nullable: true,
         },
       },
@@ -64,10 +64,10 @@ export const analyzeItem = async (req: Request, res: Response): Promise<void> =>
       model: 'gemini-3.1-flash-lite', // Lightning-fast and highly precise for visual extraction
       contents: [
         imagePart,
-        'Analyze this photo of an item I want to give away for my moving sale. Extract its details.',
+        'Analiza esta foto de un objeto que quiero regalar en mi venta de mudanza. Extrae sus detalles. Responde siempre en español.',
       ],
       config: {
-        systemInstruction: 'You are an expert inventory cataloger. Analyze the photo and output data following the required JSON schema schema exactly.',
+        systemInstruction: 'Eres un catalogador experto de inventario. Analiza la foto y genera los datos siguiendo exactamente el esquema JSON requerido. Todas las respuestas deben estar en español.',
         responseMimeType: 'application/json',
         responseSchema: schema,
       },
