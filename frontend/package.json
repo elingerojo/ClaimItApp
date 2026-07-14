@@ -16,17 +16,17 @@
     "@angular/forms": "^22.0.0",
     "@angular/platform-browser": "^22.0.0",
     "@angular/router": "^22.0.0",
-    "tslib": "^2.3.0",
     "@claimitapp/shared": "*",
-    "@vercel/blob": "^0.23.4"
+    "@vercel/blob": "^0.23.4",
+    "tslib": "^2.3.0"
   },
   "devDependencies": {
     "@angular/build": "^22.0.6",
     "@angular/cli": "^22.0.6",
     "@angular/compiler-cli": "^22.0.0",
-    "@tailwindcss/vite": "^4.3.2",
+    "@tailwindcss/postcss": "^4.3.2",
     "autoprefixer": "^10.5.2",
-    "postcss": "^8.5.18",
+    "postcss": "^8.5.19",
     "prettier": "^3.8.1",
     "tailwindcss": "^4.3.2",
     "typescript": "~6.0.2"
