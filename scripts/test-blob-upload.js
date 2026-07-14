@@ -22,7 +22,7 @@
 
 const args = process.argv.slice(2);
 const ADMIN_TOKEN = args[0] || process.env.ADMIN_TOKEN;
-const API_URL = args[1] || process.env.API_URL || 'http://localhost:3000';
+const API_URL = args[1] || process.env.API_URL || 'https://aakstrapi-production-2140.up.railway.app';
 
 if (!ADMIN_TOKEN) {
   console.error('❌ Missing ADMIN_TOKEN.');
