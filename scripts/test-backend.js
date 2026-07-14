@@ -13,15 +13,15 @@ const PRODUCTION_API_URL = 'https://railway.app';
 
 const args = process.argv.slice(2);
 const apiURL = args[2]; // Opcionalmente toma el URL del primer argumento de la línea de commando
-const PRODUCTION_API_URL = apiURL || 'https://aakstrapi-production-2140.up.railway.app';  
+const PRODUCTION_API_URL = apiURL || 'https://aakstrapi-production-2140.up.railway.app/api';  
 
 async function runDiagnostic() {
   console.log('🔍 Iniciando prueba de diagnóstico en el servidor de producción...');
-  console.log(`🌐 Apuntando a: ${PRODUCTION_API_URL}/api/items`);
+  console.log(`🌐 Apuntando a: ${PRODUCTION_API_URL}/items`);
 
   try {
     const start = Date.now();
-    const response = await fetch(`${PRODUCTION_API_URL}/api/items`);
+    const response = await fetch(`${PRODUCTION_API_URL}/items`);
     const duration = Date.now() - start;
 
     if (!response.ok) {

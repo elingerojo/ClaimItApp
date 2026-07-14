@@ -22,7 +22,7 @@
 
 const args = process.argv.slice(2);
 const ADMIN_TOKEN = args[0] || process.env.ADMIN_TOKEN;
-const API_URL = args[1] || process.env.API_URL || 'https://aakstrapi-production-2140.up.railway.app';
+const API_URL = args[1] || process.env.API_URL || 'https://aakstrapi-production-2140.up.railway.app/api';
 
 if (!ADMIN_TOKEN) {
   console.error('❌ Missing ADMIN_TOKEN.');
@@ -38,14 +38,14 @@ async function testBlobToken() {
   console.log('');
   console.log('🧪  VERCEL BLOB UPLOAD TOKEN TEST');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log(`  Endpoint : ${API_URL}/api/admin/blob-token`);
+  console.log(`  Endpoint : ${API_URL}/admin/blob-token`);
   console.log(`  Pathname : ${TEST_PATHNAME}`);
   console.log(`  Token    : ${ADMIN_TOKEN ? '✓ provided' : '✗ missing'}`);
   console.log('');
 
   try {
     // Simulate the exact body shape the @vercel/blob client SDK sends
-    const response = await fetch(`${API_URL}/api/admin/blob-token`, {
+    const response = await fetch(`${API_URL}/admin/blob-token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -68,6 +68,7 @@ async function testBlobToken() {
     if (response.ok) {
       // Successful response – should contain a signed URL and upload token
       console.log('  ✓ Response keys:', Object.keys(body).join(', '));
+      console.log(`  ✓ ${Object.keys(body)[0]}: value = `, Object.values(body)[0]);
       console.log('');
 
       if (body.url) {
