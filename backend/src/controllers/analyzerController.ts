@@ -38,7 +38,7 @@ export const analyzeItem = async (req: Request, res: Response): Promise<void> =>
         },
         infoUrl: {
           type: Type.STRING,
-          description: 'Un enlace de búsqueda externa válido (como Goodreads para libros, Amazon o un enlace general de información del producto). Devuelve null si no aplica.',
+          description: 'Un enlace de búsqueda externa actual, válido y relevante (como Amazon para libros, o un enlace general de información del producto). Devuelve null si no aplica.',
           nullable: true,
         },
       },
@@ -64,7 +64,7 @@ export const analyzeItem = async (req: Request, res: Response): Promise<void> =>
       model: 'gemini-3.1-flash-lite', // Lightning-fast and highly precise for visual extraction
       contents: [
         imagePart,
-        'Analiza esta foto de un objeto que quiero regalar en mi venta de mudanza. Extrae sus detalles. Responde siempre en español.',
+        'Analiza esta foto de un objeto que quiero regalar en mi venta de mudanza. Extrae sus detalles. Verifica que el link infoURL sea actual, válido y relevante. Responde siempre en español.',
       ],
       config: {
         systemInstruction: 'Eres un catalogador experto de inventario. Analiza la foto y genera los datos siguiendo exactamente el esquema JSON requerido. Todas las respuestas deben estar en español.',
