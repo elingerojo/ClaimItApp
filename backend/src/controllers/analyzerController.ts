@@ -61,7 +61,7 @@ export const analyzeItem = async (req: Request, res: Response): Promise<void> =>
 
     // Call the Gemini model with a structured system instruction
     const response = await ai.models.generateContent({
-      model: 'Gemini 3.1 Flash-Lite', // Lightning-fast and highly precise for visual extraction
+      model: 'gemini-3.1-flash-lite', // Lightning-fast and highly precise for visual extraction
       contents: [
         imagePart,
         'Analyze this photo of an item I want to give away for my moving sale. Extract its details.',
