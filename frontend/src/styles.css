@@ -1,3 +1,14 @@
-/* You can add global styles to this file, and also import other style files */
+/* Boilerplate setup by Angular, Google AI, and Deepseek in VsCode */
 @import "tailwindcss";
-@tailwind utilities;
+
+@theme {
+  --font-sans: "Inter", sans-serif;
+}
+
+/* Explicitly bind the feature settings to your font class */
+@utility font-sans {
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+}
+/*******************************************************************/
+
