@@ -50,18 +50,21 @@ export class InventoryService {
       };
 
       // Perform local micro-mutations on the matching array target inside your state tree
-      this.itemsSignal.update(currentItems => 
+      this.itemsSignal.update(currentItems =>
         currentItems.map(item => {
           if (item.id !== updateData.itemId) return item;
 
-          const userExists = item.queue.some(q => q.username.toLowerCase() === updateData.username.toLowerCase());
-          const updatedQueue = [...item.queue];
-
-          if (!userExists) {
-            updatedQueue.push({
-              username: updateData.username,
-              claimedAt: new Date().toISOString()
-            });
+          // Only modify queue when event carries a username (absent in title-only edits)
+          let updatedQueue = item.queue;
+          if (updateData.username) {
+            const userExists = item.queue.some(q => q.username.toLowerCase() === updateData.username.toLowerCase());
+            updatedQueue = [...item.queue];
+            if (!userExists) {
+              updatedQueue.push({
+                username: updateData.username,
+                claimedAt: new Date().toISOString()
+              });
+            }
           }
 
           return {
