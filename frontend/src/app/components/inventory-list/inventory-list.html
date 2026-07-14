@@ -11,10 +11,10 @@
       @if (!userService.isAuthenticated()) {
         <div class="flex flex-col sm:flex-row gap-2">
           <span>Para identificar tu lista de separados, ingresa un nombre distintivo</span>
-          <input #usernameInput type="text" placeholder="Apodo o alias (ej: JuanP)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
-          <input #emailInput type="email" placeholder="Correo (Opcional)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
-          <input #phoneInput type="text" placeholder="Teléfono (Opcional)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
-          <button (click)="userService.saveSession(usernameInput.value, emailInput.value, phoneInput.value)" class="text-xs bg-gray-900 text-white px-4 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors">
+          <input #usernameInput type="text" placeholder="Apodo o alias (ej: JuanP)" title="Elige un apodo o alias único para identificar tus selecciones y mantener tu misma lista de objetos en futuras sesiones. No uses tu nombre real si prefieres privacidad." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
+          <input #emailInput type="email" placeholder="Correo (Opcional)" title="Opcional. Solo se usaría para notificarte si alguien más reclama un objeto que apartaste pero no has recogido. Es decir, solo para recordarte recogerlo para que no te lo ganen. No se comparte el correo a nadie." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
+          <input #phoneInput type="text" placeholder="Teléfono (Opcional)" title="Opcional. Solo se usaría para enviar un mensaje si alguien más reclama un objeto que apartaste pero no has recogido. Es decir, solo para recordarte recogerlo para que no te lo ganen. No se comparte el número a nadie." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
+          <button (click)="userService.saveSession(usernameInput.value, emailInput.value, phoneInput.value)" title="Guarda tu alias y datos de contacto en tu navegador para poder apartar objetos." class="text-xs bg-gray-900 text-white px-4 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors">
             Guardar Datos
           </button>
         </div>
@@ -24,7 +24,7 @@
             <span class="text-gray-500">Identificado como:</span>
             <span class="font-bold text-gray-900 font-mono ml-1">&#64;{{ userService.currentUsername() }}</span>
           </div>
-          <button (click)="userService.clearSession()" class="text-[10px] text-red-500 hover:underline font-medium">
+          <button (click)="userService.clearSession()" title="Cambia a un alias diferente o actualiza tus datos de contacto. Tus apartados anteriores se conservan." class="text-[10px] text-red-500 hover:underline font-medium">
             Cambiar Alias
           </button>
         </div>
@@ -39,11 +39,11 @@
     <div class="flex items-center gap-3 flex-wrap">
       <span class="text-xs font-bold text-gray-400 uppercase tracking-wider min-w-[100px]">Categoría:</span>
       <div class="flex flex-wrap gap-1.5">
-        <button (click)="onSelectCategory('All')" [class]="activeCategory() === 'All' && !showOnlyMyClaims() ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+        <button (click)="onSelectCategory('All')" title="Mostrar todas las categorías" [class]="activeCategory() === 'All' && !showOnlyMyClaims() ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
           Todos
         </button>
         @for (cat of categories; track cat) {
-          <button (click)="onSelectCategory(cat)" [class]="activeCategory() === cat && !showOnlyMyClaims() ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+          <button (click)="onSelectCategory(cat)" [title]="'Filtrar solo objetos de la categoría: ' + translationMap[cat]" [class]="activeCategory() === cat && !showOnlyMyClaims() ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
             {{ translationMap[cat] }}
           </button>
         }
@@ -54,16 +54,16 @@
     <div class="flex items-center gap-3 flex-wrap border-t border-gray-100 pt-3">
       <span class="text-xs font-bold text-gray-400 uppercase tracking-wider min-w-[100px]">Disponibilidad:</span>
       <div class="flex flex-wrap gap-1.5">
-        <button (click)="activeStatus.set('All')" [class]="activeStatus() === 'All' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+        <button (click)="activeStatus.set('All')" title="Muestra objetos sin importar su estado de disponibilidad" [class]="activeStatus() === 'All' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
           Cualquiera
         </button>
-        <button (click)="activeStatus.set('available')" [class]="activeStatus() === 'available' ? 'bg-green-600 text-white' : 'bg-white border border-gray-200 text-green-600 hover:bg-green-50'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+        <button (click)="activeStatus.set('available')" title="Solo objetos que nadie ha apartado aún — puedes reclamarlos directamente" [class]="activeStatus() === 'available' ? 'bg-green-600 text-white' : 'bg-white border border-gray-200 text-green-600 hover:bg-green-50'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
           🟢 Disponibles
         </button>
-        <button (click)="activeStatus.set('waitlist_open')" [class]="activeStatus() === 'waitlist_open' ? 'bg-amber-500 text-white' : 'bg-white border border-gray-200 text-amber-600 hover:bg-amber-50'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+        <button (click)="activeStatus.set('waitlist_open')" title="Objetos ya apartados, pero aún puedes unirte a la lista de espera por si se liberan" [class]="activeStatus() === 'waitlist_open' ? 'bg-amber-500 text-white' : 'bg-white border border-gray-200 text-amber-600 hover:bg-amber-50'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
           🟡 Con lista de espera
         </button>
-        <button (click)="activeStatus.set('unavailable')" [class]="activeStatus() === 'unavailable' ? 'bg-gray-500 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+        <button (click)="activeStatus.set('unavailable')" title="Objetos con lista de espera completa — no se aceptan más solicitudes" [class]="activeStatus() === 'unavailable' ? 'bg-gray-500 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
           🔴 Llenos
         </button>
       </div>
@@ -73,7 +73,7 @@
     @if (userService.isAuthenticated()) {
       <div class="flex items-center gap-3 border-t border-gray-100 pt-3">
         <span class="text-xs font-bold text-gray-400 uppercase tracking-wider min-w-[100px]">Mis Acciones:</span>
-        <button (click)="onToggleMyClaims()" [class]="showOnlyMyClaims() ? 'bg-blue-600 text-white ring-2 ring-blue-100' : 'bg-white border border-gray-200 text-blue-600 hover:bg-blue-50'" class="text-xs px-4 py-1.5 rounded-full font-bold transition-all shadow-sm flex items-center gap-1">
+        <button (click)="onToggleMyClaims()" title="Muestra únicamente los objetos en los que te has apuntado (apartados o en lista de espera)." [class]="showOnlyMyClaims() ? 'bg-blue-600 text-white ring-2 ring-blue-100' : 'bg-white border border-gray-200 text-blue-600 hover:bg-blue-50'" class="text-xs px-4 py-1.5 rounded-full font-bold transition-all shadow-sm flex items-center gap-1">
           ⭐ Mis elegidos
         </button>
       </div>
@@ -101,7 +101,7 @@
             <div class="flex items-center justify-between mb-1">
               <span class="text-[10px] uppercase font-bold tracking-wider text-gray-400">{{ item.category }}</span>
               @if (item.infoUrl) {
-                <a [href]="item.infoUrl" target="_blank" class="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5">Ver Info Externa ↗</a>
+                <a [href]="item.infoUrl" target="_blank" [title]="'Abrir página externa con más información sobre: ' + item.title" class="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5">Ver Info Externa ↗</a>
               }
             </div>
             <h2 class="text-base font-bold text-gray-900 line-clamp-1">{{ item.title }}</h2>
@@ -112,7 +112,13 @@
             <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Línea de Espera:</div>
             <div class="flex flex-wrap gap-1.5 h-6 overflow-hidden">
               @for (claimer of item.queue; track claimer.username; let idx = $index) {
-                <span [class.bg-blue-50]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()" [class.border-b-2]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()" [class.border-blue-400]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()" class="inline-flex items-center text-[10px] font-medium bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-md text-gray-700 font-mono">
+                <span [title]="
+                  idx === 0
+                    ? '👑 Primero en la fila — prioridad para llevarse este objeto.'
+                    : claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()
+                      ? '✅ ¡Eres tú! Estás en la lista de este objeto.'
+                      : '⏳ En espera (posición ' + (idx + 1) + ')'
+                " [class.bg-blue-50]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()" [class.border-b-2]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()" [class.border-blue-400]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()" class="inline-flex items-center text-[10px] font-medium bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-md text-gray-700 font-mono">
                   {{ idx === 0 ? '👑' : '⏳' }} &#64;{{ claimer.username }}
                 </span>
               } @empty {
@@ -124,13 +130,18 @@
 
         <div class="px-5 pb-5">
           @if (item.status === 'unavailable') {
-            <button disabled class="w-full text-center text-xs py-2.5 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed">
+            <button disabled title="Ya no se aceptan más solicitudes para este objeto. La lista de espera está completa." class="w-full text-center text-xs py-2.5 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed">
               Lista de Espera Llena
             </button>
           } @else {
-            <button 
+            <button
               (click)="onClaimItem(item.id)"
               [disabled]="!userService.isAuthenticated()"
+              [title]="!userService.isAuthenticated()
+                ? 'Primero ingresa tu alias arriba para poder apartar objetos.'
+                : item.status === 'available'
+                  ? 'Apúntate como interesado. Si nadie más lo pidió antes, es tuyo.'
+                  : 'El objeto ya está apartado, pero quedas en espera por si se libera.'"
               [class]="item.status === 'available' ? 'bg-gray-900 text-white hover:bg-gray-800' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'"
               class="w-full text-center text-xs py-2.5 font-medium rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
