@@ -21,9 +21,9 @@ export const getUploadToken = async (req: Request, res: Response): Promise<void>
 
     // handleUpload expects the raw request body payload from the client-side @vercel/blob SDK
     const jsonResponse = await handleUpload({
-      body: req.body,
+      body: req.body as HandleUploadBody,
       request: req as any, // Cast required to align Express request shape with Vercel internal interfaces
-      // token: process.env.BLOB_READ_WRITE_TOKEN,
+      token: process.env.BLOB_READ_WRITE_TOKEN,
       onBeforeGenerateToken: async (pathname: string) => {
         // Enforce content-type security boundaries for your phone camera photos
         return {
