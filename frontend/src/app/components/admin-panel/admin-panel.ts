@@ -1,7 +1,7 @@
 import { Component, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms'; // 🧠 Requerido para enlazar [(ngModel)] con las señales de formulario
-import { InventoryService } from '../../services/inventory';
+import { InventoryService, ItemWithQueue } from '../../services/inventory';
 import { ItemCategory } from '@claimitapp/shared';
 import { upload } from '@vercel/blob/client'; // Helper oficial de Vercel para subir directo desde el navegador
 import { railwayApiUrl } from '../../app.config';
@@ -26,6 +26,12 @@ export class AdminPanel {
   readonly formDescription = signal<string>('');
   readonly formCategory = signal<ItemCategory>('Misc.');
   readonly formInfoUrl = signal<string>('');
+
+  // Estados de edición de objetos existentes
+  readonly editingItem = signal<ItemWithQueue | null>(null);
+  readonly editTitle = signal<string>('');
+  readonly editDescription = signal<string>('');
+  readonly editInfoUrl = signal<string>('');
 
   readonly categories: ItemCategory[] = [
     'Kitchen', 'Electronics', 'Decor', 'Books', 'Media', 
@@ -123,6 +129,57 @@ export class AdminPanel {
       this.formCategory.set('Misc.');
       this.formInfoUrl.set('');
 
+    } catch (err: any) {
+      alert(`Error al guardar: ${err.message}`);
+    }
+  }
+
+  /**
+   * Inicia la edición de un objeto existente, precargando sus valores actuales
+   */
+  startEdit(item: ItemWithQueue): void {
+    this.editingItem.set(item);
+    this.editTitle.set(item.title);
+    this.editDescription.set(item.description || '');
+    this.editInfoUrl.set(item.infoUrl || '');
+  }
+
+  /**
+   * Cancela la edición activa y limpia los campos
+   */
+  cancelEdit(): void {
+    this.editingItem.set(null);
+    this.editTitle.set('');
+    this.editDescription.set('');
+    this.editInfoUrl.set('');
+  }
+
+  /**
+   * Persiste los cambios de título, descripción e infoUrl en el backend
+   */
+  async onSaveEdit(): Promise<void> {
+    const item = this.editingItem();
+    if (!item) return;
+
+    try {
+      const res = await fetch(`${this.apiUrl}/admin/items/${item.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Token': this.adminToken()
+        },
+        body: JSON.stringify({
+          title: this.editTitle(),
+          description: this.editDescription(),
+          infoUrl: this.editInfoUrl()
+        })
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Error al actualizar el objeto.');
+
+      alert('✅ Objeto actualizado con éxito.');
+      this.cancelEdit();
     } catch (err: any) {
       alert(`Error al guardar: ${err.message}`);
     }

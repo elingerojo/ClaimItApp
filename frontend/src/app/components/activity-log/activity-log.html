@@ -1,5 +1,5 @@
 <div class="bg-white border border-gray-100 rounded-xl p-6 shadow-sm max-h-[500px] overflow-y-auto">
-  <h3 class="text-sm font-semibold tracking-wider text-gray-400 uppercase mb-4">Live Giveaway Activity</h3>
+  <h3 class="text-sm font-semibold tracking-wider text-gray-400 uppercase mb-4">Actividad Anotaciones en Vivo</h3>
   
   <div class="space-y-4">
     @for (log of activityLogs(); track log.claimed_at) {
@@ -14,7 +14,7 @@
         </div>
       </div>
     } @empty {
-      <div class="text-xs text-gray-400 italic text-center py-4">No giveaway logs recorded yet.</div>
+      <div class="text-xs text-gray-400 italic text-center py-4">No hay anotacione en este momento todavía.</div>
     }
   </div>
 </div>

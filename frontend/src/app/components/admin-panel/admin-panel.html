@@ -96,6 +96,37 @@
     </div>
   }
 
+  <!-- EDITOR EN LÍNEA DE OBJETOS EXISTENTES -->
+  @if (editingItem(); as item) {
+    <div class="bg-blue-50 border border-blue-100 rounded-xl p-5 mb-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold text-gray-600 uppercase tracking-wider">
+          ✏️ Editando: {{ item.title }}
+        </span>
+        <button (click)="cancelEdit()" class="text-[10px] text-gray-500 hover:underline font-medium">✕ Cancelar</button>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Título</label>
+          <input type="text" [(ngModel)]="editTitle" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400" />
+        </div>
+        <div>
+          <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Descripción</label>
+          <input type="text" [(ngModel)]="editDescription" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400" />
+        </div>
+        <div>
+          <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Info URL</label>
+          <input type="text" [(ngModel)]="editInfoUrl" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
+        </div>
+      </div>
+      <div class="flex justify-end">
+        <button (click)="onSaveEdit()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-5 py-2 rounded-lg font-medium transition-colors shadow-sm">
+          💾 Guardar Cambios
+        </button>
+      </div>
+    </div>
+  }
+
   <!-- TABLA DE CONTROL Y LISTAS DE ESPERA (Se mantiene igual) -->
   <div class="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
     <div class="overflow-x-auto">
@@ -106,6 +137,7 @@
             <th class="px-6 py-4">Categoría</th>
             <th class="px-6 py-4">Estado</th>
             <th class="px-6 py-4">Línea de Espera (Click para expulsar)</th>
+            <th class="px-6 py-4">Acción</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-50 text-xs text-gray-700">
@@ -149,6 +181,11 @@
                     <span class="text-gray-400 italic">Sin reclamos activos</span>
                   }
                 </div>
+              </td>
+              <td class="px-6 py-4">
+                <button (click)="startEdit(item)" title="Editar título, descripción o URL de información" class="text-[10px] font-medium text-blue-600 hover:text-blue-800 hover:underline transition-colors">
+                  ✏️ Editar
+                </button>
               </td>
             </tr>
           }

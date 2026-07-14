@@ -7,7 +7,7 @@ import { registerSseClient } from './config/sse.js';
 import { createClaim } from './controllers/claimsController.js';
 import { getUploadToken } from './controllers/uploadController.js';
 import { analyzeItem } from './controllers/analyzerController.js';
-import { createItem } from './controllers/itemsController.js';
+import { createItem, updateItem } from './controllers/itemsController.js';
 import { getInventoryFeed, getLedgerFeed } from './controllers/feedsController.js';
 import { evictClaimant } from './controllers/adminController.js';
 
@@ -47,6 +47,7 @@ app.post('/api/admin/blob-token', getUploadToken);
 app.post('/api/admin/analyze-item', analyzeItem);
 app.post('/api/admin/items', createItem);
 app.post('/api/admin/evict', evictClaimant);
+app.patch('/api/admin/items/:id', updateItem);
 
 // Launch the primary backend operational loop
 app.listen(PORT, () => {

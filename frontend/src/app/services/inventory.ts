@@ -44,6 +44,9 @@ export class InventoryService {
         status: ItemStatus;
         username: string;
         queuePosition: number;
+        title?: string;
+        description?: string | null;
+        infoUrl?: string | null;
       };
 
       // Perform local micro-mutations on the matching array target inside your state tree
@@ -64,7 +67,10 @@ export class InventoryService {
           return {
             ...item,
             status: updateData.status,
-            queue: updatedQueue
+            queue: updatedQueue,
+            ...(updateData.title !== undefined && { title: updateData.title }),
+            ...(updateData.description !== undefined && { description: updateData.description }),
+            ...(updateData.infoUrl !== undefined && { infoUrl: updateData.infoUrl })
           };
         })
       );
