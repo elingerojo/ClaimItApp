@@ -49,14 +49,18 @@ async function testBlobToken() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        pathname: TEST_PATHNAME,
-        clientPayload: JSON.stringify({ token: ADMIN_TOKEN }),
+        type: "blob.generate-client-token",
+        payload: {
+          pathname: TEST_PATHNAME,
+          multipart: false,
+          clientPayload: JSON.stringify({ token: ADMIN_TOKEN }),
+        }
       }),
     });
 
-    const duration = `${response.status}`[0] === '2' ? '✅' : '❌';
+    const decor = `${response.status}`[0] === '2' ? '✅' : '❌';
 
-    console.log(`  HTTP ${response.status} ${response.statusText}  ${duration}`);
+    console.log(`  HTTP ${response.status} ${response.statusText}  ${decor}`);
     console.log('');
 
     const body = await response.json();
