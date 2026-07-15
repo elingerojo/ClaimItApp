@@ -1,102 +1,72 @@
 import { Component, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms'; // 🧠 Requerido para enlazar [(ngModel)] con las señales de formulario
+import { FormsModule } from '@angular/forms';
+import { RouterModule } from '@angular/router';
 import { InventoryService, ItemWithQueue } from '../../services/inventory';
+import { AdminTokenService } from '../../services/admin-token';
 import { ItemCategory } from '@claimitapp/shared';
-import { upload } from '@vercel/blob/client'; // Helper oficial de Vercel para subir directo desde el navegador
+import { upload } from '@vercel/blob/client';
 import { railwayApiUrl } from '../../app.config';
 
 @Component({
-  selector: 'app-admin-panel',
+  selector: 'app-admin-ingest',
   standalone: true,
-  imports: [CommonModule, FormsModule],
-  templateUrl: './admin-panel.html'
+  imports: [CommonModule, FormsModule, RouterModule],
+  templateUrl: './admin-ingest.html'
 })
-export class AdminPanel {
+export class AdminIngest {
   readonly inventoryService = inject(InventoryService);
-  
-  // Estados de control administrativo
-  readonly adminToken = signal<string>('');
-  readonly tokenAccepted = signal<boolean>(false);
-  private tokenAcceptedTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly adminTokenService = inject(AdminTokenService);
+
   readonly isAiProcessing = signal<boolean>(false);
   readonly previewUrl = signal<string>('');
   readonly uploadedBlobUrl = signal<string>('');
 
-  // Señales de formulario para el autorelleno
+  // Form signals for AI auto-fill
   readonly formTitle = signal<string>('');
   readonly formDescription = signal<string>('');
   readonly formCategory = signal<ItemCategory>('Misc.');
   readonly formInfoUrl = signal<string>('');
 
-  // Estados de edición de objetos existentes
+  // Vertical editor state for the last-added item
   readonly editingItem = signal<ItemWithQueue | null>(null);
   readonly editTitle = signal<string>('');
   readonly editDescription = signal<string>('');
   readonly editInfoUrl = signal<string>('');
 
   readonly categories: ItemCategory[] = [
-    'Kitchen', 'Electronics', 'Decor', 'Books', 'Media', 
-    'Clothing', 'Bedding', 'Shoes', 'Accessories', 'Bathroom', 
+    'Kitchen', 'Electronics', 'Decor', 'Books', 'Media',
+    'Clothing', 'Bedding', 'Shoes', 'Accessories', 'Bathroom',
     'Office', 'Utilities', 'Cleaning', 'Sports', 'Misc.'
   ];
 
   private readonly apiUrl = railwayApiUrl;
 
-  setToken(val: string): void {
-    this.adminToken.set(val);
-  }
-
   /**
-   * Maneja la tecla Enter en el campo del token:
-   * - Cierra el teclado virtual en móviles (blur)
-   * - Muestra un indicador visual de "token aceptado"
-   */
-  onTokenEnter(inputEl: HTMLInputElement): void {
-    inputEl.blur(); // Dismiss mobile keyboard
-
-    if (!this.adminToken()) return;
-
-    this.tokenAccepted.set(true);
-
-    // Auto-clear after 2 seconds
-    if (this.tokenAcceptedTimer) clearTimeout(this.tokenAcceptedTimer);
-    this.tokenAcceptedTimer = setTimeout(() => {
-      this.tokenAccepted.set(false);
-      this.tokenAcceptedTimer = null;
-    }, 2000);
-  }
-
-  /**
-   * Captura la foto directo de la cámara, la sube a Vercel Blobs y detona la IA
+   * Captures photo from camera, uploads to Vercel Blobs, triggers AI analysis
    */
   async onCameraCapture(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
     if (!input.files || input.files.length === 0) return;
 
-    const file = input.files[0]; // Capturamos el archivo binario individual
-    
-    // Generar preview visual local instantáneo en la pantalla del celular
+    const file = input.files[0];
     this.previewUrl.set(URL.createObjectURL(file));
     this.isAiProcessing.set(true);
 
     try {
-      // 1. Subida directa a Vercel Blobs usando el canal de firmas seguro
       const blob = await upload(file.name, file, {
         access: 'public',
         handleUploadUrl: `${this.apiUrl}/admin/blob-token`,
-        // 🧠 CORRECCIÓN: Usamos clientPayload en lugar de headers para enviar metadatos al backend de forma segura
-        clientPayload: JSON.stringify({ token: this.adminToken() })
+        clientPayload: JSON.stringify({ token: this.adminTokenService.token() })
       });
 
       this.uploadedBlobUrl.set(blob.url);
 
-      // 2. Enviar la URL del asset a nuestro pipeline de análisis con Gemini Vision
       const aiRes = await fetch(`${this.apiUrl}/admin/analyze-item`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Admin-Token': this.adminToken()
+          'X-Admin-Token': this.adminTokenService.token()
         },
         body: JSON.stringify({ imageUrl: blob.url })
       });
@@ -104,7 +74,6 @@ export class AdminPanel {
       const aiResult = await aiRes.json();
       if (!aiRes.ok) throw new Error(aiResult.error || 'La IA falló al analizar el objeto.');
 
-      // 3. ¡Magia! Autorellenar las señales reactivas del formulario
       const aiData = aiResult.data;
       this.formTitle.set(aiData.title || '');
       this.formDescription.set(aiData.description || '');
@@ -119,7 +88,8 @@ export class AdminPanel {
   }
 
   /**
-   * Guarda los datos aprobados definitivamente en la base de datos Neon
+   * Saves the item to the database, then auto-opens the vertical editor
+   * for the last-added item
    */
   async onSaveItemToInventory(): Promise<void> {
     try {
@@ -127,7 +97,7 @@ export class AdminPanel {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Admin-Token': this.adminToken()
+          'X-Admin-Token': this.adminTokenService.token()
         },
         body: JSON.stringify({
           title: this.formTitle(),
@@ -142,8 +112,25 @@ export class AdminPanel {
       if (!res.ok) throw new Error(result.error || 'Error al persistir el objeto.');
 
       alert('¡Objeto publicado con éxito en el inventario!');
-      
-      // Limpiar formulario para el siguiente disparo de cámara
+
+      // Auto-open vertical editor for the newly created item
+      const newItem = result.item;
+      this.editingItem.set({
+        id: newItem.id,
+        title: newItem.title,
+        description: newItem.description,
+        category: newItem.category,
+        infoUrl: newItem.infoUrl,
+        imageUrl: newItem.imageUrl,
+        status: newItem.status,
+        createdAt: newItem.createdAt,
+        queue: []
+      });
+      this.editTitle.set(newItem.title);
+      this.editDescription.set(newItem.description || '');
+      this.editInfoUrl.set(newItem.infoUrl || '');
+
+      // Clear the ingest form for the next item
       this.previewUrl.set('');
       this.uploadedBlobUrl.set('');
       this.formTitle.set('');
@@ -157,27 +144,7 @@ export class AdminPanel {
   }
 
   /**
-   * Inicia la edición de un objeto existente, precargando sus valores actuales
-   */
-  startEdit(item: ItemWithQueue): void {
-    this.editingItem.set(item);
-    this.editTitle.set(item.title);
-    this.editDescription.set(item.description || '');
-    this.editInfoUrl.set(item.infoUrl || '');
-  }
-
-  /**
-   * Cancela la edición activa y limpia los campos
-   */
-  cancelEdit(): void {
-    this.editingItem.set(null);
-    this.editTitle.set('');
-    this.editDescription.set('');
-    this.editInfoUrl.set('');
-  }
-
-  /**
-   * Persiste los cambios de título, descripción e infoUrl en el backend
+   * Persists edits made in the vertical editor
    */
   async onSaveEdit(): Promise<void> {
     const item = this.editingItem();
@@ -188,7 +155,7 @@ export class AdminPanel {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'X-Admin-Token': this.adminToken()
+          'X-Admin-Token': this.adminTokenService.token()
         },
         body: JSON.stringify({
           title: this.editTitle(),
@@ -207,25 +174,13 @@ export class AdminPanel {
     }
   }
 
-  async handleEviction(itemId: string, username: string): Promise<void> {
-    const confirmation = confirm(`¿Estás seguro de que deseas expulsar a @${username}?`);
-    if (!confirmation) return;
-
-    try {
-      const res = await fetch(`${this.apiUrl}/admin/evict`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Admin-Token': this.adminToken()
-        },
-        body: JSON.stringify({ itemId, username })
-      });
-
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Error en la expulsión.');
-      alert('¡Línea actualizada con éxito!');
-    } catch (err: any) {
-      alert(`Error: ${err.message}`);
-    }
+  /**
+   * Closes the vertical editor
+   */
+  cancelEdit(): void {
+    this.editingItem.set(null);
+    this.editTitle.set('');
+    this.editDescription.set('');
+    this.editInfoUrl.set('');
   }
 }

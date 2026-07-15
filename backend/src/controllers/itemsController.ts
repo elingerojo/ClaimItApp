@@ -18,9 +18,9 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
 
   try {
     const insertQuery = `
-      INSERT INTO items (title, description, category, info_url, image_url) 
-      VALUES ($1, $2, $3, $4, $5) 
-      RETURNING id, status, created_at
+      INSERT INTO items (title, description, category, info_url, image_url)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, title, description, category, info_url, image_url, status, created_at
     `;
     const result = await pool.query(insertQuery, [
       title,
@@ -32,7 +32,16 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
 
     res.status(201).json({
       success: true,
-      item: result.rows[0]
+      item: {
+        id: result.rows[0].id,
+        title: result.rows[0].title,
+        description: result.rows[0].description,
+        category: result.rows[0].category,
+        infoUrl: result.rows[0].info_url,
+        imageUrl: result.rows[0].image_url,
+        status: result.rows[0].status,
+        createdAt: result.rows[0].created_at
+      }
     });
   } catch (error) {
     console.error('Failed to create item row:', error);
