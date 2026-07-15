@@ -86,6 +86,15 @@ export class InventoryList {
     this.showOnlyMyClaims.update(val => !val);
   }
 
+  /**
+   * Verifica si el usuario autenticado ya está en la cola de un objeto
+   */
+  isUserInItemQueue(item: { queue: Array<{ username: string }> }): boolean {
+    const username = this.userService.currentUsername();
+    if (!username) return false;
+    return item.queue.some(q => q.username.toLowerCase() === username.toLowerCase());
+  }
+
   async onClaimItem(itemId: string): Promise<void> {
     const username = this.userService.currentUsername();
     const session = this.userService.session();

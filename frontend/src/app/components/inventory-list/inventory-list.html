@@ -136,17 +136,27 @@
           } @else {
             <button
               (click)="onClaimItem(item.id)"
-              [disabled]="!userService.isAuthenticated()"
+              [disabled]="!userService.isAuthenticated() || isUserInItemQueue(item)"
               [title]="!userService.isAuthenticated()
                 ? 'Primero ingresa tu alias arriba para poder apartar objetos.'
-                : item.status === 'available'
-                  ? 'Apúntate como interesado. Si nadie más lo pidió antes, es tuyo.'
-                  : 'El objeto ya está apartado, pero quedas en espera por si se libera.'"
-              [class]="item.status === 'available' ? 'bg-gray-900 text-white hover:bg-gray-800' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'"
+                : isUserInItemQueue(item)
+                  ? 'Ya estás en la lista de este objeto.'
+                  : item.status === 'available'
+                    ? 'Apúntate como interesado. Si nadie más lo pidió antes, es tuyo.'
+                    : 'El objeto ya está apartado, pero quedas en espera por si se libera.'"
+              [class]="
+                isUserInItemQueue(item)
+                  ? 'bg-gray-100 text-gray-400 border border-gray-200'
+                  : item.status === 'available'
+                    ? 'bg-gray-900 text-white hover:bg-gray-800'
+                    : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
+              "
               class="w-full text-center text-xs py-2.5 font-medium rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               @if (!userService.isAuthenticated()) {
                 Registra tu alias arriba para obtenerlo
+              } @else if (isUserInItemQueue(item)) {
+                ✅ Ya estás apuntado
               } @else {
                 {{ item.status === 'available' ? '🙋‍♂️ ¡Anótenme, lo quiero!' : '⏳ Unirse a la Lista de Espera' }}
               }
