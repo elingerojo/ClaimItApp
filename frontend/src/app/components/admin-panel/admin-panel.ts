@@ -17,6 +17,8 @@ export class AdminPanel {
   
   // Estados de control administrativo
   readonly adminToken = signal<string>('');
+  readonly tokenAccepted = signal<boolean>(false);
+  private tokenAcceptedTimer: ReturnType<typeof setTimeout> | null = null;
   readonly isAiProcessing = signal<boolean>(false);
   readonly previewUrl = signal<string>('');
   readonly uploadedBlobUrl = signal<string>('');
@@ -43,6 +45,26 @@ export class AdminPanel {
 
   setToken(val: string): void {
     this.adminToken.set(val);
+  }
+
+  /**
+   * Maneja la tecla Enter en el campo del token:
+   * - Cierra el teclado virtual en móviles (blur)
+   * - Muestra un indicador visual de "token aceptado"
+   */
+  onTokenEnter(inputEl: HTMLInputElement): void {
+    inputEl.blur(); // Dismiss mobile keyboard
+
+    if (!this.adminToken()) return;
+
+    this.tokenAccepted.set(true);
+
+    // Auto-clear after 2 seconds
+    if (this.tokenAcceptedTimer) clearTimeout(this.tokenAcceptedTimer);
+    this.tokenAcceptedTimer = setTimeout(() => {
+      this.tokenAccepted.set(false);
+      this.tokenAcceptedTimer = null;
+    }, 2000);
   }
 
   /**
