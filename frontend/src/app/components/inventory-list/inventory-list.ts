@@ -1,4 +1,4 @@
-import { Component, signal, computed, inject } from '@angular/core';
+import { Component, signal, computed, inject, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { InventoryService, ItemWithQueue } from '../../services/inventory';
 import { UserService } from '../../services/user';
@@ -19,10 +19,33 @@ export class InventoryList {
   // Señal para el item seleccionado en el modal de detalle
   readonly selectedItem = signal<ItemWithQueue | null>(null);
 
+  // Paginación
+  readonly currentPage = signal(1);
+  readonly pageSize = 10;
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.filteredItems().length / this.pageSize))
+  );
+  readonly paginatedItems = computed(() => {
+    const allItems = this.filteredItems();
+    const start = (this.currentPage() - 1) * this.pageSize;
+    return allItems.slice(start, start + this.pageSize);
+  });
+
   // Señales reactivas para los nuevos estados de filtrado
   readonly activeCategory = signal<string>('All');
   readonly activeStatus = signal<string>('All');
   readonly showOnlyMyClaims = signal<boolean>(false);
+
+  constructor() {
+    effect(() => {
+      // Leer filtros para que effect los rastree
+      this.activeCategory();
+      this.activeStatus();
+      this.showOnlyMyClaims();
+      // Resetear a página 1 cuando cambian los filtros
+      this.currentPage.set(1);
+    });
+  }
 
   readonly categories: ItemCategory[] = [
     'Kitchen', 'Electronics', 'Decor', 'Books', 'Media', 
@@ -75,6 +98,11 @@ export class InventoryList {
 
     return list;
   });
+
+  goToPage(page: number): void {
+    const clamped = Math.max(1, Math.min(page, this.totalPages()));
+    this.currentPage.set(clamped);
+  }
 
   closeDetail(): void {
     this.selectedItem.set(null);

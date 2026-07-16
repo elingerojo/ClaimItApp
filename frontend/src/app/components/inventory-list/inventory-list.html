@@ -80,9 +80,40 @@
     }
   </div>
 
+  <!-- Barra de paginación superior -->
+  @if (filteredItems().length > pageSize) {
+    <div class="flex items-center justify-between pt-2 border-t border-gray-100">
+      <button
+        (click)="goToPage(currentPage() - 1)"
+        [disabled]="currentPage() <= 1"
+        class="text-xs px-4 py-2 rounded-lg font-medium transition-colors
+               disabled:opacity-30 disabled:cursor-not-allowed
+               enabled:bg-gray-100 enabled:text-gray-700 enabled:hover:bg-gray-200"
+      >
+        ← Anterior
+      </button>
+
+      <span class="text-xs text-gray-500">
+        Página {{ currentPage() }} de {{ totalPages() }}
+        <span class="text-gray-300 mx-1">·</span>
+        {{ filteredItems().length }} objetos
+      </span>
+
+      <button
+        (click)="goToPage(currentPage() + 1)"
+        [disabled]="currentPage() >= totalPages()"
+        class="text-xs px-4 py-2 rounded-lg font-medium transition-colors
+               disabled:opacity-30 disabled:cursor-not-allowed
+               enabled:bg-gray-100 enabled:text-gray-700 enabled:hover:bg-gray-200"
+      >
+        Siguiente →
+      </button>
+    </div>
+  }
+
   <!-- Cuadrícula Principal de Objetos (Thumbnail Horizontal) -->
   <div class="space-y-4 pt-4">
-    @for (item of filteredItems(); track item.id) {
+    @for (item of paginatedItems(); track item.id) {
 
       <!-- Card horizontal: thumbnail left + content right (click to open detail) -->
       <div [class.opacity-50]="item.status === 'unavailable'" [class.grayscale]="item.status === 'unavailable'"
@@ -142,6 +173,37 @@
     } @empty {
       <div class="bg-white border border-dashed border-gray-200 rounded-2xl py-12 text-center text-sm text-gray-400 italic">
         Ningún objeto coincide con los filtros seleccionados.
+      </div>
+    }
+
+    <!-- Barra de paginación -->
+    @if (filteredItems().length > pageSize) {
+      <div class="flex items-center justify-between pt-4 border-t border-gray-100">
+        <button
+          (click)="goToPage(currentPage() - 1)"
+          [disabled]="currentPage() <= 1"
+          class="text-xs px-4 py-2 rounded-lg font-medium transition-colors
+                 disabled:opacity-30 disabled:cursor-not-allowed
+                 enabled:bg-gray-100 enabled:text-gray-700 enabled:hover:bg-gray-200"
+        >
+          ← Anterior
+        </button>
+
+        <span class="text-xs text-gray-500">
+          Página {{ currentPage() }} de {{ totalPages() }}
+          <span class="text-gray-300 mx-1">·</span>
+          {{ filteredItems().length }} objetos
+        </span>
+
+        <button
+          (click)="goToPage(currentPage() + 1)"
+          [disabled]="currentPage() >= totalPages()"
+          class="text-xs px-4 py-2 rounded-lg font-medium transition-colors
+                 disabled:opacity-30 disabled:cursor-not-allowed
+                 enabled:bg-gray-100 enabled:text-gray-700 enabled:hover:bg-gray-200"
+        >
+          Siguiente →
+        </button>
       </div>
     }
   </div>
