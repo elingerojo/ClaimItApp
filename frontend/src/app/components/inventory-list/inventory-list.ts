@@ -19,16 +19,21 @@ export class InventoryList {
   // Señal para el item seleccionado en el modal de detalle
   readonly selectedItem = signal<ItemWithQueue | null>(null);
 
+  // Señal para detectar pantalla grande (≥ 1024px)
+  readonly isLargeScreen = signal(
+    typeof window !== 'undefined' ? window.innerWidth >= 1024 : false
+  );
+
   // Paginación
   readonly currentPage = signal(1);
-  readonly pageSize = 10;
+  readonly pageSize = computed(() => this.isLargeScreen() ? 20 : 10);
   readonly totalPages = computed(() =>
-    Math.max(1, Math.ceil(this.filteredItems().length / this.pageSize))
+    Math.max(1, Math.ceil(this.filteredItems().length / this.pageSize()))
   );
   readonly paginatedItems = computed(() => {
     const allItems = this.filteredItems();
-    const start = (this.currentPage() - 1) * this.pageSize;
-    return allItems.slice(start, start + this.pageSize);
+    const start = (this.currentPage() - 1) * this.pageSize();
+    return allItems.slice(start, start + this.pageSize());
   });
 
   // Señales reactivas para los nuevos estados de filtrado
@@ -37,13 +42,29 @@ export class InventoryList {
   readonly showOnlyMyClaims = signal<boolean>(false);
 
   constructor() {
+    // Detectar cambios de tamaño de ventana en tiempo real
+    if (typeof window !== 'undefined') {
+      const mql = window.matchMedia('(min-width: 1024px)');
+      this.isLargeScreen.set(mql.matches);
+      mql.addEventListener('change', (e) => {
+        this.isLargeScreen.set(e.matches);
+      });
+    }
+
+    // Resetear a página 1 cuando cambian los filtros
     effect(() => {
-      // Leer filtros para que effect los rastree
       this.activeCategory();
       this.activeStatus();
       this.showOnlyMyClaims();
-      // Resetear a página 1 cuando cambian los filtros
       this.currentPage.set(1);
+    });
+
+    // Protección: corregir página si excede el total (ocurre al redimensionar)
+    effect(() => {
+      const max = this.totalPages();
+      if (this.currentPage() > max) {
+        this.currentPage.set(max);
+      }
     });
   }
 

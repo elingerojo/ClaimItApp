@@ -81,7 +81,7 @@
   </div>
 
   <!-- Barra de paginación superior -->
-  @if (filteredItems().length > pageSize) {
+  @if (filteredItems().length > pageSize()) {
     <div class="flex items-center justify-between pt-2 border-t border-gray-100">
       <button
         (click)="goToPage(currentPage() - 1)"
@@ -177,7 +177,7 @@
     }
 
     <!-- Barra de paginación -->
-    @if (filteredItems().length > pageSize) {
+    @if (filteredItems().length > pageSize()) {
       <div class="flex items-center justify-between pt-4 border-t border-gray-100">
         <button
           (click)="goToPage(currentPage() - 1)"
