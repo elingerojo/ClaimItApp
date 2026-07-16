@@ -38,7 +38,7 @@ export const analyzeItem = async (req: Request, res: Response): Promise<void> =>
         },
         infoUrl: {
           type: Type.STRING,
-          description: 'Un enlace de búsqueda externa actual, válido y relevante (como Amazon para libros, o un enlace general de información del producto). Devuelve null si no aplica.',
+          description: 'Un enlace de búsqueda basado en el siguiente formato de búsqueda `https://www.google.com.mx/search?q=term1+term2+more+terms`. Donde los términos de búsqueda sean en español. Devuelve null si no aplica.',
           nullable: true,
         },
       },
