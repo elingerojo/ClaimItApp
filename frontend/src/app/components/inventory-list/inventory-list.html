@@ -112,12 +112,12 @@
   }
 
   <!-- Cuadrícula Principal de Objetos (Thumbnail Horizontal) -->
-  <div class="space-y-4 pt-4">
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-4">
     @for (item of paginatedItems(); track item.id) {
 
       <!-- Card horizontal: thumbnail left + content right (click to open detail) -->
       <div [class.opacity-50]="item.status === 'unavailable'" [class.grayscale]="item.status === 'unavailable'"
-           class="flex items-center gap-0 bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden transition-all hover:shadow-md cursor-pointer"
+           class="flex gap-0 bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden transition-all hover:shadow-md cursor-pointer"
            (click)="selectedItem.set(item)">
 
         <!-- Thumbnail (left side) -->
