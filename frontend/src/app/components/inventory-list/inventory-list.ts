@@ -1,18 +1,23 @@
 import { Component, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { InventoryService } from '../../services/inventory';
+import { InventoryService, ItemWithQueue } from '../../services/inventory';
 import { UserService } from '../../services/user';
 import { ItemCategory, ItemStatus } from '@claimitapp/shared';
+import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
+import { ItemDetail } from '../item-detail/item-detail';
 
 @Component({
   selector: 'app-inventory-list',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, StripAccentsPipe, ItemDetail],
   templateUrl: './inventory-list.html'
 })
 export class InventoryList {
   readonly inventoryService = inject(InventoryService);
   readonly userService = inject(UserService);
+
+  // Señal para el item seleccionado en el modal de detalle
+  readonly selectedItem = signal<ItemWithQueue | null>(null);
 
   // Señales reactivas para los nuevos estados de filtrado
   readonly activeCategory = signal<string>('All');
@@ -70,6 +75,10 @@ export class InventoryList {
 
     return list;
   });
+
+  closeDetail(): void {
+    this.selectedItem.set(null);
+  }
 
   /**
    * Resetea el flag de mis elegidos si se presiona una categoría, para evitar confusiones de UX

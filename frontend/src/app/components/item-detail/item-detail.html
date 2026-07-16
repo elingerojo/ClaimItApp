@@ -1,0 +1,109 @@
+<!-- Backdrop (click outside to close) -->
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+     (click)="close()">
+
+  <!-- Card vertical (stopPropagation to prevent closing when clicking inside) -->
+  <div class="bg-white rounded-2xl shadow-2xl overflow-hidden w-full max-w-lg max-h-[90vh] overflow-y-auto"
+       (click)="$event.stopPropagation()">
+
+    <!-- Image larger (square proportion) -->
+    <div class="relative w-full aspect-square bg-gray-50">
+      <img [src]="item().imageUrl" [alt]="item().title" class="w-full h-full object-cover" />
+      <button (click)="close()"
+              class="absolute top-3 right-3 w-8 h-8 bg-black/50 hover:bg-black/70 text-white rounded-full
+                     flex items-center justify-center text-sm font-bold transition-colors z-10">
+        ✕
+      </button>
+      <span [ngClass]="{
+        'text-green-600 bg-green-50 border-green-100': item().status === 'available',
+        'text-amber-600 bg-amber-50 border-amber-100': item().status === 'waitlist_open',
+        'text-red-600 bg-red-50 border-red-100': item().status === 'unavailable'
+      }" class="absolute top-3 left-3 text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full border shadow-sm">
+        {{ (item().status === 'available' ? '🟢 Disponible' : item().status === 'waitlist_open' ? '🟡 Lista de Espera' : '🔴 No disponible') | stripAccents }}
+      </span>
+    </div>
+
+    <!-- Content -->
+    <div class="p-6">
+      <!-- Category + External info -->
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs uppercase font-bold tracking-wider text-gray-400">{{ item().category | stripAccents }}</span>
+        @if (item().infoUrl) {
+          <a [href]="item().infoUrl" target="_blank"
+             [title]="'Abrir página externa con más información sobre: ' + item().title"
+             class="text-xs text-blue-500 hover:underline flex items-center gap-0.5 shrink-0 ml-1">
+            Ver Info Externa ↗
+          </a>
+        }
+      </div>
+
+      <!-- Title -->
+      <h2 class="text-xl font-bold text-gray-900">{{ item().title }}</h2>
+
+      <!-- Full description (not truncated) -->
+      <p class="text-sm text-gray-600 mt-3">{{ item().description || 'Sin descripción adicional.' }}</p>
+
+      <!-- Queue / Waitlist -->
+      <div class="mt-5 pt-4 border-t border-gray-100">
+        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{{ 'Línea de Espera:' | stripAccents }}</div>
+        <div class="flex flex-wrap gap-1.5">
+          @for (claimer of item().queue; track claimer.username; let idx = $index) {
+            <span [title]="
+              idx === 0
+                ? '👑 Primero en la fila — prioridad para llevarse este objeto.'
+                : claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()
+                  ? '✅ ¡Eres tú! Estás en la lista de este objeto.'
+                  : '⏳ En espera (posición ' + (idx + 1) + ')'"
+              [class.bg-blue-50]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()"
+              [class.border-b-2]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()"
+              [class.border-blue-400]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()"
+              class="inline-flex items-center text-xs font-medium bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-md text-gray-700 font-mono">
+              {{ idx === 0 ? '👑' : '⏳' }} &#64;{{ claimer.username }}
+            </span>
+          } @empty {
+            <span class="text-xs text-gray-400 italic">Nadie se ha anotado aún.</span>
+          }
+        </div>
+      </div>
+
+      <!-- Claim button (inside the vertical card) -->
+      <div class="mt-6">
+        @if (item().status === 'unavailable') {
+          <button disabled title="Ya no se aceptan más solicitudes para este objeto. La lista de espera está completa."
+                  class="w-full text-center text-sm py-3 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed border border-gray-200">
+            Lista de Espera Llena
+          </button>
+        } @else {
+          <button
+            (click)="onClaimItem()"
+            [disabled]="!userService.isAuthenticated() || isUserInItemQueue()"
+            [title]="!userService.isAuthenticated()
+              ? 'Primero ingresa tu alias arriba para poder apartar objetos.'
+              : isUserInItemQueue()
+                ? 'Ya estás en la lista de este objeto.'
+                : item().status === 'available'
+                  ? 'Apúntate como interesado. Si nadie más lo pidió antes, es tuyo.'
+                  : 'El objeto ya está apartado, pero quedas en espera por si se libera.'"
+            [class]="
+              isUserInItemQueue()
+                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                : item().status === 'available'
+                  ? 'bg-sky-600 text-white hover:bg-sky-700'
+                  : 'bg-amber-500 text-white hover:bg-amber-600'
+            "
+            class="w-full text-center text-sm py-3 font-medium rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed border-0"
+          >
+            @if (!userService.isAuthenticated()) {
+              Registra tu alias arriba para obtenerlo
+            } @else if (isUserInItemQueue()) {
+              ✅ Ya estás apuntado
+            } @else {
+              {{ item().status === 'available' ? '🙋‍♂️ ¡Anótenme, lo quiero!' : '⏳ Unirse a la Lista de Espera' }}
+            }
+          </button>
+        }
+      </div>
+    </div>
+
+  </div>
+</div>
