@@ -4,10 +4,11 @@
   <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-100 pb-6 mb-2">
     <div>
       <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight">Limpia x Mudanza</h1>
-      <p class="text-sm text-gray-500 mt-1">Elige lo que te guste. Regla de oro: El primero que llega, se lo lleva.</p>
+      <p class="text-md text-gray-700 mt-1"><em>"El primero que llega, se lo lleva."</em></p>
+      <p class="text-sm text-gray-500 mt-1">Separa lo que te guste.<br /></p>
     </div>
     
-    <div class="mt-4 md:mt-0 p-4 bg-gray-50 rounded-xl border border-gray-100">
+    <div class="mt-4 md:mt-0 p-4 bg-gray-100 rounded-xl border border-gray-200">
       @if (!userService.isAuthenticated()) {
         <div class="flex flex-col sm:flex-row gap-2">
           <span>Para identificar tu lista de separados, ingresa un nombre distintivo</span>
@@ -117,7 +118,7 @@
 
       <!-- Card horizontal: thumbnail left + content right (click to open detail) -->
       <div [class.opacity-50]="item.status === 'unavailable'" [class.grayscale]="item.status === 'unavailable'"
-           class="flex gap-0 bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden transition-all hover:shadow-md cursor-pointer"
+           class="flex gap-0 bg-gray-50 border border-gray-100 rounded-2xl shadow-sm overflow-hidden transition-all hover:shadow-md cursor-pointer"
            (click)="selectedItem.set(item)">
 
         <!-- Thumbnail (left side) -->
@@ -136,7 +137,7 @@
         <div class="flex-1 p-3 sm:p-4 min-w-0 flex flex-col justify-between">
           <div>
             <div class="flex items-center justify-between mb-1">
-              <span class="text-[10px] uppercase font-bold tracking-wider text-gray-400">{{ (translationMap[item.category]?? item.category) | stripAccents }}</span>
+              <span class="text-[10px] uppercase font-bold tracking-wider text-gray-500">{{ (translationMap[item.category]?? item.category) | stripAccents }}</span>
               @if (item.infoUrl) {
                 <a [href]="item.infoUrl" target="_blank" [title]="'Abrir página externa con más información sobre: ' + item.title"
                    class="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5 shrink-0 ml-1">Ver Info Externa ↗</a>
@@ -147,7 +148,7 @@
           </div>
 
           <div class="mt-2 pt-2 border-t border-gray-50">
-            <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">{{ 'Línea de Espera:' | stripAccents }}</div>
+            <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">{{ 'Línea de Espera:' | stripAccents }}</div>
             <div class="flex flex-wrap gap-1.5">
               @for (claimer of item.queue; track claimer.username; let idx = $index) {
                 <span [title]="
@@ -163,7 +164,7 @@
                   {{ idx === 0 ? '👑' : '⏳' }} &#64;{{ claimer.username }}
                 </span>
               } @empty {
-                <span class="text-[10px] text-gray-400 italic">Nadie se ha anotado aún.</span>
+                <span class="text-[10px] text-gray-500 italic">Nadie se ha anotado aún.</span>
               }
             </div>
           </div>
