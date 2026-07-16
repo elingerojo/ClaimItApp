@@ -45,9 +45,9 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
 
     // 3. Fetch the parent item and apply an exclusive pessimistic row lock
     const itemCheckQuery = `
-      SELECT id, status 
-      FROM items 
-      WHERE id = $1 
+      SELECT id, status, title, category
+      FROM items
+      WHERE id = $1
       FOR UPDATE
     `;
     const itemResult = await client.query(itemCheckQuery, [itemId]);
@@ -115,7 +115,10 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
       itemId: itemId,
       status: newStatus,
       username: username,
-      queuePosition: updatedCount
+      queuePosition: updatedCount,
+      title: item.title,
+      category: item.category,
+      claimedAt: newClaim.claimed_at
     });
 
     res.status(201).json({

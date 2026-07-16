@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 
 // Import our configurations & middleware handlers
-import { registerSseClient } from './config/sse.js';
+import { registerSseClient, initializeFeedHistory } from './config/sse.js';
 import { createClaim } from './controllers/claimsController.js';
 import { getUploadToken } from './controllers/uploadController.js';
 import { analyzeItem } from './controllers/analyzerController.js';
@@ -49,7 +49,9 @@ app.post('/api/admin/items', createItem);
 app.post('/api/admin/evict', evictClaimant);
 app.patch('/api/admin/items/:id', updateItem);
 
-// Launch the primary backend operational loop
-app.listen(PORT, () => {
-  console.log(`🚀 ClaimItApp Core Server successfully listening out on port [:${PORT}]`);
+// Initialize feed history from Neon, then launch the server
+initializeFeedHistory().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 ClaimItApp Core Server successfully listening out on port [:${PORT}]`);
+  });
 });
