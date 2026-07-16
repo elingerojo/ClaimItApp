@@ -1,6 +1,7 @@
 import { Component, signal, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { railwayApiUrl } from '../../app.config';
+import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 
 export interface LedgerLog {
   username: string;
@@ -12,7 +13,7 @@ export interface LedgerLog {
 @Component({
   selector: 'app-activity-log',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, StripAccentsPipe],
   templateUrl: './activity-log.html' // 📂 Relative target mapping matches internal folder setup
 })
 export class ActivityLog implements OnInit {

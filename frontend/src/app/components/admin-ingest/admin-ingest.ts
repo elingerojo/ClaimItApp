@@ -7,11 +7,12 @@ import { AdminTokenService } from '../../services/admin-token';
 import { ItemCategory } from '@claimitapp/shared';
 import { upload } from '@vercel/blob/client';
 import { railwayApiUrl } from '../../app.config';
+import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 
 @Component({
   selector: 'app-admin-ingest',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule],
+  imports: [CommonModule, FormsModule, RouterModule, StripAccentsPipe],
   templateUrl: './admin-ingest.html'
 })
 export class AdminIngest {

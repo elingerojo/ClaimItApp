@@ -4,11 +4,12 @@ import { RouterModule } from '@angular/router';
 import { InventoryService } from '../../services/inventory';
 import { AdminTokenService } from '../../services/admin-token';
 import { railwayApiUrl } from '../../app.config';
+import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 
 @Component({
   selector: 'app-admin-manage',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, StripAccentsPipe],
   templateUrl: './admin-manage.html'
 })
 export class AdminManage {
