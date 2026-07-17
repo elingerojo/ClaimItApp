@@ -31,9 +31,21 @@ export interface Item {
 export interface Claim {
   id: string;
   itemId: string;
-  username: string; // Swapped out name for nickname entry
-  claimantEmail: string | null; // Now explicitly nullable
-  claimantPhone: string | null; // Now explicitly nullable
+  userUuid: string;        // UUID del usuario (identificador real)
+  username: string;        // Alias actual del usuario (texto decorativo)
+  claimantEmail: string | null;
+  claimantPhone: string | null;
   claimedAt: string;
 }
 
+/** Resultado de la resolución de sesión POST /api/session */
+export interface SessionResponse {
+  uuid: string;
+  alias: string;
+  email: string | null;
+  phone: string | null;
+  isNew: boolean;
+  conflict?: boolean;
+  storedUuid?: string;
+  storedAlias?: string;
+}

@@ -3,47 +3,46 @@ import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
 
 export const createClaim = async (req: Request, res: Response): Promise<void> => {
-  const { itemId, username, email, phone } = req.body;
+  const { itemId, userUuid, email, phone } = req.body;
 
-  // Validation: Username and Item ID are strictly required
-  if (!itemId || !username) {
-    res.status(400).json({ error: 'Missing required fields: itemId and username.' });
+  // Validation: userUuid and Item ID are strictly required
+  if (!itemId || !userUuid) {
+    res.status(400).json({ error: 'Missing required fields: itemId and userUuid.' });
     return;
   }
 
   const client = await pool.connect();
 
   try {
-    // 1. Open the atomic isolation transaction
     await client.query('BEGIN');
 
-    // 2. Username Collision Guard Check
-    // If the username exists, ensure the incoming contact details match historical records
-    const userCheckQuery = `
-      SELECT claimant_email, claimant_phone 
-      FROM claims 
-      WHERE LOWER(username) = LOWER($1) 
+    // 0. Resolve current alias from users table
+    const userResult = await client.query(
+      'SELECT alias FROM users WHERE uuid = $1',
+      [userUuid]
+    );
+    if (userResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'User not found. Please register your alias first.' });
+      return;
+    }
+    const username = userResult.rows[0].alias;
+
+    // 1. Check if this user already has a claim on this item (by userUuid)
+    const existingClaimQuery = `
+      SELECT id FROM claims 
+      WHERE item_id = $1 AND user_uuid = $2
       LIMIT 1
     `;
-    const userCheckResult = await client.query(userCheckQuery, [username]);
-    
-    if (userCheckResult.rows.length > 0) {
-      const existingUser = userCheckResult.rows[0];
-      
-      // If they provided contact info that conflicts with the first time they claimed an item
-      if (
-        (email && existingUser.claimant_email && email !== existingUser.claimant_email) ||
-        (phone && existingUser.claimant_phone && phone !== existingUser.claimant_phone)
-      ) {
-        await client.query('ROLLBACK');
-        res.status(409).json({ 
-          error: `The username "${username}" is already taken by someone else. Please choose a unique nickname.` 
-        });
-        return;
-      }
+    const existingClaimResult = await client.query(existingClaimQuery, [itemId, userUuid]);
+
+    if (existingClaimResult.rows.length > 0) {
+      await client.query('ROLLBACK');
+      res.status(409).json({ error: `Ya estás en la lista de este objeto.` });
+      return;
     }
 
-    // 3. Fetch the parent item and apply an exclusive pessimistic row lock
+    // 2. Fetch the parent item and apply an exclusive pessimistic row lock
     const itemCheckQuery = `
       SELECT id, status, title, category
       FROM items
@@ -66,7 +65,7 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // 4. Count current active queue rows for this target item
+    // 3. Count current active queue rows for this target item
     const countClaimsQuery = `
       SELECT COUNT(*) as current_claims 
       FROM claims 
@@ -81,16 +80,18 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // 5. Insert new claim line into ledger with optional contact details
+    // 4. Insert new claim line into ledger with userUuid and denormalized username (current alias)
     const insertClaimQuery = `
-      INSERT INTO claims (item_id, username, claimant_email, claimant_phone) 
-      VALUES ($1, $2, $3, $4) 
+      INSERT INTO claims (item_id, user_uuid, username, claimant_email, claimant_phone) 
+      VALUES ($1, $2, $3, $4, $5) 
       RETURNING id, claimed_at
     `;
-    const newClaimResult = await client.query(insertClaimQuery, [itemId, username, email || null, phone || null]);
+    const newClaimResult = await client.query(insertClaimQuery, [
+      itemId, userUuid, username, email || null, phone || null
+    ]);
     const newClaim = newClaimResult.rows[0];
 
-    // 6. Update operational item lifecycle state mapping
+    // 5. Update operational item lifecycle state mapping
     const updatedCount = currentClaimsCount + 1;
     let newStatus = 'available';
 
@@ -107,13 +108,14 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
     `;
     await client.query(updateItemStatusQuery, [newStatus, itemId]);
 
-    // 7. Everything looks correct. Commit state payload to database.
+    // 6. Everything looks correct. Commit state payload to database.
     await client.query('COMMIT');
-    
-    // Broadcast real-time message out to all open streaming contexts instantly
+
+    // Broadcast real-time message with userUuid for precise frontend matching
     broadcastSseEvent('item_updated', {
       itemId: itemId,
       status: newStatus,
+      userUuid: userUuid,
       username: username,
       queuePosition: updatedCount,
       title: item.title,

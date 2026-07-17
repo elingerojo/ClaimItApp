@@ -4,15 +4,15 @@ import { broadcastSseEvent } from '../config/sse.js';
 
 export const evictClaimant = async (req: Request, res: Response): Promise<void> => {
   const adminToken = req.headers['x-admin-token'];
-  const { itemId, username } = req.body;
+  const { itemId, userUuid } = req.body;
 
   if (adminToken !== process.env.ADMIN_TOKEN) {
     res.status(401).json({ error: 'Unauthorized administrative access.' });
     return;
   }
 
-  if (!itemId || !username) {
-    res.status(400).json({ error: 'Missing required parameters: itemId and username.' });
+  if (!itemId || !userUuid) {
+    res.status(400).json({ error: 'Missing required parameters: itemId and userUuid.' });
     return;
   }
 
@@ -21,22 +21,26 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
   try {
     await client.query('BEGIN');
 
-    // 1. Lock the target item row to prevent race conditions during cascade recalculation
+    // Lock the target item row to prevent race conditions
     await client.query('SELECT id FROM items WHERE id = $1 FOR UPDATE', [itemId]);
 
-    // 2. Remove the specific target user from this item's claim ledger queue
+    // Get the current alias of the user being evicted (for SSE broadcast)
+    const userResult = await client.query('SELECT alias FROM users WHERE uuid = $1', [userUuid]);
+    const username = userResult.rows[0]?.alias || 'unknown';
+
+    // Remove the specific user from this item's claim ledger queue by userUuid
     const deleteQuery = `
       DELETE FROM claims 
-      WHERE item_id = $1 AND LOWER(username) = LOWER($2)
+      WHERE item_id = $1 AND user_uuid = $2
     `;
-    await client.query(deleteQuery, [itemId, username]);
+    await client.query(deleteQuery, [itemId, userUuid]);
 
-    // 3. Count remaining active claims left in line for this item
+    // Count remaining active claims
     const countQuery = 'SELECT COUNT(*) as active_count FROM claims WHERE item_id = $1';
     const countResult = await client.query(countQuery, [itemId]);
     const remainingCount = parseInt(countResult.rows[0].active_count, 10);
 
-    // 4. Map the new operational lifecycle status enum state based on remaining count
+    // Map the new operational lifecycle status
     let newStatus = 'available';
     if (remainingCount === 1 || remainingCount === 2) {
       newStatus = 'waitlist_open';
@@ -49,10 +53,11 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
 
     await client.query('COMMIT');
 
-    // 5. Broadcast the eviction event via SSE to trigger instant updates across all browsers
+    // Broadcast the eviction event via SSE
     broadcastSseEvent('item_updated', {
       itemId: itemId,
       status: newStatus,
+      userUuid: userUuid,
       username: username,
       evicted: true,
       queuePosition: remainingCount

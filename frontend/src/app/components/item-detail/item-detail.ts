@@ -21,22 +21,26 @@ export class ItemDetail {
     this.onClose()();
   }
 
+  /**
+   * Verifica si el usuario autenticado ya está en la cola de este objeto.
+   * Compara por userUuid para precisión (el alias puede cambiar).
+   */
   isUserInItemQueue(): boolean {
-    const username = this.userService.currentUsername();
-    if (!username) return false;
-    return this.item().queue.some(q => q.username.toLowerCase() === username.toLowerCase());
+    const myUuid = this.userService.currentUuid();
+    if (!myUuid) return false;
+    return this.item().queue.some(q => q.userUuid === myUuid);
   }
 
   async onClaimItem(): Promise<void> {
     const item = this.item();
-    const username = this.userService.currentUsername();
+    const userUuid = this.userService.currentUuid();
     const session = this.userService.session();
-    if (!username) return;
+    if (!userUuid) return;
 
     try {
       const response = await this.inventoryService.submitClaim(
         item.id,
-        username,
+        userUuid,
         session?.email || null,
         session?.phone || null
       );

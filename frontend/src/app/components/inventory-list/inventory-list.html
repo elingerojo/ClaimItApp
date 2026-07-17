@@ -1,6 +1,6 @@
 <div class="space-y-6">
   
-  <!-- Encabezado y Estado de Sesión del Usuario (Se mantiene igual) -->
+  <!-- Encabezado y Estado de Sesión del Usuario -->
   <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-100 pb-6 mb-2">
     <div>
       <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight">Limpia x Mudanza</h1>
@@ -12,11 +12,11 @@
       @if (!userService.isAuthenticated()) {
         <div class="flex flex-col sm:flex-row gap-2">
           <span>Para identificar tu lista de separados, ingresa un nombre distintivo</span>
-          <input #usernameInput type="text" placeholder="Apodo o alias (ej: JuanP)" title="Elige un apodo o alias único para identificar tus selecciones y mantener tu misma lista de objetos en futuras sesiones. No uses tu nombre real si prefieres privacidad." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
+          <input #aliasInput type="text" placeholder="Apodo o alias (ej: JuanP)" title="Elige un apodo o alias único para identificar tus selecciones y mantener tu misma lista de objetos en futuras sesiones. No uses tu nombre real si prefieres privacidad." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
           <input #emailInput type="email" placeholder="Correo (Opcional)" title="Opcional. Solo se usaría para notificarte si alguien más reclama un objeto que apartaste pero no has recogido. Es decir, solo para recordarte recogerlo para que no te lo ganen. No se comparte el correo a nadie." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
           <input #phoneInput type="text" placeholder="Teléfono (Opcional)" title="Opcional. Solo se usaría para enviar un mensaje si alguien más reclama un objeto que apartaste pero no has recogido. Es decir, solo para recordarte recogerlo para que no te lo ganen. No se comparte el número a nadie." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
-          <button (click)="userService.saveSession(usernameInput.value, emailInput.value, phoneInput.value)" title="Guarda tu alias y datos de contacto en tu navegador para poder apartar objetos." class="text-xs bg-gray-900 text-white px-4 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors">
-            Guardar Datos
+          <button (click)="onSaveSession(aliasInput, emailInput, phoneInput)" [disabled]="isSaving()" title="Guarda tu alias y datos de contacto en tu navegador para poder apartar objetos." class="text-xs bg-gray-900 text-white px-4 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors disabled:opacity-50">
+            {{ isSaving() ? 'Guardando...' : 'Guardar Datos' }}
           </button>
         </div>
       } @else {
@@ -150,16 +150,16 @@
           <div class="mt-2 pt-2 border-t border-gray-50">
             <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">{{ 'Línea de Espera:' | stripAccents }}</div>
             <div class="flex flex-wrap gap-1.5">
-              @for (claimer of item.queue; track claimer.username; let idx = $index) {
+              @for (claimer of item.queue; track claimer.userUuid; let idx = $index) {
                 <span [title]="
                   idx === 0
                     ? '👑 Primero en la fila — prioridad para llevarse este objeto.'
-                    : claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()
+                    : claimer.userUuid === userService.currentUuid()
                       ? '✅ ¡Eres tú! Estás en la lista de este objeto.'
                       : '⏳ En espera (posición ' + (idx + 1) + ')'"
-                  [class.bg-blue-50]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()"
-                  [class.border-b-2]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()"
-                  [class.border-blue-400]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()"
+                  [class.bg-blue-50]="claimer.userUuid === userService.currentUuid()"
+                  [class.border-b-2]="claimer.userUuid === userService.currentUuid()"
+                  [class.border-blue-400]="claimer.userUuid === userService.currentUuid()"
                   class="inline-flex items-center text-[10px] font-medium bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-md text-gray-700 font-mono">
                   {{ idx === 0 ? '👑' : '⏳' }} &#64;{{ claimer.username }}
                 </span>
@@ -215,5 +215,57 @@
       [item]="item"
       [onClose]="closeDetail.bind(this)"
     />
+  }
+
+  <!-- ================================================================== -->
+  <!-- Diálogo de Conflicto de Alias                                       -->
+  <!-- ================================================================== -->
+  @if (conflictDialogVisible(); as data) {
+    <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
+         (click)="onRejectConflictAlias()">
+      <div class="bg-white rounded-2xl shadow-2xl overflow-hidden w-full max-w-md p-6"
+           (click)="$event.stopPropagation()">
+        
+        <div class="text-center">
+          <!-- Icono -->
+          <div class="mx-auto w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mb-4">
+            <span class="text-2xl">⚠️</span>
+          </div>
+
+          <h3 class="text-lg font-bold text-gray-900 mb-2">Alias ya en uso</h3>
+          <p class="text-sm text-gray-600 mb-1">
+            El alias <strong class="font-mono">&#64;{{ conflictData()?.alias }}</strong> ya está siendo utilizado
+            por otro dispositivo.
+          </p>
+          <p class="text-xs text-gray-400 mb-6">
+            ¿Eres la misma persona en un nuevo dispositivo, o alguien más usa tu alias?
+          </p>
+
+          <!-- Botón principal: Elegir otro alias -->
+          <button (click)="onRejectConflictAlias()"
+                  title="Elige un alias diferente para esta sesión"
+                  class="w-full text-sm bg-gray-900 text-white px-4 py-3 rounded-xl font-medium hover:bg-gray-800 transition-colors mb-3">
+            Elegir otro alias
+          </button>
+
+          <!-- Opción secundaria: Continuar con este alias -->
+          <button (click)="onAcceptConflictAlias()"
+                  title="Usar este alias porque soy la misma persona en un nuevo dispositivo"
+                  class="w-full text-xs text-gray-500 hover:text-gray-700 underline py-2 transition-colors">
+            Usar este alias (soy la misma persona, nuevo dispositivo)
+          </button>
+
+          <!-- Tocayo auto-sugerencia -->
+          <div class="mt-4 pt-4 border-t border-gray-100">
+            <p class="text-[10px] text-gray-400 mb-2">O prueba una variante:</p>
+            <button (click)="onTryTocayoFromDialog()"
+                    title="Intenta variantes como alias-tocayo-2, alias-tocayo-3, etc."
+                    class="text-xs text-amber-600 hover:text-amber-700 font-medium transition-colors">
+              Sugerir &#64;{{ conflictData()?.alias }}-tocayo-2
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   }
 </div>

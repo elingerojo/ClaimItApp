@@ -47,16 +47,16 @@
       <div class="mt-5 pt-4 border-t border-gray-100">
         <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{{ 'Línea de Espera:' | stripAccents }}</div>
         <div class="flex flex-wrap gap-1.5">
-          @for (claimer of item().queue; track claimer.username; let idx = $index) {
+          @for (claimer of item().queue; track claimer.userUuid; let idx = $index) {
             <span [title]="
               idx === 0
                 ? '👑 Primero en la fila — prioridad para llevarse este objeto.'
-                : claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()
+                : claimer.userUuid === userService.currentUuid()
                   ? '✅ ¡Eres tú! Estás en la lista de este objeto.'
                   : '⏳ En espera (posición ' + (idx + 1) + ')'"
-              [class.bg-blue-50]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()"
-              [class.border-b-2]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()"
-              [class.border-blue-400]="claimer.username.toLowerCase() === userService.currentUsername().toLowerCase()"
+              [class.bg-blue-50]="claimer.userUuid === userService.currentUuid()"
+              [class.border-b-2]="claimer.userUuid === userService.currentUuid()"
+              [class.border-blue-400]="claimer.userUuid === userService.currentUuid()"
               class="inline-flex items-center text-xs font-medium bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-md text-gray-700 font-mono">
               {{ idx === 0 ? '👑' : '⏳' }} &#64;{{ claimer.username }}
             </span>

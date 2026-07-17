@@ -3,22 +3,29 @@ import pool from '../config/db.js';
 
 /**
  * Fetches all inventory items along with their sub-queues of claimants
+ * Now includes userUuid for precise frontend matching
  */
 export const getInventoryFeed = async (req: Request, res: Response): Promise<void> => {
   try {
     // 1. Fetch all items
     const itemsResult = await pool.query('SELECT * FROM items ORDER BY created_at DESC');
-    
-    // 2. Fetch all current queue positions sorted chronologically
-    const claimsResult = await pool.query('SELECT item_id, username, claimed_at FROM claims ORDER BY claimed_at ASC');
-    
-    // Group claims by their parent item_id using a clean accumulator block
+
+    // 2. Fetch all current queue positions with userUuid and current alias (via JOIN)
+    const claimsResult = await pool.query(`
+      SELECT c.item_id, c.user_uuid, u.alias AS username, c.claimed_at
+      FROM claims c
+      JOIN users u ON c.user_uuid = u.uuid
+      ORDER BY c.claimed_at ASC
+    `);
+
+    // Group claims by their parent item_id
     const claimsMap: Record<string, any[]> = {};
     claimsResult.rows.forEach(row => {
       if (!claimsMap[row.item_id]) {
         claimsMap[row.item_id] = [];
       }
       claimsMap[row.item_id].push({
+        userUuid: row.user_uuid,
         username: row.username,
         claimedAt: row.claimed_at
       });
@@ -50,9 +57,10 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
 export const getLedgerFeed = async (req: Request, res: Response): Promise<void> => {
   try {
     const queryText = `
-      SELECT c.username, c.claimed_at, i.title, i.category
+      SELECT c.user_uuid, u.alias AS username, c.claimed_at, i.title, i.category
       FROM claims c
       JOIN items i ON c.item_id = i.id
+      JOIN users u ON c.user_uuid = u.uuid
       ORDER BY c.claimed_at DESC
       LIMIT 50
     `;

@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 
 // Import our configurations & middleware handlers
 import { registerSseClient, initializeFeedHistory } from './config/sse.js';
+import { resolveSession } from './controllers/sessionController.js';
 import { createClaim } from './controllers/claimsController.js';
 import { getUploadToken } from './controllers/uploadController.js';
 import { analyzeItem } from './controllers/analyzerController.js';
@@ -19,6 +20,11 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({ origin: '*' }));
 // Express JSON body routing configuration
 app.use(express.json());
+
+/* ==========================================================================
+   SESSION & USER IDENTITY ENDPOINTS
+   ========================================================================== */
+app.post('/api/session', resolveSession);
 
 /* ==========================================================================
    PUBLIC FEEDS & DATA DISCOVERY ENDPOINTS

@@ -41,6 +41,19 @@ export class InventoryList {
   readonly activeStatus = signal<string>('All');
   readonly showOnlyMyClaims = signal<boolean>(false);
 
+  // Estado del diálogo de conflicto de alias
+  readonly conflictDialogVisible = signal(false);
+  readonly conflictData = signal<{
+    alias: string;
+    storedUuid: string;
+    storedAlias: string;
+    email: string | null;
+    phone: string | null;
+  } | null>(null);
+
+  // Estado de carga para el botón Guardar
+  readonly isSaving = signal(false);
+
   constructor() {
     // Detectar cambios de tamaño de ventana en tiempo real
     if (typeof window !== 'undefined') {
@@ -80,15 +93,15 @@ export class InventoryList {
     Books: "Libros",
     Media: "Medios",
     Clothing: "Ropa",
-    Bedding: "Blancos", // Or "Ropa de cama"
+    Bedding: "Blancos",
     Shoes: "Zapatos",
     Accessories: "Accesorios",
     Bathroom: "Baño",
     Office: "Oficina",
-    Utilities: "Utilería", // Or "Servicios" depending on context
+    Utilities: "Utilería",
     Cleaning: "Limpieza",
     Sports: "Deportes",
-    "Misc.": "Varios", // Handled as a string literal key due to the period
+    "Misc.": "Varios",
   } as const;
 
   // Pipeline combinado reactivo para calcular la rejilla en tiempo real
@@ -96,14 +109,14 @@ export class InventoryList {
     const categoryFilter = this.activeCategory();
     const statusFilter = this.activeStatus();
     const onlyMyClaims = this.showOnlyMyClaims();
-    const myUsername = this.userService.currentUsername().toLowerCase();
+    const myUuid = this.userService.currentUuid();
     
     let list = this.inventoryService.items();
 
-    // 1. Filtrado Prioritario: Mis elegidos
-    if (onlyMyClaims && myUsername) {
+    // 1. Filtrado Prioritario: Mis elegidos (comparado por userUuid)
+    if (onlyMyClaims && myUuid) {
       return list.filter(item => 
-        item.queue.some(q => q.username.toLowerCase() === myUsername)
+        item.queue.some(q => q.userUuid === myUuid)
       );
     }
 
@@ -146,22 +159,23 @@ export class InventoryList {
 
   /**
    * Verifica si el usuario autenticado ya está en la cola de un objeto
+   * Compara por userUuid para precisión (el alias puede cambiar)
    */
-  isUserInItemQueue(item: { queue: Array<{ username: string }> }): boolean {
-    const username = this.userService.currentUsername();
-    if (!username) return false;
-    return item.queue.some(q => q.username.toLowerCase() === username.toLowerCase());
+  isUserInItemQueue(item: { queue: Array<{ userUuid: string }> }): boolean {
+    const myUuid = this.userService.currentUuid();
+    if (!myUuid) return false;
+    return item.queue.some(q => q.userUuid === myUuid);
   }
 
   async onClaimItem(itemId: string): Promise<void> {
-    const username = this.userService.currentUsername();
+    const userUuid = this.userService.currentUuid();
     const session = this.userService.session();
-    if (!username) return;
+    if (!userUuid) return;
 
     try {
       const response = await this.inventoryService.submitClaim(
         itemId,
-        username,
+        userUuid,
         session?.email || null,
         session?.phone || null
       );
@@ -169,5 +183,111 @@ export class InventoryList {
     } catch (err: any) {
       alert(`Error al reclamar: ${err.message}`);
     }
+  }
+
+  /**
+   * Guarda los datos del usuario resolviendo la sesión contra el servidor.
+   * Si hay conflicto de alias, muestra el diálogo correspondiente.
+   */
+  async onSaveSession(aliasInput: HTMLInputElement, emailInput: HTMLInputElement, phoneInput: HTMLInputElement): Promise<void> {
+    const alias = aliasInput.value.trim();
+    const email = emailInput.value.trim() || null;
+    const phone = phoneInput.value.trim() || null;
+
+    if (!alias) {
+      alert('Por favor ingresa un apodo o alias.');
+      aliasInput.focus();
+      return;
+    }
+
+    this.isSaving.set(true);
+
+    try {
+      const result = await this.userService.resolveSession(alias, email, phone);
+
+      if (result.conflict && result.storedUuid && result.storedAlias) {
+        // Mostrar diálogo de conflicto
+        this.conflictData.set({
+          alias: result.storedAlias,
+          storedUuid: result.storedUuid,
+          storedAlias: result.storedAlias,
+          email,
+          phone
+        });
+        this.conflictDialogVisible.set(true);
+      } else if (result.databaseReset) {
+        // BD fue reiniciada desde la última visita del usuario
+        alert('La base de datos ha sido reiniciada desde tu última visita. Tus apartados anteriores ya no existen, pero tu identidad se ha conservado. ¡Bienvenido de nuevo!');
+      }
+      // Si success normal, el UserService ya actualizó el signal
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      this.isSaving.set(false);
+    }
+  }
+
+  /**
+   * El usuario elige continuar con el alias existente (nuevo dispositivo)
+   */
+  onAcceptConflictAlias(): void {
+    const data = this.conflictData();
+    if (!data) return;
+
+    this.userService.acceptServerUuid(data.storedUuid, data.storedAlias, data.email, data.phone);
+    this.confirmDialogHidden();
+  }
+
+  /**
+   * El usuario elige elegir otro alias
+   */
+  onRejectConflictAlias(): void {
+    this.confirmDialogHidden();
+    // Focus en el input de alias después de cerrar el diálogo
+    setTimeout(() => {
+      const aliasInput = document.querySelector<HTMLInputElement>('input[placeholder="Apodo o alias"]');
+      aliasInput?.focus();
+      aliasInput?.select();
+    }, 100);
+  }
+
+  private confirmDialogHidden(): void {
+    this.conflictDialogVisible.set(false);
+    this.conflictData.set(null);
+  }
+
+  /**
+   * Intenta variantes tocoyo-N cuando hay conflicto de alias.
+   * Usa los datos almacenados en conflictData().
+   * Empieza en 2 (el 1 es el alias original).
+   */
+  async onTryTocayoFromDialog(): Promise<void> {
+    const data = this.conflictData();
+    if (!data) return;
+
+    const baseAlias = data.storedAlias;
+    const email = data.email;
+    const phone = data.phone;
+
+    this.isSaving.set(true);
+    this.confirmDialogHidden();
+
+    for (let n = 2; n <= 9; n++) {
+      const tocayoAlias = `${baseAlias}-tocayo-${n}`;
+      try {
+        const result = await this.userService.resolveSession(tocayoAlias, email, phone);
+        if (result.success) {
+          // Alias tocayo aceptado
+          return;
+        }
+        if (!result.conflict) return; // Error no esperado, salir
+      } catch {
+        break; // Error de red, salir
+      }
+    }
+
+    // Si llegamos aquí, todos los tocayo-2..9 están ocupados
+    alert(`El alias "${baseAlias}" y sus variantes tocayo están ocupados. Por favor elige un alias completamente diferente.`);
+    this.isSaving.set(false);
   }
 }
