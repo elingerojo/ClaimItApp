@@ -19,7 +19,7 @@ flowchart TD
     %% === NUEVA SESIÓN ===
     B -->|No| C[Generar UUID\ncrypto.randomUUID]
     C --> D[Usuario ingresa alias\nemail, phone]
-    D --> E[POST /api/session\nBody: uuid, alias, email, phone]
+    D --> E[POST /api/session\nBody: uuid, alias, email, phone,\nisFromSession]
     
     E --> F{¿Alias existe en DB?}
     
@@ -54,7 +54,7 @@ flowchart TD
     
     %% === CAMBIO DE ALIAS ===
     V --> W[Usuario cambia alias]
-    W --> X[POST /api/session\nBody: uuid existente, nuevo alias]
+    W --> X[POST /api/session\nBody: uuid existente, nuevo alias, isFromSession]
     X --> Y{¿Nuevo alias existe\ncon otro UUID?}
     Y -->|Sí| Z[Conflicto → mismo diálogo]
     Y -->|No| AA[Actualizar alias en DB]
@@ -74,10 +74,11 @@ flowchart TD
 
 1. **Browser**: No encuentra `claimit_uuid` en `localStorage` → genera `crypto.randomUUID()`
 2. **Browser**: Usuario escribe alias "JuanP", email, phone
-3. **Browser**: `POST /api/session` con `{ uuid: "abc-123", alias: "JuanP", email, phone }`
+3. **Browser**: `POST /api/session` con `{ uuid: "abc-123", alias: "JuanP", email, phone, isFromSession: false }` (UUID recién generado → flag `false`)
 4. **Server**: Busca alias "JuanP" (case-insensitive)
    - **No existe**: Busca si UUID "abc-123" existe
      - No existe → `INSERT INTO users (uuid, alias, email, phone)`
+       - Si `isFromSession: true` (legacy post-reset BD) → añade `databaseReset: true` en respuesta + log
      - Sí existe (cambio de alias) → `UPDATE users SET alias = 'JuanP' WHERE uuid = 'abc-123'`
    - **Sí existe** con UUID "def-456": Compara con browser UUID "abc-123"
      - **Coinciden** → OK, misma sesión
@@ -98,7 +99,7 @@ flowchart TD
 
 1. **Browser**: Usuario hace clic en "Cambiar Alias"
 2. **Browser**: Usuario escribe nuevo alias "PedroM"
-3. **Browser**: `POST /api/session` con `{ uuid: "abc-123", alias: "PedroM", email, phone }`
+3. **Browser**: `POST /api/session` con `{ uuid: "abc-123", alias: "PedroM", email, phone, isFromSession: true }` (UUID de localStorage)
 4. **Server**: Busca alias "PedroM"
    - **No existe** → `UPDATE users SET alias = 'PedroM' WHERE uuid = 'abc-123'`
    - **Sí existe** con otro UUID → Devuelve conflicto
@@ -123,11 +124,12 @@ El navegador incrementa N desde 2 hasta 9 y reintenta. No se guarda contador en 
   "uuid": "abc-123...",          // Generado por crypto.randomUUID()
   "alias": "JuanP",              // Obligatorio
   "email": "juan@email.com",     // Opcional
-  "phone": "5512345678"          // Opcional
+  "phone": "5512345678",         // Opcional
+  "isFromSession": false         // false=UUID nuevo, true=UUID de localStorage
 }
 ```
 
-### Response — Éxito (alias libre o mismo UUID)
+### Response — Éxito, usuario nuevo
 ```json
 {
   "uuid": "abc-123...",
@@ -135,6 +137,29 @@ El navegador incrementa N desde 2 hasta 9 y reintenta. No se guarda contador en 
   "email": "juan@email.com",
   "phone": "5512345678",
   "isNew": true
+}
+```
+
+### Response — Éxito, usuario legacy post-reset BD
+```json
+{
+  "uuid": "abc-123...",
+  "alias": "JuanP",
+  "email": "juan@email.com",
+  "phone": "5512345678",
+  "isNew": true,
+  "databaseReset": true
+}
+```
+
+### Response — Éxito, sesión existente
+```json
+{
+  "uuid": "abc-123...",
+  "alias": "JuanP",
+  "email": "juan@email.com",
+  "phone": "5512345678",
+  "isNew": false
 }
 ```
 
@@ -202,8 +227,14 @@ WHERE LOWER(c.username) = LOWER(u.alias);
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
 
+/**
+ * POST /api/session
+ * ...
+ * El flag `isFromSession` (opcional) indica si el UUID se cargó de localStorage (true)
+ * o se acaba de generar (false). Útil para migraciones futuras V1→V2 no-compatibles.
+ */
 export const resolveSession = async (req: Request, res: Response): Promise<void> => {
-  const { uuid, alias, email, phone } = req.body;
+  const { uuid, alias, email, phone, isFromSession } = req.body;
 
   if (!uuid || !alias?.trim()) {
     res.status(400).json({ error: 'uuid and alias are required.' });
@@ -212,71 +243,81 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
 
   const cleanAlias = alias.trim();
 
-  // 1. Buscar si el alias ya existe (case-insensitive)
-  const aliasResult = await pool.query(
-    'SELECT uuid, alias, email, phone FROM users WHERE LOWER(alias) = LOWER($1)',
-    [cleanAlias]
-  );
-
-  if (aliasResult.rows.length > 0) {
-    const existingUser = aliasResult.rows[0];
-
-    // 2. Alias existe — ¿coincide el UUID?
-    if (existingUser.uuid === uuid) {
-      // Mismo usuario, mismo alias → todo bien
-      return res.json({
-        uuid: existingUser.uuid,
-        alias: existingUser.alias,
-        email: existingUser.email,
-        phone: existingUser.phone,
-        isNew: false
-      });
-    } else {
-      // Conflicto: alias tomado por otro UUID
-      return res.status(409).json({
-        conflict: true,
-        storedUuid: existingUser.uuid,
-        storedAlias: existingUser.alias,
-        message: `El alias "${cleanAlias}" ya está siendo usado.`
-      });
-    }
-  }
-
-  // 3. Alias no existe — ¿existe el UUID? (cambio de alias)
-  const uuidResult = await pool.query(
-    'SELECT uuid, alias, email, phone FROM users WHERE uuid = $1',
-    [uuid]
-  );
-
-  if (uuidResult.rows.length > 0) {
-    // El UUID ya existe pero con diferente alias → actualizar alias
-    await pool.query(
-      'UPDATE users SET alias = $1, email = COALESCE($2, email), phone = COALESCE($3, phone) WHERE uuid = $4',
-      [cleanAlias, email || null, phone || null, uuid]
+  try {
+    // 1. Buscar si el alias ya existe (case-insensitive)
+    const aliasResult = await pool.query(
+      'SELECT uuid, alias, email, phone FROM users WHERE LOWER(alias) = LOWER($1)',
+      [cleanAlias]
     );
 
-    return res.json({
+    if (aliasResult.rows.length > 0) {
+      const existingUser = aliasResult.rows[0];
+
+      // 2. Alias existe — ¿coincide el UUID?
+      if (existingUser.uuid === uuid) {
+        return res.json({
+          uuid: existingUser.uuid,
+          alias: existingUser.alias,
+          email: existingUser.email,
+          phone: existingUser.phone,
+          isNew: false
+        });
+      } else {
+        return res.status(409).json({
+          conflict: true,
+          storedUuid: existingUser.uuid,
+          storedAlias: existingUser.alias,
+          message: `El alias "${cleanAlias}" ya está siendo usado.`
+        });
+      }
+    }
+
+    // 3. Alias no existe — ¿existe el UUID? (cambio de alias)
+    const uuidResult = await pool.query(
+      'SELECT uuid, alias, email, phone FROM users WHERE uuid = $1',
+      [uuid]
+    );
+
+    if (uuidResult.rows.length > 0) {
+      await pool.query(
+        'UPDATE users SET alias = $1, email = COALESCE($2, email), phone = COALESCE($3, phone) WHERE uuid = $4',
+        [cleanAlias, email || null, phone || null, uuid]
+      );
+      return res.json({
+        uuid,
+        alias: cleanAlias,
+        email: email || uuidResult.rows[0].email,
+        phone: phone || uuidResult.rows[0].phone,
+        isNew: false
+      });
+    }
+
+    // 4. Nuevo usuario: UUID + alias no existen
+    // isFromSession=true + UUID no existe = posible usuario legacy de V1
+    const isLegacyUser = isFromSession === true;
+
+    await pool.query(
+      'INSERT INTO users (uuid, alias, email, phone) VALUES ($1, $2, $3, $4)',
+      [uuid, cleanAlias, email || null, phone || null]
+    );
+
+    if (isLegacyUser) {
+      console.log(`[Session] Legacy user re-created after DB reset: uuid=${uuid}, alias=${cleanAlias}`);
+    }
+
+    res.status(201).json({
       uuid,
       alias: cleanAlias,
-      email: email || uuidResult.rows[0].email,
-      phone: phone || uuidResult.rows[0].phone,
-      isNew: false
+      email: email || null,
+      phone: phone || null,
+      isNew: true,
+      ...(isLegacyUser && { databaseReset: true })
     });
+
+  } catch (error) {
+    console.error('Session resolution failed:', error);
+    res.status(500).json({ error: 'Internal error resolving user session.' });
   }
-
-  // 4. Nuevo usuario: UUID + alias no existen
-  await pool.query(
-    'INSERT INTO users (uuid, alias, email, phone) VALUES ($1, $2, $3, $4)',
-    [uuid, cleanAlias, email || null, phone || null]
-  );
-
-  res.status(201).json({
-    uuid,
-    alias: cleanAlias,
-    email: email || null,
-    phone: phone || null,
-    isNew: true
-  });
 };
 ```
 
@@ -356,22 +397,30 @@ export class UserService {
   }
 
   /**
-   * Resuelve sesión contra el servidor
-   * Retorna: { success, conflict?, storedUuid?, storedAlias? }
+   * Indica si el UUID se cargó de una sesión previa (localStorage)
+   * o se acaba de generar ahora.
+   */
+  private getIsFromSession(): boolean {
+    return !!localStorage.getItem('claimit_uuid');
+  }
+
+  /**
+   * Resuelve sesión contra el servidor.
+   * Retorna: { success, conflict?, storedUuid?, storedAlias?, databaseReset? }
    */
   async resolveSession(alias: string, email: string | null, phone: string | null): Promise<SessionResult> {
     const uuid = this.getOrCreateUuid();
-    
+    const isFromSession = this.getIsFromSession();
+
     const response = await fetch(`${railwayApiUrl}/session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uuid, alias, email, phone })
+      body: JSON.stringify({ uuid, alias, email, phone, isFromSession })
     });
 
     const data = await response.json();
 
     if (data.conflict) {
-      // Conflicto: alias ocupado por otro UUID
       return {
         conflict: true,
         browserUuid: uuid,
@@ -386,7 +435,12 @@ export class UserService {
 
     // Éxito: guardar sesión
     this.commitSession(data.uuid, data.alias, data.email, data.phone);
-    return { success: true };
+
+    const result: SessionResult = { success: true };
+    if (data.databaseReset) {
+      result.databaseReset = true;
+    }
+    return result;
   }
 
   /**
@@ -423,6 +477,8 @@ export interface SessionResult {
   browserUuid?: string;
   storedUuid?: string;
   storedAlias?: string;
+  /** Indica que la BD fue reiniciada desde la última visita del usuario */
+  databaseReset?: boolean;
 }
 ```
 
@@ -489,14 +545,14 @@ async tryTocayoVariants(baseAlias: string, email: string | null, phone: string |
 |---------|--------|-----------------|
 | `database/migrations/002_add_users_table.sql` | **Crear** | Tabla `users` + columna `user_uuid` en `claims` |
 | `shared/types.ts` | **Modificar** | Agregar `userUuid` a `Claim` |
-| `backend/src/controllers/sessionController.ts` | **Crear** | `POST /api/session` — lógica de resolución UUID+alias |
+| `backend/src/controllers/sessionController.ts` | **Crear** | `POST /api/session` — resolución UUID+alias, flag `isFromSession`, `databaseReset` |
 | `backend/src/index.ts` | **Modificar** | Registrar ruta `/api/session` |
 | `backend/src/controllers/claimsController.ts` | **Modificar** | Usar `userUuid`, lookup alias desde `users` |
 | `backend/src/controllers/feedsController.ts` | **Modificar** | JOIN con `users`, incluir `userUuid` en queue |
 | `backend/src/controllers/adminController.ts` | **Modificar** | Usar `user_uuid` para evicción |
-| `frontend/src/app/services/user.ts` | **Modificar** | UUID browser-side, `resolveSession()`, manejo de conflicto |
+| `frontend/src/app/services/user.ts` | **Modificar** | UUID browser-side, `getIsFromSession()`, `resolveSession()` con flag, `databaseReset` |
 | `frontend/src/app/services/inventory.ts` | **Modificar** | `submitClaim()` con `userUuid`, queue con `userUuid` |
-| `frontend/src/app/components/inventory-list/inventory-list.ts` | **Modificar** | Comparar por `userUuid`, handler async |
+| `frontend/src/app/components/inventory-list/inventory-list.ts` | **Modificar** | Comparar por `userUuid`, handler async con `databaseReset` |
 | `frontend/src/app/components/inventory-list/inventory-list.html` | **Modificar** | Diálogo de conflicto, tocayo auto-sugerencia |
 | `frontend/src/app/components/item-detail/item-detail.ts` | **Modificar** | Comparar por `userUuid` |
 
