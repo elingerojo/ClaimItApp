@@ -122,3 +122,40 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     res.status(500).json({ error: 'Database execution error updating item record.' });
   }
 };
+
+export const deleteItem = async (req: Request, res: Response): Promise<void> => {
+  const adminToken = req.headers['x-admin-token'];
+
+  if (adminToken !== process.env.ADMIN_TOKEN) {
+    res.status(401).json({ error: 'Unauthorized administrative access.' });
+    return;
+  }
+
+  const { id } = req.params;
+
+  if (!id) {
+    res.status(400).json({ error: 'Missing item id parameter.' });
+    return;
+  }
+
+  try {
+    // Delete the item row; related claims are removed automatically via ON DELETE CASCADE
+    const result = await pool.query('DELETE FROM items WHERE id = $1 RETURNING id, title', [id]);
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'Item not found.' });
+      return;
+    }
+
+    // Broadcast the deletion via SSE so all browsers remove it in real time
+    broadcastSseEvent('item_deleted', {
+      itemId: id,
+      title: result.rows[0].title
+    });
+
+    res.status(200).json({ success: true, message: 'Item deleted successfully.' });
+  } catch (error) {
+    console.error('Failed to delete item:', error);
+    res.status(500).json({ error: 'Database execution error deleting item record.' });
+  }
+};

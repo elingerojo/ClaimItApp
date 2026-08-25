@@ -48,6 +48,7 @@
               <th class="px-6 py-4">{{ 'Categoría' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Estado' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Línea de Espera (Click para expulsar)' | stripAccents }}</th>
+              <th class="px-6 py-4">{{ 'Acciones' | stripAccents }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-50 text-xs text-gray-700">
@@ -91,6 +92,15 @@
                       <span class="text-gray-400 italic">Sin reclamos activos</span>
                     }
                   </div>
+                </td>
+                <td class="px-6 py-4">
+                  <button
+                    (click)="handleDeleteItem(item.id, item.title)"
+                    title="Eliminar objeto permanentemente"
+                    class="flex items-center space-x-1.5 px-2.5 py-1 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-all text-xs font-medium"
+                  >
+                    🗑️ Eliminar
+                  </button>
                 </td>
               </tr>
             }

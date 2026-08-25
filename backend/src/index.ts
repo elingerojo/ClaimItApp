@@ -8,7 +8,7 @@ import { resolveSession } from './controllers/sessionController.js';
 import { createClaim } from './controllers/claimsController.js';
 import { getUploadToken } from './controllers/uploadController.js';
 import { analyzeItem } from './controllers/analyzerController.js';
-import { createItem, updateItem } from './controllers/itemsController.js';
+import { createItem, updateItem, deleteItem } from './controllers/itemsController.js';
 import { getInventoryFeed, getLedgerFeed } from './controllers/feedsController.js';
 import { evictClaimant } from './controllers/adminController.js';
 
@@ -54,6 +54,7 @@ app.post('/api/admin/analyze-item', analyzeItem);
 app.post('/api/admin/items', createItem);
 app.post('/api/admin/evict', evictClaimant);
 app.patch('/api/admin/items/:id', updateItem);
+app.delete('/api/admin/items/:id', deleteItem);
 
 // Initialize feed history from Neon, then launch the server
 initializeFeedHistory().then(() => {

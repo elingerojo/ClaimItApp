@@ -92,9 +92,35 @@ export class InventoryService {
       );
     });
 
+    // Intercept deletion vectors so removed assets disappear from every view
+    eventSource.addEventListener('item_deleted', (event: MessageEvent) => {
+      const deleteData = JSON.parse(event.data) as { itemId: string; title?: string };
+      this.itemsSignal.update(currentItems =>
+        currentItems.filter(item => item.id !== deleteData.itemId)
+      );
+    });
+
     eventSource.onerror = (err) => {
       console.error('SSE Live distribution pipeline disconnected:', err);
     };
+  }
+
+  /**
+   * Removes an item from the inventory catalog (admin only)
+   */
+  async deleteItem(itemId: string, adminToken: string): Promise<any> {
+    const response = await fetch(`${this.apiUrl}/admin/items/${itemId}`, {
+      method: 'DELETE',
+      headers: {
+        'X-Admin-Token': adminToken
+      }
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || 'No fue posible eliminar el objeto.');
+    }
+    return result;
   }
 
   /**

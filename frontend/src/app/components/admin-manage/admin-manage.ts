@@ -18,6 +18,18 @@ export class AdminManage {
 
   private readonly apiUrl = railwayApiUrl;
 
+  async handleDeleteItem(itemId: string, title: string): Promise<void> {
+    const confirmation = confirm(`¿Estás seguro de que deseas eliminar "${title}"? Esta acción no se puede deshacer.`);
+    if (!confirmation) return;
+
+    try {
+      await this.inventoryService.deleteItem(itemId, this.adminTokenService.token());
+      alert('¡Objeto eliminado con éxito!');
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    }
+  }
+
   async handleEviction(itemId: string, username: string): Promise<void> {
     const confirmation = confirm(`¿Estás seguro de que deseas expulsar a @${username}?`);
     if (!confirmation) return;
