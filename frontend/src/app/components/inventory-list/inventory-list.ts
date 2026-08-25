@@ -1,5 +1,5 @@
 import { Component, signal, computed, inject, effect } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { CommonModule, NgOptimizedImage } from '@angular/common';
 import { InventoryService, ItemWithQueue } from '../../services/inventory';
 import { UserService } from '../../services/user';
 import { ItemCategory, ItemStatus } from '@claimitapp/shared';
@@ -9,7 +9,7 @@ import { ItemDetail } from '../item-detail/item-detail';
 @Component({
   selector: 'app-inventory-list',
   standalone: true,
-  imports: [CommonModule, StripAccentsPipe, ItemDetail],
+  imports: [CommonModule, NgOptimizedImage, StripAccentsPipe, ItemDetail],
   templateUrl: './inventory-list.html'
 })
 export class InventoryList {
