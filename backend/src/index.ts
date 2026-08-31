@@ -13,6 +13,7 @@ import { analyzeItem } from './controllers/analyzerController.js';
 import { createItem, updateItem, deleteItem } from './controllers/itemsController.js';
 import { getInventoryFeed, getLedgerFeed } from './controllers/feedsController.js';
 import { evictClaimant } from './controllers/adminController.js';
+import { createEvent, acceptInvitation, getEvent, listEvents } from './controllers/eventsController.js';
 
 dotenv.config();
 const app = express();
@@ -36,6 +37,13 @@ app.get('/api/ledger', getLedgerFeed);
 app.post('/api/claims', createClaim);
 
 /* ==========================================================================
+   PUBLIC EVENTS & INVITATIONS ENDPOINTS
+   ========================================================================== */
+app.get('/api/events', listEvents);
+app.get('/api/events/:eventId', getEvent);
+app.post('/api/invitations/accept', acceptInvitation);
+
+/* ==========================================================================
    REAL-TIME DATA STREAM ENTRY ROUTE (SSE ENGINE)
    ========================================================================== */
 app.get('/api/stream', (req: Request, res: Response) => {
@@ -54,6 +62,7 @@ app.get('/api/stream', (req: Request, res: Response) => {
 app.post('/api/admin/blob-token', requireAdminCode, getUploadToken);
 app.post('/api/admin/analyze-item', requireAdminCode, analyzeItem);
 app.post('/api/admin/items', requireAdminCode, createItem);
+app.post('/api/admin/events', requireAdminCode, createEvent);
 app.post('/api/admin/evict', requireAdminCode, evictClaimant);
 app.patch('/api/admin/items/:id', requireAdminCode, updateItem);
 app.delete('/api/admin/items/:id', requireAdminCode, deleteItem);

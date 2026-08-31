@@ -1,14 +1,37 @@
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
+import { ROLE_HIERARCHY, canUserSeeItem } from '@claimitapp/shared';
 
 /**
- * Fetches all inventory items along with their sub-queues of claimants
- * Now includes userUuid for precise frontend matching
+ * Fetches inventory items filtered by user's role and visibility_level
+ * Visibility hierarchy: 0=admin, 1=familiares, 2=amigos, 3=conocidos, 4=publico
+ * User can see items with visibility_level >= their role level
  */
 export const getInventoryFeed = async (req: Request, res: Response): Promise<void> => {
   try {
-    // 1. Fetch all items
-    const itemsResult = await pool.query('SELECT * FROM items ORDER BY created_at DESC');
+    const userUuid = req.query.userUuid as string;
+    let userRole = 'publico'; // Default for unauthenticated users
+
+    // If userUuid provided, get their actual global_role
+    if (userUuid) {
+      const userResult = await pool.query(
+        'SELECT global_role FROM users WHERE uuid = $1',
+        [userUuid]
+      );
+      if (userResult.rows.length > 0) {
+        userRole = userResult.rows[0].global_role;
+      }
+    }
+
+    const userRoleLevel = ROLE_HIERARCHY[userRole] || ROLE_HIERARCHY.publico;
+
+    // 1. Fetch all items, with role-based filtering
+    const itemsResult = await pool.query(
+      `SELECT * FROM items 
+       WHERE visibility_level IS NULL OR visibility_level >= $1
+       ORDER BY created_at DESC`,
+      [userRoleLevel]
+    );
 
     // 2. Fetch all current queue positions with userUuid and current alias (via JOIN)
     const claimsResult = await pool.query(`
@@ -40,6 +63,8 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
       infoUrl: item.info_url,
       imageUrl: item.image_url,
       status: item.status,
+      visibilityLevel: item.visibility_level || 4, // Default to public
+      eventId: item.event_id || null,
       createdAt: item.created_at,
       queue: claimsMap[item.id] || []
     }));
