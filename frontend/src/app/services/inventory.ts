@@ -1,4 +1,4 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, signal, OnDestroy } from '@angular/core';
 import { Item, ItemStatus } from '@claimitapp/shared';
 import { railwayApiUrl } from '../app.config';
 
@@ -15,12 +15,18 @@ export interface ItemWithQueue extends Item {
 @Injectable({
   providedIn: 'root'
 })
-export class InventoryService {
+export class InventoryService implements OnDestroy {
   private readonly apiUrl = railwayApiUrl;
 
   // Core application visual layer signaling pipeline
   private readonly itemsSignal = signal<ItemWithQueue[]>([]);
   readonly items = this.itemsSignal.asReadonly();
+
+  // SSE reconnection tracking (exponential backoff)
+  private sseRetryCount = 0;
+  private readonly MAX_RETRIES = 5;
+  private sseClient: EventSource | null = null;
+  private pollingIntervalId: number | null = null;
 
   constructor() {
     this.fetchInitialInventory();
@@ -42,9 +48,11 @@ export class InventoryService {
     if (typeof window === 'undefined') return;
 
     const eventSource = new EventSource(`${this.apiUrl}/stream`);
+    this.sseClient = eventSource;
 
     // Intercept update vectors fired directly out of claims allocation procedures
     eventSource.addEventListener('item_updated', (event: MessageEvent) => {
+      this.sseRetryCount = 0; // Reset counter on successful event
       const updateData = JSON.parse(event.data) as {
         itemId: string;
         status: ItemStatus;
@@ -94,15 +102,92 @@ export class InventoryService {
 
     // Intercept deletion vectors so removed assets disappear from every view
     eventSource.addEventListener('item_deleted', (event: MessageEvent) => {
+      this.sseRetryCount = 0; // Reset counter on successful event
       const deleteData = JSON.parse(event.data) as { itemId: string; title?: string };
       this.itemsSignal.update(currentItems =>
         currentItems.filter(item => item.id !== deleteData.itemId)
       );
     });
 
-    eventSource.onerror = (err) => {
-      console.error('SSE Live distribution pipeline disconnected:', err);
+    eventSource.onerror = () => {
+      this.handleSseError();
     };
+  }
+
+  /**
+   * Handle SSE disconnection with exponential backoff
+   * Retries up to 5 times: 1s, 2s, 4s, 8s, 16s
+   * After 5 failures, activate polling fallback at 30s interval
+   */
+  private handleSseError(): void {
+    console.warn(
+      `[SSE] Disconnected. Retry attempt ${this.sseRetryCount + 1}/${this.MAX_RETRIES}`
+    );
+
+    // Close current connection
+    if (this.sseClient) {
+      this.sseClient.close();
+      this.sseClient = null;
+    }
+
+    if (this.sseRetryCount < this.MAX_RETRIES) {
+      // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+      const delayMs = Math.pow(2, this.sseRetryCount) * 1000;
+      this.sseRetryCount++;
+
+      console.log(
+        `[SSE] Reconnecting in ${delayMs}ms (exponential backoff attempt #${this.sseRetryCount})`
+      );
+
+      setTimeout(() => {
+        this.initializeSseStream();
+      }, delayMs);
+    } else {
+      // Fallback: polling after 5 failed reconnection attempts
+      console.error(
+        '[SSE] Failed after 5 reconnection attempts. Activating polling fallback (30s interval).'
+      );
+      this.activateFallbackPolling();
+    }
+  }
+
+  /**
+   * Fallback polling mechanism (30s interval)
+   * Only activated if SSE fails 5+ times
+   */
+  private activateFallbackPolling(): void {
+    if (this.pollingIntervalId !== null) {
+      return; // Already polling
+    }
+
+    console.warn('[FALLBACK] Polling activated. SSE appears to be down.');
+
+    this.pollingIntervalId = window.setInterval(() => {
+      this.fetchInitialInventory().catch((err) => {
+        console.error('[FALLBACK] Polling refresh failed:', err);
+      });
+    }, 30_000); // 30 seconds
+  }
+
+  /**
+   * Stop fallback polling if SSE is restored
+   */
+  private stopFallbackPolling(): void {
+    if (this.pollingIntervalId !== null) {
+      clearInterval(this.pollingIntervalId);
+      this.pollingIntervalId = null;
+      console.log('[FALLBACK] Polling deactivated. SSE restored.');
+    }
+  }
+
+  /**
+   * Cleanup on component destroy
+   */
+  ngOnDestroy(): void {
+    if (this.sseClient) {
+      this.sseClient.close();
+    }
+    this.stopFallbackPolling();
   }
 
   /**
