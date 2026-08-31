@@ -1,18 +1,21 @@
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
+import { validateItemInput } from '@claimitapp/shared';
+import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 
 export const createItem = async (req: Request, res: Response): Promise<void> => {
-  const adminToken = req.headers['x-admin-token'];
   const { title, description, category, infoUrl, imageUrl } = req.body;
+  const adminCode = (req as any).adminCode; // Attached by requireAdminCode middleware
 
-  if (adminToken !== process.env.ADMIN_TOKEN) {
-    res.status(401).json({ error: 'Unauthorized administrative access.' });
-    return;
-  }
-
-  if (!title || !category || !imageUrl) {
-    res.status(400).json({ error: 'Missing required item tracking parameters.' });
+  // Validate input
+  const validation = validateItemInput({ title, description, category, infoUrl, imageUrl });
+  if (!validation.valid) {
+    res.status(400).json({
+      error: 'Validation failed',
+      details: validation.errors,
+      timestamp: new Date().toISOString()
+    });
     return;
   }
 
@@ -30,34 +33,45 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
       imageUrl
     ]);
 
+    const item = result.rows[0];
+
+    // Log audit entry
+    await logAudit({
+      action: 'ITEM_CREATED',
+      adminCodeSuffix: maskAdminCode(adminCode),
+      itemId: item.id,
+      details: {
+        title: item.title,
+        category: item.category,
+        timestamp: new Date().toISOString()
+      }
+    });
+
     res.status(201).json({
       success: true,
       item: {
-        id: result.rows[0].id,
-        title: result.rows[0].title,
-        description: result.rows[0].description,
-        category: result.rows[0].category,
-        infoUrl: result.rows[0].info_url,
-        imageUrl: result.rows[0].image_url,
-        status: result.rows[0].status,
-        createdAt: result.rows[0].created_at
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        category: item.category,
+        infoUrl: item.info_url,
+        imageUrl: item.image_url,
+        status: item.status,
+        createdAt: item.created_at
       }
     });
   } catch (error) {
     console.error('Failed to create item row:', error);
-    res.status(500).json({ error: 'Database insertion error creating new asset item.' });
+    res.status(500).json({
+      error: 'Database insertion error creating new item',
+      timestamp: new Date().toISOString()
+    });
   }
 };
 
 export const updateItem = async (req: Request, res: Response): Promise<void> => {
-  const adminToken = req.headers['x-admin-token'];
-
-  if (adminToken !== process.env.ADMIN_TOKEN) {
-    res.status(401).json({ error: 'Unauthorized administrative access.' });
-    return;
-  }
-
   const { id } = req.params;
+  const adminCode = (req as any).adminCode; // Attached by requireAdminCode middleware
   const { title, description, infoUrl } = req.body;
 
   if (!id) {
@@ -95,7 +109,18 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
 
     const updatedItem = result.rows[0];
 
-    // Broadcast the update via SSE so all browsers reflect changes in real time
+    // Log audit entry
+    await logAudit({
+      action: 'ITEM_UPDATED',
+      adminCodeSuffix: maskAdminCode(adminCode),
+      itemId: updatedItem.id,
+      details: {
+        title: updatedItem.title,
+        changedFields: { title: !!title, description: description !== undefined, infoUrl: infoUrl !== undefined }
+      }
+    });
+
+    // Broadcast the update via SSE
     broadcastSseEvent('item_updated', {
       itemId: updatedItem.id,
       status: updatedItem.status,
@@ -124,14 +149,8 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
 };
 
 export const deleteItem = async (req: Request, res: Response): Promise<void> => {
-  const adminToken = req.headers['x-admin-token'];
-
-  if (adminToken !== process.env.ADMIN_TOKEN) {
-    res.status(401).json({ error: 'Unauthorized administrative access.' });
-    return;
-  }
-
   const { id } = req.params;
+  const adminCode = (req as any).adminCode; // Attached by requireAdminCode middleware
 
   if (!id) {
     res.status(400).json({ error: 'Missing item id parameter.' });
@@ -147,13 +166,29 @@ export const deleteItem = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    // Broadcast the deletion via SSE so all browsers remove it in real time
-    broadcastSseEvent('item_deleted', {
-      itemId: id,
-      title: result.rows[0].title
+    const deletedItem = result.rows[0];
+
+    // Log audit entry
+    await logAudit({
+      action: 'ITEM_DELETED',
+      adminCodeSuffix: maskAdminCode(adminCode),
+      itemId: deletedItem.id,
+      details: {
+        title: deletedItem.title,
+        timestamp: new Date().toISOString()
+      }
     });
 
-    res.status(200).json({ success: true, message: 'Item deleted successfully.' });
+    // Broadcast the deletion via SSE
+    broadcastSseEvent('item_deleted', {
+      itemId: deletedItem.id,
+      title: deletedItem.title
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Item "${deletedItem.title}" deleted successfully`
+    });
   } catch (error) {
     console.error('Failed to delete item:', error);
     res.status(500).json({ error: 'Database execution error deleting item record.' });

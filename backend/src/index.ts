@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 
 // Import our configurations & middleware handlers
 import { registerSseClient, initializeFeedHistory } from './config/sse.js';
+import { requireAdminCode } from './middleware/adminGuard.js';
+import { getAuditLog } from './utils/auditLog.js';
 import { resolveSession } from './controllers/sessionController.js';
 import { createClaim } from './controllers/claimsController.js';
 import { getUploadToken } from './controllers/uploadController.js';
@@ -49,12 +51,24 @@ app.get('/api/stream', (req: Request, res: Response) => {
 /* ==========================================================================
    ADMIN ASSISTANCE & ASSET MANAGEMENT PIPELINE
    ========================================================================== */
-app.post('/api/admin/blob-token', getUploadToken);
-app.post('/api/admin/analyze-item', analyzeItem);
-app.post('/api/admin/items', createItem);
-app.post('/api/admin/evict', evictClaimant);
-app.patch('/api/admin/items/:id', updateItem);
-app.delete('/api/admin/items/:id', deleteItem);
+app.post('/api/admin/blob-token', requireAdminCode, getUploadToken);
+app.post('/api/admin/analyze-item', requireAdminCode, analyzeItem);
+app.post('/api/admin/items', requireAdminCode, createItem);
+app.post('/api/admin/evict', requireAdminCode, evictClaimant);
+app.patch('/api/admin/items/:id', requireAdminCode, updateItem);
+app.delete('/api/admin/items/:id', requireAdminCode, deleteItem);
+
+/* ==========================================================================
+   ADMIN AUDITING & OPERATIONAL OVERSIGHT
+   ========================================================================== */
+app.get('/api/admin/audit-log', requireAdminCode, async (req: Request, res: Response) => {
+  const limit = Math.min(parseInt(req.query.limit as string) || 100, 1000);
+  const logs = await getAuditLog(limit);
+  res.json({
+    count: logs.length,
+    entries: logs
+  });
+});
 
 // Initialize feed history from Neon, then launch the server
 initializeFeedHistory().then(() => {

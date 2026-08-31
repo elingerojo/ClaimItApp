@@ -1,13 +1,38 @@
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
+import { validateClaimInput, validateEmailFormat, validatePhoneFormat } from '@claimitapp/shared';
 
 export const createClaim = async (req: Request, res: Response): Promise<void> => {
   const { itemId, userUuid, email, phone } = req.body;
 
   // Validation: userUuid and Item ID are strictly required
-  if (!itemId || !userUuid) {
-    res.status(400).json({ error: 'Missing required fields: itemId and userUuid.' });
+  const validation = validateClaimInput({ itemId, userUuid, email, phone });
+  if (!validation.valid) {
+    res.status(400).json({
+      error: 'Validation failed',
+      details: validation.errors,
+      timestamp: new Date().toISOString()
+    });
+    return;
+  }
+
+  // Additional validation for email and phone if provided
+  if (email && email.trim() && !validateEmailFormat(email)) {
+    res.status(400).json({
+      error: 'Validation failed',
+      details: ['Email: invalid format'],
+      timestamp: new Date().toISOString()
+    });
+    return;
+  }
+
+  if (phone && phone.trim() && !validatePhoneFormat(phone)) {
+    res.status(400).json({
+      error: 'Validation failed',
+      details: ['Phone: must be 7-15 digits'],
+      timestamp: new Date().toISOString()
+    });
     return;
   }
 

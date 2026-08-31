@@ -28,6 +28,10 @@ export class InventoryService implements OnDestroy {
   private sseClient: EventSource | null = null;
   private pollingIntervalId: number | null = null;
 
+  // Claim rate limiting (cooldown between claims per user)
+  private lastClaimTime = new Map<string, number>(); // userUuid -> timestamp
+  private readonly CLAIM_COOLDOWN_MS = 2000; // 2 seconds
+
   constructor() {
     this.fetchInitialInventory();
     this.initializeSseStream();
@@ -210,18 +214,37 @@ export class InventoryService implements OnDestroy {
 
   /**
    * Dispatches data out to claims transaction handlers
+   * Enforces 2-second cooldown between claims per user to prevent accidental duplicates
    */
   async submitClaim(itemId: string, userUuid: string, email: string | null, phone: string | null): Promise<any> {
-    const response = await fetch(`${this.apiUrl}/claims`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemId, userUuid, email, phone })
-    });
+    // Check cooldown: prevent multiple claims within 2 seconds
+    const lastTime = this.lastClaimTime.get(userUuid) || 0;
+    const timeSinceLastClaim = Date.now() - lastTime;
 
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(result.error || 'The system was unable to register your claim request.');
+    if (timeSinceLastClaim < this.CLAIM_COOLDOWN_MS) {
+      const waitTime = Math.ceil((this.CLAIM_COOLDOWN_MS - timeSinceLastClaim) / 1000);
+      throw new Error(`Please wait ${waitTime}s before claiming another item`);
     }
-    return result;
+
+    // Record claim timestamp for future cooldown checks
+    this.lastClaimTime.set(userUuid, Date.now());
+
+    try {
+      const response = await fetch(`${this.apiUrl}/claims`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId, userUuid, email, phone })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'The system was unable to register your claim request.');
+      }
+      return result;
+    } catch (error) {
+      // Reset cooldown on error so user can retry
+      this.lastClaimTime.delete(userUuid);
+      throw error;
+    }
   }
 }

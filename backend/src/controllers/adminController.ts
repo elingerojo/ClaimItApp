@@ -1,15 +1,11 @@
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
+import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 
 export const evictClaimant = async (req: Request, res: Response): Promise<void> => {
-  const adminToken = req.headers['x-admin-token'];
+  const adminCode = (req as any).adminCode; // Attached by requireAdminCode middleware
   const { itemId, userUuid } = req.body;
-
-  if (adminToken !== process.env.ADMIN_TOKEN) {
-    res.status(401).json({ error: 'Unauthorized administrative access.' });
-    return;
-  }
 
   if (!itemId || !userUuid) {
     res.status(400).json({ error: 'Missing required parameters: itemId and userUuid.' });
@@ -52,6 +48,21 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
     await client.query(updateStatusQuery, [newStatus, itemId]);
 
     await client.query('COMMIT');
+
+    // Log audit entry
+    await logAudit({
+      action: 'CLAIM_EVICTED',
+      adminCodeSuffix: maskAdminCode(adminCode),
+      itemId: itemId,
+      userId: userUuid,
+      details: {
+        username: username,
+        remainingClaims: remainingCount,
+        newStatus: newStatus,
+        cascadedAutomatically: true,
+        timestamp: new Date().toISOString()
+      }
+    });
 
     // Broadcast the eviction event via SSE
     broadcastSseEvent('item_updated', {
