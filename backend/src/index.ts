@@ -15,6 +15,8 @@ import { getInventoryFeed, getLedgerFeed } from './controllers/feedsController.j
 import { evictClaimant } from './controllers/adminController.js';
 import { createEvent, acceptInvitation, getEvent, listEvents } from './controllers/eventsController.js';
 
+// Edit comment to triger redoploy in Railway 
+
 dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
