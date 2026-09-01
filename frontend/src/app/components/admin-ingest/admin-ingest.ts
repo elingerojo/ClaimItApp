@@ -31,6 +31,7 @@ export class AdminIngest {
   readonly formDescription = signal<string>('');
   readonly formCategory = signal<ItemCategory>('Misc.');
   readonly formInfoUrl = signal<string>('');
+  readonly formPrecioBase = signal<number | null>(null);
 
   // Vertical editor state for the last-added item
   readonly editingItem = signal<ItemWithQueue | null>(null);
@@ -108,7 +109,8 @@ export class AdminIngest {
           description: this.formDescription(),
           category: this.formCategory(),
           infoUrl: this.formInfoUrl(),
-          imageUrl: this.uploadedBlobUrl()
+          imageUrl: this.uploadedBlobUrl(),
+          precio_base_costo: this.formPrecioBase()
         })
       });
 
@@ -141,6 +143,7 @@ export class AdminIngest {
       this.formDescription.set('');
       this.formCategory.set('Misc.');
       this.formInfoUrl.set('');
+      this.formPrecioBase.set(null);
 
     } catch (err: any) {
       this.toastService.error(`Error al guardar: ${err.message}`);

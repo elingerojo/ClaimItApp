@@ -89,6 +89,13 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
         );
         // Deadline of the requesting user's own claim (for the pickup indicator)
         const myClaim = userUuid ? item.queue.find(q => q.userUuid === userUuid) : undefined;
+
+        // Solo el precio del nivel del usuario (el resto permanece oculto)
+        const precioKey =
+          ({ familiares: 'precioFamiliar', amigos: 'precioAmigo', conocidos: 'precioConocido', publico: 'precioPublico' } as const)[
+            userRole
+          ] ?? 'precioPublico';
+
         return {
           id: item.id,
           title: item.title,
@@ -104,6 +111,9 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
           effectiveAvailableFrom,
           canClaim,
           myPickupDeadline: myClaim?.pickupDeadline ?? null,
+          // NUMERIC viene como string de pg; normalizar a número para la UI
+          precioVisible:
+            (item as any)[precioKey] != null ? Number((item as any)[precioKey]) : null,
           createdAt: item.createdAt,
           queue: item.queue
         };

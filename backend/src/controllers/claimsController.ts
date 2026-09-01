@@ -71,7 +71,7 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
 
     // 2. Fetch the parent item and apply an exclusive pessimistic row lock
     const itemCheckQuery = `
-      SELECT id, status, title, category
+      SELECT id, status, title, category, event_id
       FROM items
       WHERE id = $1
       FOR UPDATE
@@ -90,6 +90,42 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
       await client.query('ROLLBACK');
       res.status(409).json({ error: 'The waitlist for this item is completely full.' });
       return;
+    }
+
+    // 2b. Límite de apartados simultáneos por rol dentro del mismo evento
+    if (item.event_id) {
+      const memberRes = await client.query(
+        'SELECT role FROM event_members WHERE event_id = $1 AND user_uuid = $2',
+        [item.event_id, userUuid]
+      );
+      let role = memberRes.rows[0]?.role;
+      if (!role) {
+        const userRoleRes = await client.query('SELECT global_role FROM users WHERE uuid = $1', [
+          userUuid
+        ]);
+        role = userRoleRes.rows[0]?.global_role || 'publico';
+      }
+
+      const setting = await client.query(
+        'SELECT max_apartados_simultaneos FROM trust_levels_settings WHERE id = $1',
+        [role]
+      );
+      const limit = setting.rows[0]?.max_apartados_simultaneos ?? 1;
+
+      const activeInEvent = await client.query(
+        `SELECT COUNT(*)::int AS n FROM claims c
+         JOIN items i ON c.item_id = i.id
+         WHERE c.user_uuid = $1 AND COALESCE(c.picked_up, false) = false AND i.event_id = $2`,
+        [userUuid, item.event_id]
+      );
+
+      if (activeInEvent.rows[0].n >= limit) {
+        await client.query('ROLLBACK');
+        res.status(409).json({
+          error: `Límite de apartados simultáneos alcanzado (máximo ${limit} para tu rol en este evento).`
+        });
+        return;
+      }
     }
 
     // 3. Count current active queue rows for this target item

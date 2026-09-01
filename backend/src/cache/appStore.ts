@@ -27,6 +27,17 @@ export interface StoreItem {
   visibleAt: string | null;
   availableFrom: string | null;
   expiresAt: string | null;
+  // Trust-matrix price snapshot (frozen at creation)
+  precioBaseCosto: number | null;
+  precioFamiliar: number | null;
+  precioAmigo: number | null;
+  precioConocido: number | null;
+  precioPublico: number | null;
+  horasRecoleccionFamiliar: number | null;
+  horasRecoleccionAmigo: number | null;
+  horasRecoleccionConocido: number | null;
+  horasRecoleccionPublico: number | null;
+  nivelAccesoMinimo: string | null;
   createdAt: string;
   queue: Array<{
     userUuid: string;
@@ -73,6 +84,7 @@ let feedHistory: FeedEntry[] = [];
 let users: Map<string, StoreUser> = new Map();
 let events: Map<string, any> = new Map();
 let eventMembers: Map<string, StoreEventMember[]> = new Map(); // userUuid -> memberships
+let trustSettings: Map<string, any> = new Map(); // level id -> trust_levels_settings row
 
 /** Carga todo desde Neon al arrancar. Único acceso a BD en frío. */
 export async function rehydrateAll(): Promise<void> {
@@ -113,6 +125,16 @@ export async function rehydrateAll(): Promise<void> {
       visibleAt: item.visible_at,
       availableFrom: item.available_from,
       expiresAt: item.expires_at,
+      precioBaseCosto: item.precio_base_costo,
+      precioFamiliar: item.precio_familiar,
+      precioAmigo: item.precio_amigo,
+      precioConocido: item.precio_conocido,
+      precioPublico: item.precio_publico,
+      horasRecoleccionFamiliar: item.horas_recoleccion_familiar,
+      horasRecoleccionAmigo: item.horas_recoleccion_amigo,
+      horasRecoleccionConocido: item.horas_recoleccion_conocido,
+      horasRecoleccionPublico: item.horas_recoleccion_publico,
+      nivelAccesoMinimo: item.nivel_acceso_minimo,
       createdAt: item.created_at,
       queue: claimsMap[item.id] || []
     }));
@@ -149,7 +171,11 @@ export async function rehydrateAll(): Promise<void> {
       ])
     );
 
-    // 5. Eventos + membresías para calcular disponibilidad efectiva en RAM
+    // 5. Trust level settings (pricing multipliers / limits)
+    const trustResult = await pool.query('SELECT * FROM trust_levels_settings');
+    trustSettings = new Map(trustResult.rows.map((r: any) => [r.id, r]));
+
+    // 6. Eventos + membresías para calcular disponibilidad efectiva en RAM
     const eventsResult = await pool.query(
       `SELECT id, available_from, familiares_advance_hours, amigos_advance_hours,
               conocidos_advance_hours, publico_advance_hours, status, published_at
@@ -191,6 +217,7 @@ export const getEventMembership = (
   eventId: string
 ): StoreEventMember | undefined =>
   (eventMembers.get(userUuid) || []).find(m => m.eventId === eventId);
+export const getTrustSetting = (level: string): any => trustSettings.get(level);
 
 // --- Escrituras (write-through, llamadas por los controladores) ---
 export function upsertItem(item: StoreItem): void {

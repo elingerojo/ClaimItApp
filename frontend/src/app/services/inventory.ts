@@ -19,6 +19,7 @@ export interface ItemWithQueue extends Item {
   effectiveAvailableFrom?: string | null;
   canClaim?: boolean;
   myPickupDeadline?: string | null;
+  precioVisible?: number | null;
   queue: Array<QueueEntry>;
 }
 

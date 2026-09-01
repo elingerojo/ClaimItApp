@@ -89,6 +89,10 @@
           <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ 'Link de Información Externa (Goodreads / Amazon)' | stripAccents }}</label>
           <input type="text" [(ngModel)]="formInfoUrl" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono text-blue-600" />
         </div>
+        <div>
+          <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ 'Precio Base (costo)' | stripAccents }}</label>
+          <input type="number" step="0.01" min="0" [(ngModel)]="formPrecioBase" placeholder="Ej: 100" title="Se congelan los 4 precios por nivel de confianza (familiar 70%, amigo 85%, conocido 95%, público 100%)" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400" />
+        </div>
 
         <div class="flex justify-end pt-2">
           <button

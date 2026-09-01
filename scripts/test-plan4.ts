@@ -83,6 +83,16 @@ async function main(): Promise<void> {
       visibleAt: null,
       availableFrom: null,
       expiresAt: null,
+      precioBaseCosto: null,
+      precioFamiliar: null,
+      precioAmigo: null,
+      precioConocido: null,
+      precioPublico: null,
+      horasRecoleccionFamiliar: null,
+      horasRecoleccionAmigo: null,
+      horasRecoleccionConocido: null,
+      horasRecoleccionPublico: null,
+      nivelAccesoMinimo: null,
       createdAt: new Date().toISOString(),
       queue: [
         { userUuid: uuid, username: alias, claimedAt: new Date().toISOString(), pickupDeadline: deadline }

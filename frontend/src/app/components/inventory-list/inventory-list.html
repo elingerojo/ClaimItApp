@@ -152,6 +152,9 @@
               }
             </div>
             <h2 class="text-sm font-bold text-gray-900 line-clamp-1">{{ item.title }}</h2>
+            @if (item.precioVisible != null) {
+              <div class="text-sm font-extrabold text-gray-900 mt-0.5">${{ item.precioVisible }}</div>
+            }
             <p class="text-xs text-gray-500 mt-1 line-clamp-2">{{ item.description || 'Sin descripción adicional.' }}</p>
             @if (item.effectiveAvailableFrom && item.canClaim === false) {
               <div class="text-xs text-purple-600 bg-purple-50 rounded-lg px-3 py-1.5 mt-2">

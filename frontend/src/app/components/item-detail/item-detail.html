@@ -40,6 +40,11 @@
       <!-- Title -->
       <h2 class="text-xl font-bold text-gray-900">{{ item().title }}</h2>
 
+      <!-- Precio según el nivel del usuario -->
+      @if (item().precioVisible != null) {
+        <div class="mt-1 text-xl font-extrabold text-gray-900">${{ item().precioVisible }}</div>
+      }
+
       <!-- Full description (not truncated) -->
       <p class="text-sm text-gray-600 mt-3">{{ item().description || 'Sin descripción adicional.' }}</p>
 
