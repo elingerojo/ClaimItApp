@@ -87,6 +87,8 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
           userUuid,
           userRole
         );
+        // Deadline of the requesting user's own claim (for the pickup indicator)
+        const myClaim = userUuid ? item.queue.find(q => q.userUuid === userUuid) : undefined;
         return {
           id: item.id,
           title: item.title,
@@ -101,6 +103,7 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
           availableFrom: item.availableFrom,
           effectiveAvailableFrom,
           canClaim,
+          myPickupDeadline: myClaim?.pickupDeadline ?? null,
           createdAt: item.createdAt,
           queue: item.queue
         };

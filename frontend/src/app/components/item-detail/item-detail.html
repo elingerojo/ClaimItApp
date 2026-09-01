@@ -66,12 +66,39 @@
         </div>
       </div>
 
+      <!-- Deadline de recogida (primer en fila) -->
+      @if (esPrimeroEnFila() && item().myPickupDeadline) {
+        <div class="mt-4 text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2 border border-amber-100">
+          ⏰ Tienes hasta <b>{{ item().myPickupDeadline | date:'EEE d MMM, h:mm a' }}</b> para recoger.
+        </div>
+      }
+
+      <!-- Compartir invitación (roles no-público) -->
+      @if (canShare()) {
+        <div class="mt-4">
+          <button (click)="onShare()" class="text-xs px-3 py-2 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
+            🔗 Invitar a un {{ userService.currentRole() === 'familiares' ? 'amigo' : userService.currentRole() === 'amigos' ? 'conocido' : 'contacto' }}
+          </button>
+          @if (shareVisible() && shareLink(); as link) {
+            <div class="mt-2 flex items-center gap-2">
+              <input [value]="link" readonly class="flex-1 text-[10px] font-mono px-2 py-1.5 border border-gray-200 rounded-lg bg-gray-50" />
+              <button (click)="copyShareLink()" class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50">📋</button>
+            </div>
+          }
+        </div>
+      }
+
       <!-- Claim button (inside the vertical card) -->
       <div class="mt-6">
         @if (item().status === 'unavailable') {
           <button disabled title="Ya no se aceptan más solicitudes para este objeto. La lista de espera está completa."
                   class="w-full text-center text-sm py-3 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed border border-gray-200">
             Lista de Espera Llena
+          </button>
+        } @else if (!isAvailableForMe()) {
+          <button disabled title="Este objeto aún no está disponible para ti según tu rol."
+                  class="w-full text-center text-sm py-3 bg-purple-50 text-purple-600 font-medium rounded-xl cursor-not-allowed border border-purple-100">
+            🕐 Próximamente...
           </button>
         } @else {
           <button

@@ -43,6 +43,17 @@ export class InventoryList {
   readonly activeStatus = signal<string>('All');
   readonly showOnlyMyClaims = signal<boolean>(false);
 
+  // Clases Tailwind para el badge de rol del usuario
+  readonly roleBadgeClass = computed(() => {
+    const role = this.userService.currentRole();
+    return {
+      familiares: 'bg-purple-100 text-purple-700',
+      amigos: 'bg-blue-100 text-blue-700',
+      conocidos: 'bg-gray-100 text-gray-600',
+      publico: 'bg-gray-200 text-gray-500'
+    }[role] ?? 'bg-gray-100 text-gray-500';
+  });
+
   // Estado del diálogo de conflicto de alias
   readonly conflictDialogVisible = signal(false);
   readonly conflictData = signal<{

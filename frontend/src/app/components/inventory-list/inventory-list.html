@@ -29,6 +29,9 @@
           <div>
             <span class="text-gray-500">Identificado como:</span>
             <span class="font-bold text-gray-900 font-mono ml-1">&#64;{{ userService.currentUsername() }}</span>
+            <span [class]="'ml-2 inline-block text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ' + roleBadgeClass()">
+              {{ userService.currentRole() }}
+            </span>
           </div>
           <button (click)="userService.clearSession()" title="Cambia a un alias diferente o actualiza tus datos de contacto. Tus apartados anteriores se conservan." class="text-[10px] text-red-500 hover:underline font-medium">
             Cambiar Alias
@@ -150,6 +153,11 @@
             </div>
             <h2 class="text-sm font-bold text-gray-900 line-clamp-1">{{ item.title }}</h2>
             <p class="text-xs text-gray-500 mt-1 line-clamp-2">{{ item.description || 'Sin descripción adicional.' }}</p>
+            @if (item.effectiveAvailableFrom && item.canClaim === false) {
+              <div class="text-xs text-purple-600 bg-purple-50 rounded-lg px-3 py-1.5 mt-2">
+                🕐 Disponible para ti a partir del {{ item.effectiveAvailableFrom | date:'EEE d MMM, h:mm a' }}
+              </div>
+            }
           </div>
 
           <div class="mt-2 pt-2 border-t border-gray-50">

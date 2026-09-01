@@ -28,7 +28,12 @@ export interface StoreItem {
   availableFrom: string | null;
   expiresAt: string | null;
   createdAt: string;
-  queue: Array<{ userUuid: string; username: string; claimedAt: string }>;
+  queue: Array<{
+    userUuid: string;
+    username: string;
+    claimedAt: string;
+    pickupDeadline: string | null;
+  }>;
 }
 
 export interface LedgerEntry {
@@ -75,18 +80,23 @@ export async function rehydrateAll(): Promise<void> {
     // 1. Items + claims (queues)
     const itemsResult = await pool.query('SELECT * FROM items ORDER BY created_at DESC');
     const claimsResult = await pool.query(
-      `SELECT c.item_id, c.user_uuid, u.alias AS username, c.claimed_at
+      `SELECT c.item_id, c.user_uuid, u.alias AS username, c.claimed_at,
+              c.pickup_deadline
        FROM claims c JOIN users u ON c.user_uuid = u.uuid
        ORDER BY c.claimed_at ASC`
     );
 
-    const claimsMap: Record<string, Array<{ userUuid: string; username: string; claimedAt: string }>> = {};
+    const claimsMap: Record<
+      string,
+      Array<{ userUuid: string; username: string; claimedAt: string; pickupDeadline: string | null }>
+    > = {};
     claimsResult.rows.forEach((row: any) => {
       if (!claimsMap[row.item_id]) claimsMap[row.item_id] = [];
       claimsMap[row.item_id].push({
         userUuid: row.user_uuid,
         username: row.username,
-        claimedAt: row.claimed_at
+        claimedAt: row.claimed_at,
+        pickupDeadline: row.pickup_deadline
       });
     });
 
@@ -195,7 +205,12 @@ export function removeItem(itemId: string): void {
 
 export function addClaimToItem(
   itemId: string,
-  claim: { userUuid: string; username: string; claimedAt: string },
+  claim: {
+    userUuid: string;
+    username: string;
+    claimedAt: string;
+    pickupDeadline: string | null;
+  },
   newStatus: string
 ): void {
   items = items.map(i => {

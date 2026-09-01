@@ -58,6 +58,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
           alias: existingUser.alias,
           email: existingUser.email,
           phone: existingUser.phone,
+          globalRole: existingUser.global_role,
           isNew: false
         });
         return;
@@ -93,6 +94,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
         alias: cleanAlias,
         email: email || uuidResult.rows[0].email,
         phone: phone || uuidResult.rows[0].phone,
+        globalRole: uuidResult.rows[0].global_role,
         isNew: false
       });
       return;
@@ -122,6 +124,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
       alias: cleanAlias,
       email: email || null,
       phone: phone || null,
+      globalRole: 'publico',
       isNew: true,
       ...(isLegacyUser && { databaseReset: true })
     });

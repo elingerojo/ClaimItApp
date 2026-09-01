@@ -1,0 +1,147 @@
+<div class="max-w-6xl mx-auto px-4 py-8 font-sans">
+
+  <!-- Encabezado Principal -->
+  <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-100 pb-6 mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900 tracking-tight">Gestión de Eventos</h1>
+      <p class="text-xs text-gray-500 mt-1">Crea eventos con roles, links de invitación y asignación de items.</p>
+    </div>
+    <div class="mt-4 md:mt-0">
+      <app-admin-auth />
+    </div>
+  </div>
+
+  <!-- Navegación entre páginas -->
+  <nav class="flex gap-1 bg-gray-100 p-1 rounded-lg mb-6">
+    <a routerLink="/admin/ingest" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">📥 Subir Objeto</a>
+    <a routerLink="/admin/manage" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">📋 Gestionar Inventario</a>
+    <a routerLink="/admin/events" class="px-4 py-2 text-xs font-medium rounded-md bg-white shadow-sm transition-colors">🎯 Eventos</a>
+  </nav>
+
+  @if (adminTokenService.authenticated()) {
+
+    <!-- Botón crear -->
+    <div class="flex items-center justify-between mb-4">
+      <button (click)="loadEvents()" class="text-xs px-3 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">🔄 Refrescar</button>
+      <button (click)="toggleForm()" class="text-xs px-4 py-2 rounded-lg font-medium transition-colors bg-gray-900 text-white hover:bg-gray-800">
+        {{ formVisible() ? 'Cancelar' : '+ Crear Evento' }}
+      </button>
+    </div>
+
+    <!-- Formulario de creación -->
+    @if (formVisible()) {
+      <div class="bg-gray-50 border border-gray-100 rounded-xl p-5 mb-6 space-y-3">
+        <h2 class="text-sm font-bold text-gray-900">Nuevo Evento</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <input [(ngModel)]="title" type="text" placeholder="Título del evento *" class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
+          <input [(ngModel)]="ownerUuid" type="text" placeholder="Owner UUID (del anfitrión) *" class="text-xs px-3 py-2 border border-gray-200 rounded-lg font-mono" />
+          <input [(ngModel)]="availableFrom" type="datetime-local" placeholder="Disponible desde *" class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
+          <input [(ngModel)]="pickupDeadline" type="datetime-local" placeholder="Fecha límite de recogida *" class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
+          <input [(ngModel)]="publishedAt" type="datetime-local" placeholder="Publicado en (opcional)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
+          <textarea [(ngModel)]="description" placeholder="Descripción (opcional)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg"></textarea>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <label class="text-[10px] text-gray-500">Fam. anticipación (h)<input [(ngModel)]="familiaresAdvance" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
+          <label class="text-[10px] text-gray-500">Amig. anticipación (h)<input [(ngModel)]="amigosAdvance" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
+          <label class="text-[10px] text-gray-500">Conc. anticipación (h)<input [(ngModel)]="conocidosAdvance" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
+          <label class="text-[10px] text-gray-500">Fam. bonus (h)<input [(ngModel)]="familiaresShare" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
+          <label class="text-[10px] text-gray-500">Amig. bonus (h)<input [(ngModel)]="amigosShare" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
+          <label class="text-[10px] text-gray-500">Conc. bonus (h)<input [(ngModel)]="conocidosShare" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
+        </div>
+        <button (click)="submitCreate()" [disabled]="saving()" class="text-xs px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+          {{ saving() ? 'Creando...' : 'Crear Evento' }}
+        </button>
+      </div>
+    }
+
+    <!-- Lista de eventos -->
+    <div class="space-y-3">
+      @for (ev of events(); track ev.id) {
+        <div class="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+          <div class="flex flex-col md:flex-row md:items-center justify-between p-4 gap-2">
+            <div class="min-w-0">
+              <div class="font-semibold text-gray-900 text-sm">{{ ev.title }}</div>
+              <div class="text-[10px] text-gray-400 font-mono mt-0.5">{{ ev.id }}</div>
+              <div class="text-[10px] text-gray-500 mt-1">
+                Disponible: {{ ev.available_from | date:'short' }} · Recogida: {{ ev.pickup_deadline | date:'short' }}
+              </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <button (click)="openDetail(ev.id)" class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">👁 Detalle</button>
+              <button (click)="toggleAssign(ev.id)" class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">📎 Asignar Items</button>
+              <button (click)="removeEvent(ev.id, ev.title)" class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">🗑️</button>
+            </div>
+          </div>
+
+          <!-- Panel de asignación -->
+          @if (assignPanelId() === ev.id) {
+            <div class="border-t border-gray-100 p-4 bg-gray-50/50">
+              <div class="text-xs font-bold text-gray-500 mb-2">Asignar items al evento</div>
+              <div class="max-h-40 overflow-y-auto space-y-1 mb-3">
+                @for (item of inventoryService.items(); track item.id) {
+                  <label class="flex items-center gap-2 text-xs text-gray-700">
+                    <input type="checkbox" [checked]="selectedItemIds().includes(item.id)" (change)="toggleItemSelection(item.id)" class="accent-gray-900" />
+                    <span class="truncate">{{ item.title }}</span>
+                  </label>
+                }
+              </div>
+              <button (click)="submitAssign(ev.id)" class="text-xs px-3 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-800">Asignar seleccionados</button>
+            </div>
+          }
+
+          <!-- Detalle -->
+          @if (detail()?.event?.id === ev.id) {
+            @if (detail(); as d) {
+              <div class="border-t border-gray-100 p-4 space-y-4">
+                <div class="text-[10px] text-gray-400 font-mono">Status: <span class="text-gray-700">{{ d.event.status }}</span></div>
+
+                <!-- Miembros por rol -->
+                <div>
+                  <div class="text-xs font-bold text-gray-500 mb-1.5">Miembros</div>
+                  <div class="flex flex-wrap gap-2">
+                    @for (m of d.members; track m.user_uuid) {
+                      <span class="inline-flex items-center text-[10px] px-2 py-0.5 rounded-md bg-gray-100 text-gray-700">
+                        {{ roleLabels[m.role] ?? m.role }} · &#64;{{ m.alias }}
+                      </span>
+                    } @empty {
+                      <span class="text-[10px] text-gray-400 italic">Sin miembros.</span>
+                    }
+                  </div>
+                </div>
+
+                <!-- Links de invitación -->
+                <div>
+                  <div class="text-xs font-bold text-gray-500 mb-1.5">Links de invitación (1 por rol)</div>
+                  <div class="space-y-1">
+                    @for (inv of d.invitations; track inv.role) {
+                      <div class="flex items-center justify-between text-[10px] font-mono bg-gray-50 border border-gray-100 rounded-lg px-2 py-1">
+                        <span>{{ roleLabels[inv.role] ?? inv.role }} · {{ inv.code }}</span>
+                        <button (click)="copyCode(inv.code)" class="text-gray-500 hover:text-gray-800">📋</button>
+                      </div>
+                    }
+                  </div>
+                </div>
+
+                <!-- Items del evento -->
+                <div>
+                  <div class="text-xs font-bold text-gray-500 mb-1.5">Items ({{ d.items.length }})</div>
+                  <div class="flex flex-wrap gap-2">
+                    @for (i of d.items; track i.id) {
+                      <span class="inline-flex items-center text-[10px] px-2 py-0.5 rounded-md bg-blue-50 text-blue-700">{{ i.title }}</span>
+                    } @empty {
+                      <span class="text-[10px] text-gray-400 italic">Sin items asignados.</span>
+                    }
+                  </div>
+                </div>
+              </div>
+            }
+          }
+        </div>
+      } @empty {
+        <div class="bg-white border border-dashed border-gray-200 rounded-2xl py-12 text-center text-sm text-gray-400 italic">
+          {{ loading() ? 'Cargando eventos...' : 'No hay eventos aún.' }}
+        </div>
+      }
+    </div>
+  }
+</div>

@@ -1,14 +1,24 @@
-import { Injectable, signal, OnDestroy } from '@angular/core';
+import { Injectable, signal, OnDestroy, inject } from '@angular/core';
 import { Item, ItemStatus } from '@claimitapp/shared';
 import { railwayApiUrl } from '../app.config';
+import { UserService } from './user';
+import { ToastService } from './toast';
 
 export interface QueueEntry {
   userUuid: string;
   username: string;
   claimedAt: string;
+  pickupDeadline: string | null;
 }
 
 export interface ItemWithQueue extends Item {
+  visibilityLevel?: number | null;
+  eventId?: string | null;
+  visibleAt?: string | null;
+  availableFrom?: string | null;
+  effectiveAvailableFrom?: string | null;
+  canClaim?: boolean;
+  myPickupDeadline?: string | null;
   queue: Array<QueueEntry>;
 }
 
@@ -17,6 +27,8 @@ export interface ItemWithQueue extends Item {
 })
 export class InventoryService implements OnDestroy {
   private readonly apiUrl = railwayApiUrl;
+  private readonly userService = inject(UserService);
+  private readonly toastService = inject(ToastService);
 
   // Core application visual layer signaling pipeline
   private readonly itemsSignal = signal<ItemWithQueue[]>([]);
@@ -41,13 +53,26 @@ export class InventoryService implements OnDestroy {
 
   private async fetchInitialInventory(): Promise<void> {
     try {
-      const response = await fetch(`${this.apiUrl}/items`);
+      // Enviar el userUuid para que el feed calcule la disponibilidad efectiva
+      // (effectiveAvailableFrom/canClaim) y el deadline del usuario según su rol.
+      const userUuid = this.userService.currentUuid();
+      const url = userUuid ? `${this.apiUrl}/items?userUuid=${encodeURIComponent(userUuid)}` : `${this.apiUrl}/items`;
+      const response = await fetch(url);
       if (!response.ok) throw new Error('Failed to retrieve baseline catalog metadata.');
       const data: ItemWithQueue[] = await response.json();
       this.itemsSignal.set(data);
     } catch (error) {
       console.error('Core visual collection mapping failed:', error);
     }
+  }
+
+  /**
+   * Refetches the inventory feed (with the current user's uuid) so the role /
+   * deadline indicators stay fresh after a claim, session change or event
+   * mutation.
+   */
+  async refresh(): Promise<void> {
+    await this.fetchInitialInventory();
   }
 
   private initializeSseStream(): void {
@@ -79,7 +104,20 @@ export class InventoryService implements OnDestroy {
         description?: string | null;
         infoUrl?: string | null;
         evicted?: boolean;
+        pickedUp?: boolean;
+        evictedUsername?: string;
+        newFirstUsername?: string;
+        reason?: string;
+        pickupDeadline?: string | null;
       };
+
+      // "Ahora eres el primero en la fila" (auto-advance de cola)
+      if (
+        updateData.newFirstUsername &&
+        updateData.newFirstUsername === this.userService.currentUsername()
+      ) {
+        this.toastService.info('👑 Ahora eres el primero en la fila!');
+      }
 
       // Perform local micro-mutations on the matching array target inside your state tree
       this.itemsSignal.update(currentItems =>
@@ -93,14 +131,23 @@ export class InventoryService implements OnDestroy {
             updatedQueue = item.queue.filter(q => q.userUuid !== updateData.userUuid);
           } else if (updateData.userUuid) {
             // Only modify queue when event carries a userUuid (absent in title-only edits)
-            const userExists = item.queue.some(q => q.userUuid === updateData.userUuid);
-            updatedQueue = [...item.queue];
-            if (!userExists) {
-              updatedQueue.push({
-                userUuid: updateData.userUuid,
-                username: updateData.username,
-                claimedAt: new Date().toISOString()
-              });
+            const existing = item.queue.find(q => q.userUuid === updateData.userUuid);
+            if (existing) {
+              updatedQueue = item.queue.map(q =>
+                q.userUuid === updateData.userUuid
+                  ? { ...q, pickupDeadline: updateData.pickupDeadline ?? q.pickupDeadline }
+                  : q
+              );
+            } else {
+              updatedQueue = [
+                ...item.queue,
+                {
+                  userUuid: updateData.userUuid,
+                  username: updateData.username,
+                  claimedAt: new Date().toISOString(),
+                  pickupDeadline: updateData.pickupDeadline ?? null
+                }
+              ];
             }
           }
 
@@ -110,7 +157,11 @@ export class InventoryService implements OnDestroy {
             queue: updatedQueue,
             ...(updateData.title !== undefined && { title: updateData.title }),
             ...(updateData.description !== undefined && { description: updateData.description }),
-            ...(updateData.infoUrl !== undefined && { infoUrl: updateData.infoUrl })
+            ...(updateData.infoUrl !== undefined && { infoUrl: updateData.infoUrl }),
+            ...(updateData.pickupDeadline !== undefined &&
+              updateData.userUuid === this.userService.currentUuid() && {
+                myPickupDeadline: updateData.pickupDeadline
+              })
           };
         })
       );
@@ -303,6 +354,8 @@ export class InventoryService implements OnDestroy {
       if (!response.ok) {
         throw new Error(result.error || 'The system was unable to register your claim request.');
       }
+      // Refrescar para reflejar el deadline asignado al primer en fila
+      this.refresh().catch(() => {});
       return result;
     } catch (error) {
       // Reset cooldown on error so user can retry

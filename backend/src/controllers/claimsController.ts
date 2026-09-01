@@ -144,7 +144,20 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
     await client.query('COMMIT');
 
     // 6b. Write-through: actualizar el store en RAM (mismo await)
-    addClaimToItem(itemId, { userUuid, username, claimedAt: newClaim.claimed_at }, newStatus);
+    const deadlineRes = await pool.query(
+      'SELECT pickup_deadline FROM claims WHERE item_id = $1 AND user_uuid = $2',
+      [itemId, userUuid]
+    );
+    addClaimToItem(
+      itemId,
+      {
+        userUuid,
+        username,
+        claimedAt: newClaim.claimed_at,
+        pickupDeadline: deadlineRes.rows[0]?.pickup_deadline ?? null
+      },
+      newStatus
+    );
     appendLedger({
       user_uuid: userUuid,
       username,

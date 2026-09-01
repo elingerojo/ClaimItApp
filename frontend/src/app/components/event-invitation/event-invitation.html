@@ -1,0 +1,42 @@
+<div class="min-h-screen bg-gray-50 flex items-center justify-center p-4 font-sans">
+
+  <div class="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
+
+    @if (state() === 'loading') {
+      <div class="text-center text-sm text-gray-400 py-10">Validando invitación...</div>
+    }
+
+    @if (state() === 'error') {
+      <div class="text-center py-8">
+        <div class="text-4xl mb-3">😕</div>
+        <div class="text-sm font-semibold text-gray-800">Invitación no válida</div>
+        <div class="text-xs text-gray-500 mt-1">{{ errorMsg() }}</div>
+        <a routerLink="/" class="inline-block mt-5 text-xs font-medium text-blue-600 hover:underline">← Volver al inicio</a>
+      </div>
+    }
+
+    @if (state() === 'ready') {
+      <div class="text-center">
+        <div class="text-4xl mb-3">🎟️</div>
+        <h1 class="text-lg font-bold text-gray-900">Invitación a "{{ eventTitle() }}"</h1>
+        <p class="text-xs text-gray-500 mt-1">Invitado por <span class="font-semibold text-gray-700">&#64;{{ inviterAlias() }}</span></p>
+
+        <div class="mt-4 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-gray-100 text-gray-700 font-medium">
+          Recibirás el rol: <span class="font-bold">{{ roleLabels[role()] ?? role() }}</span>
+        </div>
+
+        @if (!userService.isAuthenticated()) {
+          <input [(ngModel)]="alias" type="text" placeholder="Tu apodo o alias"
+                 class="mt-5 w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
+        }
+
+        <button (click)="onJoin()" [disabled]="joining()"
+                class="mt-5 w-full text-sm py-3 rounded-xl font-semibold transition-all bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
+          {{ joining() ? 'Uniéndote...' : '🚀 Unirme al evento' }}
+        </button>
+        <p class="text-[10px] text-gray-400 mt-3">La invitación es de un solo uso por rol.</p>
+      </div>
+    }
+
+  </div>
+</div>

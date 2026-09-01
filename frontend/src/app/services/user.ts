@@ -6,6 +6,7 @@ export interface UserSession {
   alias: string;
   email: string | null;
   phone: string | null;
+  globalRole: string | null;
 }
 
 export interface SessionResult {
@@ -33,6 +34,8 @@ export class UserService {
   readonly isAuthenticated = computed(() => this.userSessionSignal() !== null);
   readonly currentUuid = computed(() => this.userSessionSignal()?.uuid || '');
   readonly currentUsername = computed(() => this.userSessionSignal()?.alias || '');
+  /** Rol global (familiares > amigos > conocidos > publico). Default: publico. */
+  readonly currentRole = computed(() => this.userSessionSignal()?.globalRole || 'publico');
 
   constructor() {
     this.loadSessionFromStorage();
@@ -49,7 +52,8 @@ export class UserService {
       uuid,
       alias,
       email: localStorage.getItem('claimit_email'),
-      phone: localStorage.getItem('claimit_phone')
+      phone: localStorage.getItem('claimit_phone'),
+      globalRole: localStorage.getItem('claimit_role')
     });
   }
 
@@ -110,8 +114,8 @@ export class UserService {
         throw new Error(data.error || 'Error al resolver sesión');
       }
 
-      // Éxito: guardar sesión con UUID y alias
-      this.commitSession(data.uuid, data.alias, data.email, data.phone);
+      // Éxito: guardar sesión con UUID, alias y rol global
+      this.commitSession(data.uuid, data.alias, data.email, data.phone, data.globalRole);
 
       // Si el servidor indica que hubo un reset de BD, lo comunicamos
       const result: SessionResult = { success: true };
@@ -128,10 +132,26 @@ export class UserService {
   /**
    * El usuario acepta el UUID del servidor (opción "continuar en nuevo dispositivo").
    * Actualiza localStorage con el UUID almacenado en el servidor. */
-  acceptServerUuid(storedUuid: string, alias: string, email: string | null, phone: string | null): void {
+  acceptServerUuid(
+    storedUuid: string,
+    alias: string,
+    email: string | null,
+    phone: string | null,
+    globalRole: string | null = null
+  ): void {
     // Reemplazar el UUID del browser con el del servidor
     localStorage.setItem('claimit_uuid', storedUuid);
-    this.commitSession(storedUuid, alias, email, phone);
+    this.commitSession(storedUuid, alias, email, phone, globalRole);
+  }
+
+  /**
+   * Actualiza únicamente el rol global de la sesión (p. ej. tras aceptar una
+   * invitación que eleva el rol).
+   */
+  setRole(role: string): void {
+    const current = this.userSessionSignal();
+    if (!current) return;
+    this.commitSession(current.uuid, current.alias, current.email, current.phone, role);
   }
 
   /**
@@ -141,10 +161,16 @@ export class UserService {
    */
   saveSession(alias: string, email: string | null, phone: string | null): void {
     const uuid = this.getOrCreateUuid();
-    this.commitSession(uuid, alias.trim(), email?.trim() || null, phone?.trim() || null);
+    this.commitSession(uuid, alias.trim(), email?.trim() || null, phone?.trim() || null, 'publico');
   }
 
-  private commitSession(uuid: string, alias: string, email: string | null, phone: string | null): void {
+  private commitSession(
+    uuid: string,
+    alias: string,
+    email: string | null,
+    phone: string | null,
+    globalRole: string | null
+  ): void {
     const cleanAlias = alias.trim();
 
     localStorage.setItem('claimit_uuid', uuid);
@@ -156,11 +182,15 @@ export class UserService {
     if (phone?.trim()) localStorage.setItem('claimit_phone', phone.trim());
     else localStorage.removeItem('claimit_phone');
 
+    if (globalRole) localStorage.setItem('claimit_role', globalRole);
+    else localStorage.removeItem('claimit_role');
+
     this.userSessionSignal.set({
       uuid,
       alias: cleanAlias,
       email: email?.trim() || null,
-      phone: phone?.trim() || null
+      phone: phone?.trim() || null,
+      globalRole: globalRole || null
     });
   }
 
@@ -172,6 +202,7 @@ export class UserService {
     localStorage.removeItem('claimit_alias');
     localStorage.removeItem('claimit_email');
     localStorage.removeItem('claimit_phone');
+    localStorage.removeItem('claimit_role');
     this.userSessionSignal.set(null);
   }
 }
