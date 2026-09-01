@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { InventoryService } from '../../services/inventory';
 import { AdminTokenService } from '../../services/admin-token';
+import { ToastService } from '../../services/toast';
 import { railwayApiUrl } from '../../app.config';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 
@@ -16,6 +17,7 @@ import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 export class AdminManage {
   readonly inventoryService = inject(InventoryService);
   readonly adminTokenService = inject(AdminTokenService);
+  readonly toastService = inject(ToastService);
 
   private readonly apiUrl = railwayApiUrl;
 
@@ -25,9 +27,9 @@ export class AdminManage {
 
     try {
       await this.inventoryService.deleteItem(itemId, this.adminTokenService.token());
-      alert('¡Objeto eliminado con éxito!');
+      this.toastService.success('¡Objeto eliminado con éxito!');
     } catch (err: any) {
-      alert(`Error: ${err.message}`);
+      this.toastService.error(`Error: ${err.message}`);
     }
   }
 
@@ -47,9 +49,9 @@ export class AdminManage {
 
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Error en la expulsión.');
-      alert('¡Línea actualizada con éxito!');
+      this.toastService.success('¡Línea actualizada con éxito!');
     } catch (err: any) {
-      alert(`Error: ${err.message}`);
+      this.toastService.error(`Error: ${err.message}`);
     }
   }
 }

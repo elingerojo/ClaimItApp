@@ -1,0 +1,18 @@
+<!-- Contenedor global de toasts (esquina superior derecha) -->
+<div class="fixed top-4 right-4 z-[100] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2"
+     aria-live="polite">
+  @for (toast of toastService.toasts(); track toast.id) {
+    <div role="status"
+         [class]="toastClass(toast.type)"
+         class="flex items-start gap-3 rounded-xl border px-4 py-3 text-sm font-medium text-white shadow-lg cursor-pointer"
+         (click)="toastService.dismiss(toast.id)">
+      <span class="leading-snug">{{ toast.message }}</span>
+      <button type="button"
+              (click)="$event.stopPropagation(); toastService.dismiss(toast.id)"
+              class="ml-auto shrink-0 rounded p-0.5 text-white/70 transition-colors hover:text-white"
+              aria-label="Cerrar notificación">
+        ✕
+      </button>
+    </div>
+  }
+</div>

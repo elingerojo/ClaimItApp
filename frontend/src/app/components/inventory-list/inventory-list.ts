@@ -2,6 +2,7 @@ import { Component, signal, computed, inject, effect } from '@angular/core';
 import { CommonModule, NgOptimizedImage } from '@angular/common';
 import { InventoryService, ItemWithQueue } from '../../services/inventory';
 import { UserService } from '../../services/user';
+import { ToastService } from '../../services/toast';
 import { ItemCategory, ItemStatus } from '@claimitapp/shared';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { ItemDetail } from '../item-detail/item-detail';
@@ -15,6 +16,7 @@ import { ItemDetail } from '../item-detail/item-detail';
 export class InventoryList {
   readonly inventoryService = inject(InventoryService);
   readonly userService = inject(UserService);
+  readonly toastService = inject(ToastService);
 
   // Señal para el item seleccionado en el modal de detalle
   readonly selectedItem = signal<ItemWithQueue | null>(null);
@@ -179,9 +181,9 @@ export class InventoryList {
         session?.email || null,
         session?.phone || null
       );
-      alert(response.message || '¡Acción registrada con éxito!');
+      this.toastService.success(response.message || '¡Acción registrada con éxito!');
     } catch (err: any) {
-      alert(`Error al reclamar: ${err.message}`);
+      this.toastService.error(`Error al reclamar: ${err.message}`);
     }
   }
 
@@ -195,7 +197,7 @@ export class InventoryList {
     const phone = phoneInput.value.trim() || null;
 
     if (!alias) {
-      alert('Por favor ingresa un apodo o alias.');
+      this.toastService.error('Por favor ingresa un apodo o alias.');
       aliasInput.focus();
       return;
     }
@@ -217,11 +219,11 @@ export class InventoryList {
         this.conflictDialogVisible.set(true);
       } else if (result.databaseReset) {
         // BD fue reiniciada desde la última visita del usuario
-        alert('La base de datos ha sido reiniciada desde tu última visita. Tus apartados anteriores ya no existen, pero tu identidad se ha conservado. ¡Bienvenido de nuevo!');
+        this.toastService.info('La base de datos ha sido reiniciada desde tu última visita. Tus apartados anteriores ya no existen, pero tu identidad se ha conservado. ¡Bienvenido de nuevo!');
       }
       // Si success normal, el UserService ya actualizó el signal
     } catch (err: any) {
-      alert(`Error: ${err.message}`);
+      this.toastService.error(`Error: ${err.message}`);
     } finally {
       this.isSaving.set(false);
     }
@@ -287,7 +289,7 @@ export class InventoryList {
     }
 
     // Si llegamos aquí, todos los tocayo-2..9 están ocupados
-    alert(`El alias "${baseAlias}" y sus variantes tocayo están ocupados. Por favor elige un alias completamente diferente.`);
+    this.toastService.error(`El alias "${baseAlias}" y sus variantes tocayo están ocupados. Por favor elige un alias completamente diferente.`);
     this.isSaving.set(false);
   }
 }

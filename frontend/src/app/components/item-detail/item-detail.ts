@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { InventoryService, ItemWithQueue } from '../../services/inventory';
 import { UserService } from '../../services/user';
+import { ToastService } from '../../services/toast';
 
 @Component({
   selector: 'app-item-detail',
@@ -16,6 +17,7 @@ export class ItemDetail {
 
   readonly inventoryService = inject(InventoryService);
   readonly userService = inject(UserService);
+  readonly toastService = inject(ToastService);
 
   close(): void {
     this.onClose()();
@@ -44,9 +46,10 @@ export class ItemDetail {
         session?.email || null,
         session?.phone || null
       );
-      alert(response.message || '¡Acción registrada con éxito!');
+      this.toastService.success(response.message || '¡Acción registrada con éxito!');
+      this.close();
     } catch (err: any) {
-      alert(`Error al reclamar: ${err.message}`);
+      this.toastService.error(`Error al reclamar: ${err.message}`);
     }
   }
 }

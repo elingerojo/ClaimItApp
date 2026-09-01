@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { InventoryService, ItemWithQueue } from '../../services/inventory';
 import { AdminTokenService } from '../../services/admin-token';
+import { ToastService } from '../../services/toast';
 import { ItemCategory } from '@claimitapp/shared';
 import { upload } from '@vercel/blob/client';
 import { railwayApiUrl } from '../../app.config';
@@ -18,6 +19,7 @@ import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 export class AdminIngest {
   readonly inventoryService = inject(InventoryService);
   readonly adminTokenService = inject(AdminTokenService);
+  readonly toastService = inject(ToastService);
 
   readonly isAiProcessing = signal<boolean>(false);
   readonly previewUrl = signal<string>('');
@@ -82,7 +84,7 @@ export class AdminIngest {
       this.formInfoUrl.set(aiData.infoUrl || '');
 
     } catch (err: any) {
-      alert(`Error en el flujo de cámara/IA: ${err.message}`);
+      this.toastService.error(`Error en el flujo de cámara/IA: ${err.message}`);
     } finally {
       this.isAiProcessing.set(false);
     }
@@ -112,7 +114,7 @@ export class AdminIngest {
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Error al persistir el objeto.');
 
-      alert('¡Objeto publicado con éxito en el inventario!');
+      this.toastService.success('¡Objeto publicado con éxito en el inventario!');
 
       // Auto-open vertical editor for the newly created item
       const newItem = result.item;
@@ -140,7 +142,7 @@ export class AdminIngest {
       this.formInfoUrl.set('');
 
     } catch (err: any) {
-      alert(`Error al guardar: ${err.message}`);
+      this.toastService.error(`Error al guardar: ${err.message}`);
     }
   }
 
@@ -168,10 +170,10 @@ export class AdminIngest {
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Error al actualizar el objeto.');
 
-      alert('✅ Objeto actualizado con éxito.');
+      this.toastService.success('✅ Objeto actualizado con éxito.');
       this.cancelEdit();
     } catch (err: any) {
-      alert(`Error al guardar: ${err.message}`);
+      this.toastService.error(`Error al guardar: ${err.message}`);
     }
   }
 
