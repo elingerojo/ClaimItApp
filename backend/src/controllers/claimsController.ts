@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
-import { addClaimToItem, appendLedger } from '../cache/appStore.js';
+import { addClaimToItem, appendLedger, removeClaimFromItem } from '../cache/appStore.js';
 import { validateClaimInput, validateEmailFormat, validatePhoneFormat } from '@claimitapp/shared';
+import { assignPickupDeadlineToFirst, advanceQueue } from '../services/queueService.js';
 
 export const createClaim = async (req: Request, res: Response): Promise<void> => {
   const { itemId, userUuid, email, phone } = req.body;
@@ -128,11 +129,16 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
     }
 
     const updateItemStatusQuery = `
-      UPDATE items 
-      SET status = $1 
+      UPDATE items
+      SET status = $1
       WHERE id = $2
     `;
     await client.query(updateItemStatusQuery, [newStatus, itemId]);
+
+    // 5b. If this claim is first in line, assign its pickup deadline
+    if (updatedCount === 1) {
+      await assignPickupDeadlineToFirst(itemId, client);
+    }
 
     // 6. Everything looks correct. Commit state payload to database.
     await client.query('COMMIT');
@@ -170,6 +176,83 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
     await client.query('ROLLBACK');
     console.error('Transaction execution failed:', error);
     res.status(500).json({ error: 'Internal system error processing the claim transaction.' });
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * POST /api/claims/pickup
+ *
+ * Confirms that the user picked up the item: marks the claim as picked_up,
+ * clears its deadline and auto-advances the queue (FIFO) so the next claimant
+ * (if any) becomes first and receives a fresh pickup deadline.
+ */
+export const confirmPickup = async (req: Request, res: Response): Promise<void> => {
+  const { itemId, userUuid } = req.body;
+
+  if (!itemId || !userUuid) {
+    res.status(400).json({ error: 'itemId and userUuid are required.' });
+    return;
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Lock the target item row to prevent race conditions
+    await client.query('SELECT id FROM items WHERE id = $1 FOR UPDATE', [itemId]);
+
+    // Find the active (not picked up) claim for this user on this item
+    const claimResult = await client.query(
+      `SELECT id, username FROM claims
+       WHERE item_id = $1 AND user_uuid = $2 AND COALESCE(picked_up, false) = false`,
+      [itemId, userUuid]
+    );
+
+    if (claimResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'No active claim found for this item and user.' });
+      return;
+    }
+
+    const claim = claimResult.rows[0];
+
+    // Mark as picked up and clear its deadline
+    await client.query('UPDATE claims SET picked_up = true, pickup_deadline = NULL WHERE id = $1', [
+      claim.id
+    ]);
+
+    // Auto-advance the queue: next claim (if any) becomes first with a deadline
+    const { newStatus, newFirstUsername } = await advanceQueue(itemId, client);
+
+    await client.query('COMMIT');
+
+    // Write-through: remove the picked-up user from the RAM store queue
+    removeClaimFromItem(itemId, userUuid, newStatus);
+
+    // Broadcast with pickup context
+    broadcastSseEvent('item_updated', {
+      itemId,
+      status: newStatus,
+      userUuid,
+      username: claim.username,
+      pickedUp: true,
+      newFirstUsername,
+      reason: 'pickup_confirmed'
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Pickup confirmed. Queue advanced.',
+      newStatus,
+      newFirstUsername
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Pickup confirmation failed:', error);
+    res.status(500).json({ error: 'Internal error confirming pickup.' });
   } finally {
     client.release();
   }

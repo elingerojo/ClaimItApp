@@ -3,6 +3,7 @@ import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 import { removeClaimFromItem } from '../cache/appStore.js';
+import { advanceQueue } from '../services/queueService.js';
 
 export const evictClaimant = async (req: Request, res: Response): Promise<void> => {
   const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
@@ -32,21 +33,15 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
     `;
     await client.query(deleteQuery, [itemId, userUuid]);
 
-    // Count remaining active claims
-    const countQuery = 'SELECT COUNT(*) as active_count FROM claims WHERE item_id = $1';
-    const countResult = await client.query(countQuery, [itemId]);
-    const remainingCount = parseInt(countResult.rows[0].active_count, 10);
+    // Count remaining active claims (for audit)
+    const countResult = await client.query(
+      'SELECT COUNT(*)::int AS active_count FROM claims WHERE item_id = $1',
+      [itemId]
+    );
+    const remainingCount = countResult.rows[0].active_count;
 
-    // Map the new operational lifecycle status
-    let newStatus = 'available';
-    if (remainingCount === 1 || remainingCount === 2) {
-      newStatus = 'waitlist_open';
-    } else if (remainingCount >= 3) {
-      newStatus = 'unavailable';
-    }
-
-    const updateStatusQuery = 'UPDATE items SET status = $1 WHERE id = $2';
-    await client.query(updateStatusQuery, [newStatus, itemId]);
+    // Auto-advance the queue: recompute status + assign deadline to the new first
+    const { newStatus, newFirstUsername } = await advanceQueue(itemId, client);
 
     await client.query('COMMIT');
 
@@ -63,6 +58,7 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
         username: username,
         remainingClaims: remainingCount,
         newStatus: newStatus,
+        newFirstUsername: newFirstUsername,
         cascadedAutomatically: true,
         timestamp: new Date().toISOString()
       }
@@ -75,7 +71,10 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
       userUuid: userUuid,
       username: username,
       evicted: true,
-      queuePosition: remainingCount
+      evictedUsername: username,
+      newFirstUsername,
+      queuePosition: remainingCount,
+      reason: 'manual_evict'
     });
 
     res.status(200).json({ success: true, message: 'Claimant evicted successfully and list cascaded.' });

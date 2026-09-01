@@ -8,7 +8,8 @@ import { rehydrateAll } from './cache/appStore.js';
 import { requireAdminSession } from './middleware/adminSession.js';
 import { getAuditLog } from './utils/auditLog.js';
 import { resolveSession } from './controllers/sessionController.js';
-import { createClaim } from './controllers/claimsController.js';
+import { createClaim, confirmPickup } from './controllers/claimsController.js';
+import { startScheduler } from './services/scheduler.js';
 import { getUploadToken } from './controllers/uploadController.js';
 import { analyzeItem } from './controllers/analyzerController.js';
 import { createItem, updateItem, deleteItem } from './controllers/itemsController.js';
@@ -39,6 +40,7 @@ app.post('/api/session', resolveSession);
 app.get('/api/items', getInventoryFeed);
 app.get('/api/ledger', getLedgerFeed);
 app.post('/api/claims', createClaim);
+app.post('/api/claims/pickup', confirmPickup);
 
 /* ==========================================================================
    PUBLIC EVENTS & INVITATIONS ENDPOINTS
@@ -93,6 +95,9 @@ app.get('/api/admin/audit-log', requireAdminSession, async (req: Request, res: R
 
 // Rehidratar el store en RAM desde Neon (única carga en frío), luego arrancar
 rehydrateAll().then(() => {
+  // Arrancar las automatizaciones temporales (releaseBatches, verifyDeadlines,
+  // updateEventStatus) una vez que el store está listo.
+  startScheduler();
   app.listen(PORT, () => {
     console.log(`🚀 ClaimItApp Core Server successfully listening out on port [:${PORT}]`);
   });
