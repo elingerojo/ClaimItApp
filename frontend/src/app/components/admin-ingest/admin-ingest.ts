@@ -9,11 +9,12 @@ import { ItemCategory } from '@claimitapp/shared';
 import { upload } from '@vercel/blob/client';
 import { railwayApiUrl } from '../../app.config';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
+import { AdminAuth } from '../admin-auth/admin-auth';
 
 @Component({
   selector: 'app-admin-ingest',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, StripAccentsPipe],
+  imports: [CommonModule, FormsModule, RouterModule, StripAccentsPipe, AdminAuth],
   templateUrl: './admin-ingest.html'
 })
 export class AdminIngest {

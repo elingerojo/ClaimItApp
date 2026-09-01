@@ -6,7 +6,7 @@ import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 
 export const createItem = async (req: Request, res: Response): Promise<void> => {
   const { title, description, category, infoUrl, imageUrl } = req.body;
-  const adminCode = (req as any).adminCode; // Attached by requireAdminCode middleware
+  const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
 
   // Validate input
   const validation = validateItemInput({ title, description, category, infoUrl, imageUrl });
@@ -38,7 +38,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     // Log audit entry
     await logAudit({
       action: 'ITEM_CREATED',
-      adminCodeSuffix: maskAdminCode(adminCode),
+      adminCodeSuffix: maskAdminCode(String(adminSession?.id ?? '')),
       itemId: item.id,
       details: {
         title: item.title,
@@ -71,7 +71,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
 
 export const updateItem = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
-  const adminCode = (req as any).adminCode; // Attached by requireAdminCode middleware
+  const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
   const { title, description, infoUrl } = req.body;
 
   if (!id) {
@@ -112,7 +112,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     // Log audit entry
     await logAudit({
       action: 'ITEM_UPDATED',
-      adminCodeSuffix: maskAdminCode(adminCode),
+      adminCodeSuffix: maskAdminCode(String(adminSession?.id ?? '')),
       itemId: updatedItem.id,
       details: {
         title: updatedItem.title,
@@ -150,7 +150,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
 
 export const deleteItem = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
-  const adminCode = (req as any).adminCode; // Attached by requireAdminCode middleware
+  const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
 
   if (!id) {
     res.status(400).json({ error: 'Missing item id parameter.' });
@@ -171,7 +171,7 @@ export const deleteItem = async (req: Request, res: Response): Promise<void> => 
     // Log audit entry
     await logAudit({
       action: 'ITEM_DELETED',
-      adminCodeSuffix: maskAdminCode(adminCode),
+      adminCodeSuffix: maskAdminCode(String(adminSession?.id ?? '')),
       itemId: deletedItem.id,
       details: {
         title: deletedItem.title,

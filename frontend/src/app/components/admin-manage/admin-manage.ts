@@ -7,11 +7,12 @@ import { AdminTokenService } from '../../services/admin-token';
 import { ToastService } from '../../services/toast';
 import { railwayApiUrl } from '../../app.config';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
+import { AdminAuth } from '../admin-auth/admin-auth';
 
 @Component({
   selector: 'app-admin-manage',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, StripAccentsPipe],
+  imports: [CommonModule, FormsModule, RouterModule, StripAccentsPipe, AdminAuth],
   templateUrl: './admin-manage.html'
 })
 export class AdminManage {

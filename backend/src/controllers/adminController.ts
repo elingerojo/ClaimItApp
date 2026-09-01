@@ -4,7 +4,7 @@ import { broadcastSseEvent } from '../config/sse.js';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 
 export const evictClaimant = async (req: Request, res: Response): Promise<void> => {
-  const adminCode = (req as any).adminCode; // Attached by requireAdminCode middleware
+  const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
   const { itemId, userUuid } = req.body;
 
   if (!itemId || !userUuid) {
@@ -52,7 +52,7 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
     // Log audit entry
     await logAudit({
       action: 'CLAIM_EVICTED',
-      adminCodeSuffix: maskAdminCode(adminCode),
+      adminCodeSuffix: maskAdminCode(String(adminSession?.id ?? '')),
       itemId: itemId,
       userId: userUuid,
       details: {

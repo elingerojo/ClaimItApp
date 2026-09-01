@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
+import { validateSessionToken } from '../utils/adminSession.js';
 
 export const getUploadToken = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -12,9 +13,11 @@ export const getUploadToken = async (req: Request, res: Response): Promise<void>
       const parsedPayload = JSON.parse(clientPayload);
       payloadToken = parsedPayload.token;
     }
-    // El token es el password del administrador que toma las fotos, el que
-    // introduce en el <input type="password"> en 'admin-panel.html'
-    if (payloadToken !== process.env.ADMIN_TOKEN) {
+
+    // El token viaja en el clientPayload del SDK de Vercel (no como header),
+    // por lo que esta ruta valida la sesión de forma interna contra la BD.
+    const session = await validateSessionToken(payloadToken);
+    if (!session) {
       res.status(401).json({ error: 'Unauthorized administrative access.' });
       return;
     }

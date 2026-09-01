@@ -5,14 +5,8 @@ import { GoogleGenAI, Type } from '@google/genai';
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export const analyzeItem = async (req: Request, res: Response): Promise<void> => {
-  const adminToken = req.headers['x-admin-token'];
+  // La autenticación la garantiza el middleware requireAdminSession en la ruta.
   const { imageUrl } = req.body;
-
-  // Security guard: Ensure only you can invoke AI operations
-  if (adminToken !== process.env.ADMIN_TOKEN) {
-    res.status(401).json({ error: 'Unauthorized administrative access.' });
-    return;
-  }
 
   if (!imageUrl) {
     res.status(400).json({ error: 'Missing required parameter: imageUrl.' });

@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 
 // Import our configurations & middleware handlers
 import { registerSseClient, initializeFeedHistory } from './config/sse.js';
-import { requireAdminCode } from './middleware/adminGuard.js';
+import { requireAdminSession } from './middleware/adminSession.js';
 import { getAuditLog } from './utils/auditLog.js';
 import { resolveSession } from './controllers/sessionController.js';
 import { createClaim } from './controllers/claimsController.js';
@@ -13,6 +13,7 @@ import { analyzeItem } from './controllers/analyzerController.js';
 import { createItem, updateItem, deleteItem } from './controllers/itemsController.js';
 import { getInventoryFeed, getLedgerFeed } from './controllers/feedsController.js';
 import { evictClaimant } from './controllers/adminController.js';
+import { adminLogin, adminSessionStatus, adminLogout } from './controllers/adminAuthController.js';
 import { createEvent, acceptInvitation, getEvent, listEvents } from './controllers/eventsController.js';
 
 // Edit comment to triger redoploy in Railway 
@@ -59,20 +60,28 @@ app.get('/api/stream', (req: Request, res: Response) => {
 });
 
 /* ==========================================================================
+   ADMIN AUTHENTICATION
+   ========================================================================== */
+app.post('/api/admin/login', adminLogin);
+app.get('/api/admin/session', requireAdminSession, adminSessionStatus);
+app.post('/api/admin/logout', requireAdminSession, adminLogout);
+
+/* ==========================================================================
    ADMIN ASSISTANCE & ASSET MANAGEMENT PIPELINE
    ========================================================================== */
-app.post('/api/admin/blob-token', requireAdminCode, getUploadToken);
-app.post('/api/admin/analyze-item', requireAdminCode, analyzeItem);
-app.post('/api/admin/items', requireAdminCode, createItem);
-app.post('/api/admin/events', requireAdminCode, createEvent);
-app.post('/api/admin/evict', requireAdminCode, evictClaimant);
-app.patch('/api/admin/items/:id', requireAdminCode, updateItem);
-app.delete('/api/admin/items/:id', requireAdminCode, deleteItem);
+// blob-token valida la sesión internamente vía clientPayload (SDK de Vercel no envía headers)
+app.post('/api/admin/blob-token', getUploadToken);
+app.post('/api/admin/analyze-item', requireAdminSession, analyzeItem);
+app.post('/api/admin/items', requireAdminSession, createItem);
+app.post('/api/admin/events', requireAdminSession, createEvent);
+app.post('/api/admin/evict', requireAdminSession, evictClaimant);
+app.patch('/api/admin/items/:id', requireAdminSession, updateItem);
+app.delete('/api/admin/items/:id', requireAdminSession, deleteItem);
 
 /* ==========================================================================
    ADMIN AUDITING & OPERATIONAL OVERSIGHT
    ========================================================================== */
-app.get('/api/admin/audit-log', requireAdminCode, async (req: Request, res: Response) => {
+app.get('/api/admin/audit-log', requireAdminSession, async (req: Request, res: Response) => {
   const limit = Math.min(parseInt(req.query.limit as string) || 100, 1000);
   const logs = await getAuditLog(limit);
   res.json({

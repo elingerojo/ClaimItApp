@@ -6,24 +6,8 @@
       <h1 class="text-2xl font-bold text-gray-900 tracking-tight">Gestión de Inventario</h1>
       <p class="text-xs text-gray-500 mt-1">Administra objetos, expulsa usuarios de la lista de espera.</p>
     </div>
-    <div class="mt-4 md:mt-0 flex items-center gap-2">
-      <div class="relative">
-        <input
-          #tokenInput
-          type="password"
-          [ngModel]="adminTokenService.token()"
-          (ngModelChange)="adminTokenService.setToken($any($event))"
-          placeholder="Ingresar X-Admin-Token"
-          (keydown.enter)="adminTokenService.onTokenEnter(tokenInput)"
-          [class.border-green-400]="adminTokenService.tokenAccepted()"
-          [class.ring-2]="adminTokenService.tokenAccepted()"
-          [class.ring-green-100]="adminTokenService.tokenAccepted()"
-          class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono w-64 shadow-sm transition-all duration-300"
-        />
-      </div>
-      @if (adminTokenService.tokenAccepted()) {
-        <span class="text-green-500 text-sm font-bold" style="animation: fadeIn 0.25s ease-out">✅</span>
-      }
+    <div class="mt-4 md:mt-0">
+      <app-admin-auth />
     </div>
   </div>
 
@@ -37,7 +21,7 @@
     </a>
   </nav>
 
-  @if (adminTokenService.token()) {
+  @if (adminTokenService.authenticated()) {
 
     <!-- TABLA DE CONTROL Y LISTAS DE ESPERA -->
     <div class="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
