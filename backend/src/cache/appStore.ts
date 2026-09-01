@@ -24,6 +24,9 @@ export interface StoreItem {
   status: string;
   visibilityLevel: number | null;
   eventId: string | null;
+  visibleAt: string | null;
+  availableFrom: string | null;
+  expiresAt: string | null;
   createdAt: string;
   queue: Array<{ userUuid: string; username: string; claimedAt: string }>;
 }
@@ -48,6 +51,13 @@ export interface StoreUser {
   global_role: string;
 }
 
+export interface StoreEventMember {
+  eventId: string;
+  role: string;
+  bonusHours: number;
+  invitedBy: string | null;
+}
+
 export const MAX_FEED_HISTORY = 50;
 export const MAX_LEDGER = 50;
 
@@ -56,6 +66,8 @@ let items: StoreItem[] = [];
 let ledger: LedgerEntry[] = [];
 let feedHistory: FeedEntry[] = [];
 let users: Map<string, StoreUser> = new Map();
+let events: Map<string, any> = new Map();
+let eventMembers: Map<string, StoreEventMember[]> = new Map(); // userUuid -> memberships
 
 /** Carga todo desde Neon al arrancar. Único acceso a BD en frío. */
 export async function rehydrateAll(): Promise<void> {
@@ -88,6 +100,9 @@ export async function rehydrateAll(): Promise<void> {
       status: item.status,
       visibilityLevel: item.visibility_level,
       eventId: item.event_id,
+      visibleAt: item.visible_at,
+      availableFrom: item.available_from,
+      expiresAt: item.expires_at,
       createdAt: item.created_at,
       queue: claimsMap[item.id] || []
     }));
@@ -124,8 +139,31 @@ export async function rehydrateAll(): Promise<void> {
       ])
     );
 
+    // 5. Eventos + membresías para calcular disponibilidad efectiva en RAM
+    const eventsResult = await pool.query(
+      `SELECT id, available_from, familiares_advance_hours, amigos_advance_hours,
+              conocidos_advance_hours, publico_advance_hours, status, published_at
+       FROM events`
+    );
+    events = new Map(eventsResult.rows.map((e: any) => [e.id, e]));
+
+    const membersResult = await pool.query(
+      `SELECT event_id, user_uuid, role, bonus_hours, invited_by FROM event_members`
+    );
+    eventMembers = new Map<string, StoreEventMember[]>();
+    membersResult.rows.forEach((m: any) => {
+      const list = eventMembers.get(m.user_uuid) || [];
+      list.push({
+        eventId: m.event_id,
+        role: m.role,
+        bonusHours: m.bonus_hours,
+        invitedBy: m.invited_by
+      });
+      eventMembers.set(m.user_uuid, list);
+    });
+
     console.log(
-      `[APPSTORE] Rehydrated: ${items.length} items, ${ledger.length} ledger, ${feedHistory.length} feeds, ${users.size} users`
+      `[APPSTORE] Rehydrated: ${items.length} items, ${ledger.length} ledger, ${feedHistory.length} feeds, ${users.size} users, ${events.size} events, ${membersResult.rows.length} memberships`
     );
   } catch (err) {
     console.error('[APPSTORE] Rehydrate failed:', err);
@@ -137,6 +175,12 @@ export const getItems = (): StoreItem[] => items;
 export const getLedger = (): LedgerEntry[] => ledger;
 export const getFeedHistory = (): FeedEntry[] => feedHistory;
 export const getUser = (uuid: string): StoreUser | undefined => users.get(uuid);
+export const getEvent = (eventId: string): any => events.get(eventId);
+export const getEventMembership = (
+  userUuid: string,
+  eventId: string
+): StoreEventMember | undefined =>
+  (eventMembers.get(userUuid) || []).find(m => m.eventId === eventId);
 
 // --- Escrituras (write-through, llamadas por los controladores) ---
 export function upsertItem(item: StoreItem): void {
@@ -181,4 +225,60 @@ export function appendFeed(event: string, data: any): void {
 
 export function upsertUser(u: StoreUser): void {
   users.set(u.uuid, u);
+}
+
+export function upsertEvent(evt: any): void {
+  events.set(evt.id, evt);
+}
+
+export function removeEvent(eventId: string): void {
+  events.delete(eventId);
+  // Also drop memberships pointing to the removed event
+  for (const [userUuid, members] of eventMembers) {
+    const filtered = members.filter(m => m.eventId !== eventId);
+    if (filtered.length === 0) eventMembers.delete(userUuid);
+    else eventMembers.set(userUuid, filtered);
+  }
+}
+
+export function upsertEventMember(userUuid: string, membership: StoreEventMember): void {
+  const list = eventMembers.get(userUuid) || [];
+  const idx = list.findIndex(m => m.eventId === membership.eventId);
+  if (idx >= 0) list[idx] = membership;
+  else list.push(membership);
+  eventMembers.set(userUuid, list);
+}
+
+/**
+ * Propagate event-level date changes to the store items that INHERIT them
+ * (items with their own value keep the override — inheritance vs override).
+ */
+export function propagateEventDates(
+  eventId: string,
+  changes: { availableFrom?: string | null; visibleAt?: string | null }
+): void {
+  items = items.map(i => {
+    if (i.eventId !== eventId) return i;
+    const next = { ...i };
+    if (changes.availableFrom !== undefined && next.availableFrom === null) {
+      next.availableFrom = changes.availableFrom;
+    }
+    if (changes.visibleAt !== undefined && next.visibleAt === null) {
+      next.visibleAt = changes.visibleAt;
+    }
+    return next;
+  });
+}
+
+/** Detach all store items from a deleted event (clear inherited scheduling). */
+export function detachItemsFromEvent(eventId: string): void {
+  items = items.map(i => {
+    if (i.eventId !== eventId) return i;
+    return { ...i, eventId: null, visibleAt: null, availableFrom: null, expiresAt: null };
+  });
+}
+
+/** (Re)assign an item to an event in the store (write-through for batch assign). */
+export function setItemEvent(itemId: string, eventId: string | null): void {
+  items = items.map(i => (i.id === itemId ? { ...i, eventId } : i));
 }

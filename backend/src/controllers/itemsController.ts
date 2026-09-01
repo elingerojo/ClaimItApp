@@ -6,7 +6,18 @@ import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 import { getItems, upsertItem, removeItem } from '../cache/appStore.js';
 
 export const createItem = async (req: Request, res: Response): Promise<void> => {
-  const { title, description, category, infoUrl, imageUrl } = req.body;
+  const {
+    title,
+    description,
+    category,
+    infoUrl,
+    imageUrl,
+    visibility_level,
+    event_id,
+    available_from,
+    visible_at,
+    expires_at
+  } = req.body;
   const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
 
   // Validate input
@@ -22,16 +33,24 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
 
   try {
     const insertQuery = `
-      INSERT INTO items (title, description, category, info_url, image_url)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, title, description, category, info_url, image_url, status, visibility_level, event_id, created_at
+      INSERT INTO items
+        (title, description, category, info_url, image_url,
+         visibility_level, event_id, available_from, visible_at, expires_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING id, title, description, category, info_url, image_url, status,
+                visibility_level, event_id, available_from, visible_at, expires_at, created_at
     `;
     const result = await pool.query(insertQuery, [
       title,
       description || null,
       category,
       infoUrl || null,
-      imageUrl
+      imageUrl,
+      visibility_level ?? 4,
+      event_id ?? null,
+      available_from ?? null,
+      visible_at ?? null,
+      expires_at ?? null
     ]);
 
     const item = result.rows[0];
@@ -47,6 +66,9 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
       status: item.status,
       visibilityLevel: item.visibility_level,
       eventId: item.event_id,
+      visibleAt: item.visible_at,
+      availableFrom: item.available_from,
+      expiresAt: item.expires_at,
       createdAt: item.created_at,
       queue: []
     });
@@ -88,15 +110,26 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
 export const updateItem = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
   const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
-  const { title, description, infoUrl } = req.body;
+  const { title, description, infoUrl, visibility_level, event_id, available_from, visible_at } =
+    req.body;
 
   if (!id) {
     res.status(400).json({ error: 'Missing item id parameter.' });
     return;
   }
 
-  if (!title && description === undefined && infoUrl === undefined) {
-    res.status(400).json({ error: 'At least one field (title, description, infoUrl) must be provided.' });
+  if (
+    !title &&
+    description === undefined &&
+    infoUrl === undefined &&
+    visibility_level === undefined &&
+    event_id === undefined &&
+    available_from === undefined &&
+    visible_at === undefined
+  ) {
+    res.status(400).json({
+      error: 'At least one editable field must be provided.'
+    });
     return;
   }
 
@@ -107,14 +140,24 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       SET
         title = COALESCE($1, title),
         description = COALESCE($2, description),
-        info_url = COALESCE($3, info_url)
-      WHERE id = $4
-      RETURNING id, title, description, category, info_url, image_url, status, visibility_level, event_id, created_at
+        info_url = COALESCE($3, info_url),
+        visibility_level = COALESCE($4, visibility_level),
+        event_id = COALESCE($5, event_id),
+        available_from = COALESCE($6, available_from),
+        visible_at = COALESCE($7, visible_at),
+        updated_at = NOW()
+      WHERE id = $8
+      RETURNING id, title, description, category, info_url, image_url, status,
+                visibility_level, event_id, available_from, visible_at, expires_at, created_at
     `;
     const result = await pool.query(updateQuery, [
       title || null,
       description !== undefined ? description : null,
       infoUrl !== undefined ? infoUrl : null,
+      visibility_level !== undefined ? visibility_level : null,
+      event_id !== undefined ? event_id : null,
+      available_from !== undefined ? available_from : null,
+      visible_at !== undefined ? visible_at : null,
       id
     ]);
 
@@ -137,6 +180,9 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       status: updatedItem.status,
       visibilityLevel: updatedItem.visibility_level,
       eventId: updatedItem.event_id,
+      visibleAt: updatedItem.visible_at,
+      availableFrom: updatedItem.available_from,
+      expiresAt: updatedItem.expires_at,
       createdAt: updatedItem.created_at,
       queue: existing?.queue ?? []
     });

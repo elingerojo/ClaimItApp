@@ -16,7 +16,18 @@ import { createItem, updateItem, deleteItem } from './controllers/itemsControlle
 import { getInventoryFeed, getLedgerFeed } from './controllers/feedsController.js';
 import { evictClaimant } from './controllers/adminController.js';
 import { adminLogin, adminSessionStatus, adminLogout } from './controllers/adminAuthController.js';
-import { createEvent, acceptInvitation, getEvent, listEvents } from './controllers/eventsController.js';
+import {
+  createEvent,
+  updateEvent,
+  deleteEvent,
+  getEventDetail,
+  assignItems,
+  acceptInvitation,
+  getEvent,
+  listEvents,
+  validateInvitation,
+  getShareLink
+} from './controllers/eventsController.js';
 
 // Edit comment to triger redoploy in Railway 
 
@@ -47,6 +58,8 @@ app.post('/api/claims/pickup', confirmPickup);
    ========================================================================== */
 app.get('/api/events', listEvents);
 app.get('/api/events/:eventId', getEvent);
+app.get('/api/events/:id/invite/:code', validateInvitation);
+app.get('/api/events/:id/share-link', getShareLink);
 app.post('/api/invitations/accept', acceptInvitation);
 
 /* ==========================================================================
@@ -77,6 +90,10 @@ app.post('/api/admin/blob-token', getUploadToken);
 app.post('/api/admin/analyze-item', requireAdminSession, analyzeItem);
 app.post('/api/admin/items', requireAdminSession, createItem);
 app.post('/api/admin/events', requireAdminSession, createEvent);
+app.get('/api/admin/events/:id', requireAdminSession, getEventDetail);
+app.patch('/api/admin/events/:id', requireAdminSession, updateEvent);
+app.delete('/api/admin/events/:id', requireAdminSession, deleteEvent);
+app.post('/api/admin/events/:id/items', requireAdminSession, assignItems);
 app.post('/api/admin/evict', requireAdminSession, evictClaimant);
 app.patch('/api/admin/items/:id', requireAdminSession, updateItem);
 app.delete('/api/admin/items/:id', requireAdminSession, deleteItem);
