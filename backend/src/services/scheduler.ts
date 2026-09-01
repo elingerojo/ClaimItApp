@@ -3,80 +3,53 @@
  *
  * Time automations (Prompt_time_automations.md, "Jobs Programados"):
  *
- *  - releaseBatches()      every 60s    broadcast items whose available_from arrived
- *  - verifyDeadlines()     every 5 min  evict claims whose pickup_deadline passed and
- *                                       auto-advance their queue (FIFO)
- *  - updateEventStatus()   every 5 min  advance events.status
- *                                       (draft -> scheduled -> active -> completed)
+ *  - expireOverdueClaims()  catch-up: evicts claims whose pickup_deadline passed,
+ *                           auto-advances the queue and applies trust sanctions.
+ *  - runLazyCatchUp()       triggers expireOverdueClaims() ONLY when the RAM
+ *                           store has overdue deadlines (checks in memory first,
+ *                           so it touches Neon only when there is real work).
+ *  - releaseBatches()       broadcast items whose available_from arrived.
+ *  - updateEventStatus()    advance events.status (draft -> scheduled -> active
+ *                           -> completed).
  *
- * Single Railway instance (replicas=1), so in-memory tracking (releasedItemIds)
- * is valid. Jobs write to Neon and keep the RAM store (appStore) in sync via
- * write-through so the SSE feed stays consistent without touching Neon on reads.
+ * Lazy mode (default): no periodic polling. The catch-up runs on activity
+ * (feed read, claim, pickup, SSE connect) so Neon can autosuspend when idle
+ * (preserves the "siesta" / zero-traffic design and the compute allowance).
+ *
+ * Optional poll mode: set SCHEDULER_ENABLED=true to restore fixed-interval jobs
+ * (SCHEDULER_RELEASE_SEC, SCHEDULER_DEADLINE_MIN) for users who prefer the
+ * queue to advance in real time even with zero traffic.
  */
 import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
-import { removeClaimFromItem } from '../cache/appStore.js';
+import { getItems, removeClaimFromItem } from '../cache/appStore.js';
 import { advanceQueue } from './queueService.js';
 import { applyExpirationSanction } from './trustSanctions.js';
 
-const RELEASE_INTERVAL_MS = 60_000;
-const DEADLINE_INTERVAL_MS = 5 * 60_000;
-const EVENT_STATUS_INTERVAL_MS = 5 * 60_000;
-
-/** Items already released in this process run (avoid re-broadcasting forever). */
-const releasedItemIds = new Set<string>();
-
 /**
- * Prime the released set on startup so items that are already past their
- * available_from do not emit a batch-release event at boot.
+ * True when the RAM store holds at least one queue entry with a passed
+ * pickup deadline. Pure in-memory check (never touches Neon).
  */
-async function primeReleasedItems(): Promise<void> {
-  try {
-    const res = await pool.query(
-      'SELECT id FROM items WHERE available_from IS NOT NULL AND available_from <= NOW()'
-    );
-    for (const row of res.rows) releasedItemIds.add(row.id);
-    console.log(`[Scheduler] Primed ${res.rows.length} already-released item(s).`);
-  } catch (err) {
-    console.error('[Scheduler] primeReleasedItems failed:', err);
-  }
-}
-
-/**
- * Release batches: when an item's available_from arrives, emit item_updated so
- * the frontend flips it to claimable. Runs every 60s.
- */
-export async function releaseBatches(): Promise<void> {
-  const client = await pool.connect();
-  try {
-    const res = await client.query(
-      `SELECT id FROM items
-       WHERE available_from IS NOT NULL AND available_from <= NOW()`
-    );
-
-    for (const row of res.rows) {
-      if (releasedItemIds.has(row.id)) continue;
-      releasedItemIds.add(row.id);
-      broadcastSseEvent('item_updated', {
-        itemId: row.id,
-        status: 'available',
-        reason: 'batch_released'
-      });
-      console.log(`[Scheduler] Batch released item ${row.id}`);
+export function hasOverdueDeadlinesInStore(): boolean {
+  const now = Date.now();
+  for (const item of getItems()) {
+    for (const claim of item.queue) {
+      if (claim.pickupDeadline && new Date(claim.pickupDeadline).getTime() <= now) {
+        return true;
+      }
     }
-  } catch (err) {
-    console.error('[Scheduler] releaseBatches failed:', err);
-  } finally {
-    client.release();
   }
+  return false;
 }
 
 /**
- * Verify deadlines: evict claims whose pickup_deadline passed and auto-advance
- * each affected item's queue. Runs every 5 minutes.
+ * Catch-up: evict claims whose pickup_deadline passed and auto-advance each
+ * affected item's queue (applying trust sanctions per role). Each item is
+ * processed in its own transaction. Returns the number of evicted claims.
  */
-export async function verifyDeadlines(): Promise<void> {
+export async function expireOverdueClaims(): Promise<number> {
   const client = await pool.connect();
+  let total = 0;
   try {
     const res = await client.query(
       `SELECT c.item_id, c.user_uuid, u.alias AS username, i.event_id AS event_id
@@ -142,16 +115,61 @@ export async function verifyDeadlines(): Promise<void> {
             reason: 'deadline_expired'
           });
         }
+        total += evicted.length;
         console.log(
           `[Scheduler] Deadline expiry: evicted ${evicted.length} on item ${itemId}, new first: ${newFirstUsername}`
         );
       } catch (err) {
         await client.query('ROLLBACK');
-        console.error(`[Scheduler] verifyDeadlines failed for item ${itemId}:`, err);
+        console.error(`[Scheduler] expireOverdueClaims failed for item ${itemId}:`, err);
       }
     }
   } catch (err) {
-    console.error('[Scheduler] verifyDeadlines query failed:', err);
+    console.error('[Scheduler] expireOverdueClaims query failed:', err);
+  } finally {
+    client.release();
+  }
+  return total;
+}
+
+/**
+ * Lazy catch-up hook: only touches Neon when the RAM store has overdue
+ * deadlines. Call this on activity (feed read, claim, pickup, SSE connect).
+ */
+export async function runLazyCatchUp(): Promise<number> {
+  if (!hasOverdueDeadlinesInStore()) return 0;
+  return expireOverdueClaims();
+}
+
+/**
+ * Alias kept for the optional periodic poll.
+ */
+export async function verifyDeadlines(): Promise<void> {
+  await expireOverdueClaims();
+}
+
+/**
+ * Release batches: when an item's available_from arrives, emit item_updated so
+ * the frontend flips it to claimable. Only used in the optional poll mode —
+ * the feed already computes canClaim dynamically, so this is not required for
+ * correctness.
+ */
+export async function releaseBatches(): Promise<void> {
+  const client = await pool.connect();
+  try {
+    const res = await client.query(
+      `SELECT id FROM items
+       WHERE available_from IS NOT NULL AND available_from <= NOW()`
+    );
+    for (const row of res.rows) {
+      broadcastSseEvent('item_updated', {
+        itemId: row.id,
+        status: 'available',
+        reason: 'batch_released'
+      });
+    }
+  } catch (err) {
+    console.error('[Scheduler] releaseBatches failed:', err);
   } finally {
     client.release();
   }
@@ -159,27 +177,22 @@ export async function verifyDeadlines(): Promise<void> {
 
 /**
  * Advance event lifecycle: draft -> scheduled -> active -> completed.
- * Runs every 5 minutes.
+ * Only used in the optional poll mode.
  */
 export async function updateEventStatus(): Promise<void> {
   const client = await pool.connect();
   try {
-    // draft -> scheduled: published_at is within the next day (or already passed)
     await client.query(
       `UPDATE events SET status = 'scheduled', updated_at = NOW()
        WHERE status = 'draft'
          AND published_at IS NOT NULL
          AND published_at <= NOW() + interval '1 day'`
     );
-
-    // scheduled/draft -> active: public availability window reached
     await client.query(
       `UPDATE events SET status = 'active', updated_at = NOW()
        WHERE status IN ('draft','scheduled')
          AND available_from <= NOW()`
     );
-
-    // active -> completed: no item of the event is waiting in a queue
     await client.query(
       `UPDATE events SET status = 'completed', updated_at = NOW()
        WHERE status = 'active'
@@ -196,31 +209,36 @@ export async function updateEventStatus(): Promise<void> {
 }
 
 /**
- * Start the scheduled jobs. Call once after rehydrateAll() in index.ts.
+ * Start the scheduled jobs. By default runs in LAZY mode (no polling) so Neon
+ * can autosuspend and preserve the compute allowance. Set SCHEDULER_ENABLED=true
+ * to enable the fixed-interval jobs instead.
  */
 export function startScheduler(): void {
-  primeReleasedItems().then(() => {
-    setInterval(() => {
-      releaseBatches().catch(() => {});
-    }, RELEASE_INTERVAL_MS);
-  });
+  const enabled = process.env.SCHEDULER_ENABLED === 'true';
+
+  if (!enabled) {
+    console.log(
+      '[Scheduler] LAZY MODE (default): expiración por actividad (catch-up). ' +
+        'Neon puede autosuspenderse. Para polls periódicos setea SCHEDULER_ENABLED=true.'
+    );
+    return;
+  }
+
+  const releaseSec = Math.max(parseInt(process.env.SCHEDULER_RELEASE_SEC || '300', 10), 60);
+  const deadlineMin = Math.max(parseInt(process.env.SCHEDULER_DEADLINE_MIN || '15', 10), 5);
 
   setInterval(() => {
+    releaseBatches().catch(() => {});
+  }, releaseSec * 1000);
+  setInterval(() => {
     verifyDeadlines().catch(() => {});
-  }, DEADLINE_INTERVAL_MS);
-
+  }, deadlineMin * 60 * 1000);
   setInterval(() => {
     updateEventStatus().catch(() => {});
-  }, EVENT_STATUS_INTERVAL_MS);
-
-  // Run the time-sensitive jobs once shortly after boot (no wait for first tick)
-  setTimeout(() => {
-    verifyDeadlines().catch(() => {});
-    updateEventStatus().catch(() => {});
-  }, 5000);
+  }, deadlineMin * 60 * 1000);
 
   console.log(
-    `[Scheduler] Jobs started: releaseBatches every ${RELEASE_INTERVAL_MS / 1000}s, ` +
-      `verifyDeadlines + updateEventStatus every ${DEADLINE_INTERVAL_MS / 60000} min.`
+    `[Scheduler] POLL MODE enabled: releaseBatches every ${releaseSec}s, ` +
+      `verifyDeadlines + updateEventStatus every ${deadlineMin} min.`
   );
 }

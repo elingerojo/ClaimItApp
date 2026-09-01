@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { ROLE_HIERARCHY } from '@claimitapp/shared';
 import { getItems, getLedger, getUser, getEvent, getEventMembership } from '../cache/appStore.js';
+import { runLazyCatchUp } from '../services/scheduler.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -57,6 +58,10 @@ function computeAvailability(
  */
 export const getInventoryFeed = async (req: Request, res: Response): Promise<void> => {
   try {
+    // Catch-up perezoso: resolver deadlines vencidos solo si hay actividad.
+    // Con store limpio no toca Neon (preserva el autosuspend).
+    await runLazyCatchUp();
+
     const userUuid = req.query.userUuid as string;
     let userRole = 'publico'; // Default for unauthenticated users
 

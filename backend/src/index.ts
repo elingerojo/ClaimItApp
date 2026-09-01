@@ -9,7 +9,7 @@ import { requireAdminSession } from './middleware/adminSession.js';
 import { getAuditLog } from './utils/auditLog.js';
 import { resolveSession } from './controllers/sessionController.js';
 import { createClaim, confirmPickup } from './controllers/claimsController.js';
-import { startScheduler } from './services/scheduler.js';
+import { startScheduler, runLazyCatchUp } from './services/scheduler.js';
 import { getUploadToken } from './controllers/uploadController.js';
 import { analyzeItem } from './controllers/analyzerController.js';
 import { createItem, updateItem, deleteItem } from './controllers/itemsController.js';
@@ -73,6 +73,10 @@ app.get('/api/stream', (req: Request, res: Response) => {
   res.flushHeaders(); // Establish baseline protocol layer instantly
 
   registerSseClient(res);
+
+  // Catch-up perezoso al conectar (un usuario está mirando): resuelve
+  // deadlines vencidos y avanza la cola. Solo toca Neon si hay vencidos.
+  runLazyCatchUp().catch(() => {});
 });
 
 /* ==========================================================================

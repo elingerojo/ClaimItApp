@@ -5,6 +5,7 @@ import { addClaimToItem, appendLedger, removeClaimFromItem } from '../cache/appS
 import { validateClaimInput, validateEmailFormat, validatePhoneFormat } from '@claimitapp/shared';
 import { assignPickupDeadlineToFirst, advanceQueue } from '../services/queueService.js';
 import { reduceExpirationCount } from '../services/trustSanctions.js';
+import { runLazyCatchUp } from '../services/scheduler.js';
 
 export const createClaim = async (req: Request, res: Response): Promise<void> => {
   const { itemId, userUuid, email, phone } = req.body;
@@ -38,6 +39,9 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
     });
     return;
   }
+
+  // Catch-up perezoso antes de tocar la cola
+  await runLazyCatchUp();
 
   const client = await pool.connect();
 
@@ -252,6 +256,9 @@ export const confirmPickup = async (req: Request, res: Response): Promise<void> 
     res.status(400).json({ error: 'itemId and userUuid are required.' });
     return;
   }
+
+  // Catch-up perezoso antes de confirmar recogida
+  await runLazyCatchUp();
 
   const client = await pool.connect();
 
