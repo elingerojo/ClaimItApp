@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
+import { removeClaimFromItem } from '../cache/appStore.js';
 
 export const evictClaimant = async (req: Request, res: Response): Promise<void> => {
   const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
@@ -48,6 +49,9 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
     await client.query(updateStatusQuery, [newStatus, itemId]);
 
     await client.query('COMMIT');
+
+    // Write-through: actualizar el store en RAM
+    removeClaimFromItem(itemId, userUuid, newStatus);
 
     // Log audit entry
     await logAudit({

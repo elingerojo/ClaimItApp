@@ -3,7 +3,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 
 // Import our configurations & middleware handlers
-import { registerSseClient, initializeFeedHistory } from './config/sse.js';
+import { registerSseClient } from './config/sse.js';
+import { rehydrateAll } from './cache/appStore.js';
 import { requireAdminSession } from './middleware/adminSession.js';
 import { getAuditLog } from './utils/auditLog.js';
 import { resolveSession } from './controllers/sessionController.js';
@@ -90,8 +91,8 @@ app.get('/api/admin/audit-log', requireAdminSession, async (req: Request, res: R
   });
 });
 
-// Initialize feed history from Neon, then launch the server
-initializeFeedHistory().then(() => {
+// Rehidratar el store en RAM desde Neon (única carga en frío), luego arrancar
+rehydrateAll().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀 ClaimItApp Core Server successfully listening out on port [:${PORT}]`);
   });

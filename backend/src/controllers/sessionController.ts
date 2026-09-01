@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
+import { upsertUser } from '../cache/appStore.js';
 
 /**
  * POST /api/session
@@ -41,7 +42,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
   try {
     // 1. Buscar si el alias ya existe (case-insensitive)
     const aliasResult = await pool.query(
-      'SELECT uuid, alias, email, phone FROM users WHERE LOWER(alias) = LOWER($1)',
+      'SELECT uuid, alias, email, phone, global_role FROM users WHERE LOWER(alias) = LOWER($1)',
       [cleanAlias]
     );
 
@@ -51,6 +52,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
       // 2. Alias existe — ¿coincide el UUID?
       if (existingUser.uuid === uuid) {
         // Mismo usuario, mismo alias → todo bien
+        upsertUser({ uuid: existingUser.uuid, alias: existingUser.alias, global_role: existingUser.global_role });
         res.json({
           uuid: existingUser.uuid,
           alias: existingUser.alias,
@@ -73,7 +75,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
 
     // 3. Alias no existe — ¿existe el UUID? (cambio de alias)
     const uuidResult = await pool.query(
-      'SELECT uuid, alias, email, phone FROM users WHERE uuid = $1',
+      'SELECT uuid, alias, email, phone, global_role FROM users WHERE uuid = $1',
       [uuid]
     );
 
@@ -83,6 +85,8 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
         'UPDATE users SET alias = $1, email = COALESCE($2, email), phone = COALESCE($3, phone) WHERE uuid = $4',
         [cleanAlias, email || null, phone || null, uuid]
       );
+
+      upsertUser({ uuid, alias: cleanAlias, global_role: uuidResult.rows[0].global_role });
 
       res.json({
         uuid,
@@ -110,6 +114,8 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
     if (isLegacyUser) {
       console.log(`[Session] Legacy user re-created after DB reset: uuid=${uuid}, alias=${cleanAlias}`);
     }
+
+    upsertUser({ uuid, alias: cleanAlias, global_role: 'publico' });
 
     res.status(201).json({
       uuid,

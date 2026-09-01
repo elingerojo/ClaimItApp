@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
+import { addClaimToItem, appendLedger } from '../cache/appStore.js';
 import { validateClaimInput, validateEmailFormat, validatePhoneFormat } from '@claimitapp/shared';
 
 export const createClaim = async (req: Request, res: Response): Promise<void> => {
@@ -135,6 +136,16 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
 
     // 6. Everything looks correct. Commit state payload to database.
     await client.query('COMMIT');
+
+    // 6b. Write-through: actualizar el store en RAM (mismo await)
+    addClaimToItem(itemId, { userUuid, username, claimedAt: newClaim.claimed_at }, newStatus);
+    appendLedger({
+      user_uuid: userUuid,
+      username,
+      claimed_at: newClaim.claimed_at,
+      title: item.title,
+      category: item.category
+    });
 
     // Broadcast real-time message with userUuid for precise frontend matching
     broadcastSseEvent('item_updated', {

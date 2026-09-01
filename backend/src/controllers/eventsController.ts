@@ -9,6 +9,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db.js';
 import { validateEventInput, validateInvitationCode } from '@claimitapp/shared';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
+import { getUser, upsertUser } from '../cache/appStore.js';
 import {
   ROLE_HIERARCHY,
   VALID_ROLES,
@@ -216,6 +217,14 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     );
 
     await client.query('COMMIT');
+
+    // Write-through: actualizar el rol del usuario en el store (preservando el alias)
+    const existingUser = getUser(userUuid);
+    upsertUser({
+      uuid: userUuid,
+      alias: existingUser?.alias ?? 'User_' + userUuid.slice(0, 8),
+      global_role: newRole
+    });
 
     // Log audit entry
     await logAudit({

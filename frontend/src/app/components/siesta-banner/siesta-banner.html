@@ -1,0 +1,12 @@
+<!-- Banner de siesta: aparece tras inactividad y permite despertar con un toque -->
+@if (siestaService.asleep()) {
+  <button
+    type="button"
+    (click)="siestaService.requestWake()"
+    title="La aplicación está en siesta por inactividad. Toca para despertar y actualizar todo."
+    class="fixed bottom-4 inset-x-0 mx-auto z-[90] flex items-center gap-2 rounded-full bg-gray-900/90 text-white text-xs font-medium px-5 py-3 shadow-2xl border border-white/10 hover:bg-gray-800 transition-colors w-fit"
+  >
+    <span class="text-sm">😴</span>
+    Aplicación en siesta — toca para despertar
+  </button>
+}

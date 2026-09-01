@@ -27,6 +27,8 @@ export class InventoryService implements OnDestroy {
   private readonly MAX_RETRIES = 5;
   private sseClient: EventSource | null = null;
   private pollingIntervalId: number | null = null;
+  private reconnectTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  private sseRetryTimerId: number | null = null;
 
   // Claim rate limiting (cooldown between claims per user)
   private lastClaimTime = new Map<string, number>(); // userUuid -> timestamp
@@ -53,6 +55,16 @@ export class InventoryService implements OnDestroy {
 
     const eventSource = new EventSource(`${this.apiUrl}/stream`);
     this.sseClient = eventSource;
+
+    // Al reconectarse con éxito, salir del modo polling de respaldo
+    eventSource.onopen = () => {
+      this.sseRetryCount = 0;
+      this.stopFallbackPolling();
+      if (this.sseRetryTimerId !== null) {
+        clearInterval(this.sseRetryTimerId);
+        this.sseRetryTimerId = null;
+      }
+    };
 
     // Intercept update vectors fired directly out of claims allocation procedures
     eventSource.addEventListener('item_updated', (event: MessageEvent) => {
@@ -122,6 +134,7 @@ export class InventoryService implements OnDestroy {
    * Handle SSE disconnection with exponential backoff
    * Retries up to 5 times: 1s, 2s, 4s, 8s, 16s
    * After 5 failures, activate polling fallback at 30s interval
+   * (el polling solo corre en estado despierto; la siesta lo detiene).
    */
   private handleSseError(): void {
     console.warn(
@@ -143,7 +156,8 @@ export class InventoryService implements OnDestroy {
         `[SSE] Reconnecting in ${delayMs}ms (exponential backoff attempt #${this.sseRetryCount})`
       );
 
-      setTimeout(() => {
+      this.reconnectTimeoutId = setTimeout(() => {
+        this.reconnectTimeoutId = null;
         this.initializeSseStream();
       }, delayMs);
     } else {
@@ -157,7 +171,8 @@ export class InventoryService implements OnDestroy {
 
   /**
    * Fallback polling mechanism (30s interval)
-   * Only activated if SSE fails 5+ times
+   * Only activated if SSE fails 5+ times. Mientras está activo, se reintenta
+   * SSE cada 60s para volver al streaming cuando el servidor se restaure.
    */
   private activateFallbackPolling(): void {
     if (this.pollingIntervalId !== null) {
@@ -171,6 +186,16 @@ export class InventoryService implements OnDestroy {
         console.error('[FALLBACK] Polling refresh failed:', err);
       });
     }, 30_000); // 30 seconds
+
+    // Reintentar SSE periódicamente para salir del polling cuando se restaure
+    if (this.sseRetryTimerId === null) {
+      this.sseRetryTimerId = window.setInterval(() => {
+        if (this.sseClient) return; // Ya reconectado
+        console.log('[SSE] Reintentando conexión desde fallback polling...');
+        this.sseRetryCount = 0;
+        this.initializeSseStream();
+      }, 60_000); // 60 seconds
+    }
   }
 
   /**
@@ -185,6 +210,38 @@ export class InventoryService implements OnDestroy {
   }
 
   /**
+   * Siesta: cierra SSE y detiene cualquier timer/polling pendiente para que
+   * cesen por completo los requests (Neon puede autosuspenderse).
+   */
+  enterSiesta(): void {
+    if (this.sseClient) {
+      this.sseClient.close();
+      this.sseClient = null;
+    }
+    if (this.reconnectTimeoutId !== null) {
+      clearTimeout(this.reconnectTimeoutId);
+      this.reconnectTimeoutId = null;
+    }
+    this.stopFallbackPolling();
+    if (this.sseRetryTimerId !== null) {
+      clearInterval(this.sseRetryTimerId);
+      this.sseRetryTimerId = null;
+    }
+    this.sseRetryCount = 0;
+    console.log('[SSE] Siesta: conexión y timers detenidos.');
+  }
+
+  /**
+   * Despierta: reconecta SSE y refresca los datos.
+   * /api/items se sirve desde el store en RAM (sin query a Neon salvo que
+   * Railway haya reiniciado y necesite rehidratar).
+   */
+  wake(): void {
+    this.initializeSseStream();
+    this.fetchInitialInventory();
+  }
+
+  /**
    * Cleanup on component destroy
    */
   ngOnDestroy(): void {
@@ -192,6 +249,12 @@ export class InventoryService implements OnDestroy {
       this.sseClient.close();
     }
     this.stopFallbackPolling();
+    if (this.reconnectTimeoutId !== null) {
+      clearTimeout(this.reconnectTimeoutId);
+    }
+    if (this.sseRetryTimerId !== null) {
+      clearInterval(this.sseRetryTimerId);
+    }
   }
 
   /**

@@ -3,6 +3,7 @@ import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
 import { validateItemInput } from '@claimitapp/shared';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
+import { getItems, upsertItem, removeItem } from '../cache/appStore.js';
 
 export const createItem = async (req: Request, res: Response): Promise<void> => {
   const { title, description, category, infoUrl, imageUrl } = req.body;
@@ -23,7 +24,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     const insertQuery = `
       INSERT INTO items (title, description, category, info_url, image_url)
       VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, title, description, category, info_url, image_url, status, created_at
+      RETURNING id, title, description, category, info_url, image_url, status, visibility_level, event_id, created_at
     `;
     const result = await pool.query(insertQuery, [
       title,
@@ -34,6 +35,21 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     ]);
 
     const item = result.rows[0];
+
+    // Write-through: actualizar el store en RAM
+    upsertItem({
+      id: item.id,
+      title: item.title,
+      description: item.description,
+      category: item.category,
+      infoUrl: item.info_url,
+      imageUrl: item.image_url,
+      status: item.status,
+      visibilityLevel: item.visibility_level,
+      eventId: item.event_id,
+      createdAt: item.created_at,
+      queue: []
+    });
 
     // Log audit entry
     await logAudit({
@@ -93,7 +109,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
         description = COALESCE($2, description),
         info_url = COALESCE($3, info_url)
       WHERE id = $4
-      RETURNING id, title, description, category, info_url, image_url, status, created_at
+      RETURNING id, title, description, category, info_url, image_url, status, visibility_level, event_id, created_at
     `;
     const result = await pool.query(updateQuery, [
       title || null,
@@ -108,6 +124,22 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     }
 
     const updatedItem = result.rows[0];
+
+    // Write-through: actualizar el store en RAM (preservando la cola actual)
+    const existing = getItems().find(i => i.id === updatedItem.id);
+    upsertItem({
+      id: updatedItem.id,
+      title: updatedItem.title,
+      description: updatedItem.description,
+      category: updatedItem.category,
+      infoUrl: updatedItem.info_url,
+      imageUrl: updatedItem.image_url,
+      status: updatedItem.status,
+      visibilityLevel: updatedItem.visibility_level,
+      eventId: updatedItem.event_id,
+      createdAt: updatedItem.created_at,
+      queue: existing?.queue ?? []
+    });
 
     // Log audit entry
     await logAudit({
@@ -167,6 +199,8 @@ export const deleteItem = async (req: Request, res: Response): Promise<void> => 
     }
 
     const deletedItem = result.rows[0];
+
+    removeItem(deletedItem.id); // Write-through: quitar del store en RAM
 
     // Log audit entry
     await logAudit({
