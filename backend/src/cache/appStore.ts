@@ -65,6 +65,7 @@ export interface StoreUser {
   uuid: string;
   alias: string;
   global_role: string;
+  bloqueado_apartar?: boolean;
 }
 
 export interface StoreEventMember {
@@ -72,6 +73,7 @@ export interface StoreEventMember {
   role: string;
   bonusHours: number;
   invitedBy: string | null;
+  bloqueadoInvitar?: boolean;
 }
 
 export const MAX_FEED_HISTORY = 50;
@@ -162,12 +164,14 @@ export async function rehydrateAll(): Promise<void> {
       timestamp: row.created_at
     }));
 
-    // 4. Usuarios (alias + roles) para filtrado por rol en memoria
-    const usersResult = await pool.query('SELECT uuid, alias, global_role FROM users');
+    // 4. Usuarios (alias + roles + blacklist) para filtrado por rol en memoria
+    const usersResult = await pool.query(
+      'SELECT uuid, alias, global_role, bloqueado_apartar FROM users'
+    );
     users = new Map(
       usersResult.rows.map((u: any) => [
         u.uuid,
-        { uuid: u.uuid, alias: u.alias, global_role: u.global_role }
+        { uuid: u.uuid, alias: u.alias, global_role: u.global_role, bloqueado_apartar: u.bloqueado_apartar }
       ])
     );
 
@@ -184,7 +188,8 @@ export async function rehydrateAll(): Promise<void> {
     events = new Map(eventsResult.rows.map((e: any) => [e.id, e]));
 
     const membersResult = await pool.query(
-      `SELECT event_id, user_uuid, role, bonus_hours, invited_by FROM event_members`
+      `SELECT event_id, user_uuid, role, bonus_hours, invited_by, bloqueado_invitar
+       FROM event_members`
     );
     eventMembers = new Map<string, StoreEventMember[]>();
     membersResult.rows.forEach((m: any) => {
@@ -193,7 +198,8 @@ export async function rehydrateAll(): Promise<void> {
         eventId: m.event_id,
         role: m.role,
         bonusHours: m.bonus_hours,
-        invitedBy: m.invited_by
+        invitedBy: m.invited_by,
+        bloqueadoInvitar: m.bloqueado_invitar
       });
       eventMembers.set(m.user_uuid, list);
     });

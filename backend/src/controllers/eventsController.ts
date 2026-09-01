@@ -636,6 +636,19 @@ export const getShareLink = async (req: Request, res: Response): Promise<void> =
   }
 
   try {
+    // Sanción por tolerancia: quien excedió el umbral pierde temporalmente
+    // el derecho a invitar.
+    const memberRes = await pool.query(
+      'SELECT bloqueado_invitar FROM event_members WHERE event_id = $1 AND user_uuid = $2',
+      [id, userUuid]
+    );
+    if (memberRes.rows[0]?.bloqueado_invitar) {
+      res.status(403).json({
+        error: 'Has perdido temporalmente el derecho a invitar por exceder el umbral de expiraciones.'
+      });
+      return;
+    }
+
     const inv = await pool.query(
       `SELECT code FROM event_invitations
        WHERE event_id = $1 AND role = $2 AND is_active = true`,

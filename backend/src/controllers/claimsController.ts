@@ -4,6 +4,7 @@ import { broadcastSseEvent } from '../config/sse.js';
 import { addClaimToItem, appendLedger, removeClaimFromItem } from '../cache/appStore.js';
 import { validateClaimInput, validateEmailFormat, validatePhoneFormat } from '@claimitapp/shared';
 import { assignPickupDeadlineToFirst, advanceQueue } from '../services/queueService.js';
+import { reduceExpirationCount } from '../services/trustSanctions.js';
 
 export const createClaim = async (req: Request, res: Response): Promise<void> => {
   const { itemId, userUuid, email, phone } = req.body;
@@ -43,14 +44,21 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
   try {
     await client.query('BEGIN');
 
-    // 0. Resolve current alias from users table
+    // 0. Resolve current alias from users table + blacklist check
     const userResult = await client.query(
-      'SELECT alias FROM users WHERE uuid = $1',
+      'SELECT alias, bloqueado_apartar FROM users WHERE uuid = $1',
       [userUuid]
     );
     if (userResult.rows.length === 0) {
       await client.query('ROLLBACK');
       res.status(404).json({ error: 'User not found. Please register your alias first.' });
+      return;
+    }
+    if (userResult.rows[0].bloqueado_apartar) {
+      await client.query('ROLLBACK');
+      res.status(403).json({
+        error: 'Tu cuenta está bloqueada para nuevas separaciones por exceder el umbral de expiraciones.'
+      });
       return;
     }
     const username = userResult.rows[0].alias;
@@ -251,7 +259,11 @@ export const confirmPickup = async (req: Request, res: Response): Promise<void> 
     await client.query('BEGIN');
 
     // Lock the target item row to prevent race conditions
-    await client.query('SELECT id FROM items WHERE id = $1 FOR UPDATE', [itemId]);
+    const itemLock = await client.query(
+      'SELECT id, event_id FROM items WHERE id = $1 FOR UPDATE',
+      [itemId]
+    );
+    const targetEventId = itemLock.rows[0]?.event_id ?? null;
 
     // Find the active (not picked up) claim for this user on this item
     const claimResult = await client.query(
@@ -275,6 +287,11 @@ export const confirmPickup = async (req: Request, res: Response): Promise<void> 
 
     // Auto-advance the queue: next claim (if any) becomes first with a deadline
     const { newStatus, newFirstUsername } = await advanceQueue(itemId, client);
+
+    // Tolerancia: completar a tiempo reduce el contador de expiraciones
+    if (targetEventId) {
+      await reduceExpirationCount(targetEventId, userUuid, client);
+    }
 
     await client.query('COMMIT');
 

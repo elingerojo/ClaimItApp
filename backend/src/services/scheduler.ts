@@ -17,6 +17,7 @@ import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
 import { removeClaimFromItem } from '../cache/appStore.js';
 import { advanceQueue } from './queueService.js';
+import { applyExpirationSanction } from './trustSanctions.js';
 
 const RELEASE_INTERVAL_MS = 60_000;
 const DEADLINE_INTERVAL_MS = 5 * 60_000;
@@ -78,9 +79,10 @@ export async function verifyDeadlines(): Promise<void> {
   const client = await pool.connect();
   try {
     const res = await client.query(
-      `SELECT c.item_id, c.user_uuid, u.alias AS username
+      `SELECT c.item_id, c.user_uuid, u.alias AS username, i.event_id AS event_id
        FROM claims c
        JOIN users u ON c.user_uuid = u.uuid
+       JOIN items i ON c.item_id = i.id
        WHERE COALESCE(c.picked_up, false) = false
          AND c.pickup_deadline IS NOT NULL
          AND c.pickup_deadline <= NOW()
@@ -88,13 +90,18 @@ export async function verifyDeadlines(): Promise<void> {
     );
 
     // Group expired claims by item so each item is processed in one transaction.
-    const byItem = new Map<string, Array<{ userUuid: string; username: string }>>();
+    const byItem = new Map<
+      string,
+      { eventId: string | null; users: Array<{ userUuid: string; username: string }> }
+    >();
     for (const r of res.rows) {
-      if (!byItem.has(r.item_id)) byItem.set(r.item_id, []);
-      byItem.get(r.item_id)!.push({ userUuid: r.user_uuid, username: r.username });
+      if (!byItem.has(r.item_id)) {
+        byItem.set(r.item_id, { eventId: r.event_id ?? null, users: [] });
+      }
+      byItem.get(r.item_id)!.users.push({ userUuid: r.user_uuid, username: r.username });
     }
 
-    for (const [itemId, evicted] of byItem) {
+    for (const [itemId, { eventId, users: evicted }] of byItem) {
       await client.query('BEGIN');
       try {
         await client.query('SELECT id FROM items WHERE id = $1 FOR UPDATE', [itemId]);
@@ -108,6 +115,14 @@ export async function verifyDeadlines(): Promise<void> {
         }
 
         const { newStatus, newFirstUsername } = await advanceQueue(itemId, client);
+
+        // Tolerancia a expiraciones: incrementar contador y aplicar sanción por rol
+        if (eventId) {
+          for (const u of evicted) {
+            await applyExpirationSanction(eventId, u.userUuid, client);
+          }
+        }
+
         await client.query('COMMIT');
 
         // Write-through: keep the RAM store consistent with Neon
