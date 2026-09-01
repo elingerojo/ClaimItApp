@@ -11,8 +11,9 @@
         <input
           #tokenInput
           type="password"
+          [ngModel]="adminTokenService.token()"
+          (ngModelChange)="adminTokenService.setToken($event)"
           placeholder="Ingresar X-Admin-Token"
-          (input)="adminTokenService.setToken($any($event.target).value)"
           (keydown.enter)="adminTokenService.onTokenEnter(tokenInput)"
           [class.border-green-400]="adminTokenService.tokenAccepted()"
           [class.ring-2]="adminTokenService.tokenAccepted()"

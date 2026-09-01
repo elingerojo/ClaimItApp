@@ -1,5 +1,6 @@
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { InventoryService } from '../../services/inventory';
 import { AdminTokenService } from '../../services/admin-token';
@@ -9,7 +10,7 @@ import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 @Component({
   selector: 'app-admin-manage',
   standalone: true,
-  imports: [CommonModule, RouterModule, StripAccentsPipe],
+  imports: [CommonModule, FormsModule, RouterModule, StripAccentsPipe],
   templateUrl: './admin-manage.html'
 })
 export class AdminManage {
