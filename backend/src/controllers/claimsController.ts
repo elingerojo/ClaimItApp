@@ -271,7 +271,14 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
       success: true,
       message: updatedCount === 1 ? 'Item claimed successfully!' : `Joined waitlist at spot #${updatedCount}.`,
       queuePosition: updatedCount,
-      claimId: newClaim.id
+      claimId: newClaim.id,
+      // Deadline congelado del nuevo primero en fila (F1) para feedback inmediato.
+      pickupDeadline: claimRes.rows[0]?.pickup_deadline ?? null,
+      roleAtAssignment: claimRes.rows[0]?.role_at_assignment ?? null,
+      pickupWindowHours:
+        claimRes.rows[0]?.pickup_window_hours != null
+          ? Number(claimRes.rows[0].pickup_window_hours)
+          : null
     });
 
   } catch (error) {

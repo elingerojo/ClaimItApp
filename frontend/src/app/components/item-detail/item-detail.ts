@@ -24,6 +24,8 @@ export class ItemDetail {
 
   readonly shareLink = signal<string | null>(null);
   readonly shareVisible = signal(false);
+  /** Diálogo de confirmación previa al apartado (preflight, Fase 5). */
+  readonly isConfirmingClaim = signal(false);
 
   /** Bindings de utilidades de estado de evento para la plantilla. */
   readonly eventStatusLabel = eventStatusLabel;
@@ -136,7 +138,32 @@ export class ItemDetail {
     return this.item().queue.some(q => q.userUuid === myUuid);
   }
 
+  /** ¿Al apartar este objeto quedaría PRIMERO en la fila (objeto libre)? */
+  wouldBecomeFirst(): boolean {
+    return (
+      this.userService.isAuthenticated() &&
+      !this.isUserInItemQueue() &&
+      this.item().status === 'available' &&
+      this.isAvailableForMe() &&
+      !this.isClaimsClosed()
+    );
+  }
+
   async onClaimItem(): Promise<void> {
+    if (this.wouldBecomeFirst()) {
+      this.isConfirmingClaim.set(true);
+      return;
+    }
+    await this.confirmClaim();
+  }
+
+  cancelConfirm(): void {
+    this.isConfirmingClaim.set(false);
+  }
+
+  /** Ejecuta el apartado (tras la confirmación preflight cuando aplica). */
+  async confirmClaim(): Promise<void> {
+    this.isConfirmingClaim.set(false);
     const item = this.item();
     const userUuid = this.userService.currentUuid();
     const session = this.userService.session();
@@ -149,7 +176,17 @@ export class ItemDetail {
         session?.email || null,
         session?.phone || null
       );
-      this.toastService.success(response.message || '¡Acción registrada con éxito!');
+      if (response?.queuePosition === 1 && (response.pickupDeadline || item.myPickupDeadline)) {
+        const deadline = response.pickupDeadline || item.myPickupDeadline;
+        this.toastService.success(
+          `🎉 ¡Eres primero en la fila! Recoge antes de ${new Date(deadline).toLocaleString('es-MX', {
+            dateStyle: 'medium',
+            timeStyle: 'short'
+          })}.`
+        );
+      } else {
+        this.toastService.success(response.message || '¡Acción registrada con éxito!');
+      }
       this.close();
     } catch (err: any) {
       this.toastService.error(`Error al reclamar: ${err.message}`);

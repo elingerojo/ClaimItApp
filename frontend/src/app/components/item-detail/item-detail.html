@@ -238,4 +238,44 @@
     </div>
 
   </div>
+
+  <!-- Confirmación previa al apartado (preflight, Fase 5) -->
+  @if (isConfirmingClaim()) {
+    <div class="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50"
+         (click)="$event.stopPropagation(); cancelConfirm()">
+      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4"
+           (click)="$event.stopPropagation()">
+        <div class="text-center">
+          <div class="mx-auto w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mb-3 text-2xl">⏰</div>
+          <h3 class="text-lg font-bold text-gray-900">¿Confirmas el apartado?</h3>
+        </div>
+        <p class="text-sm text-gray-600">
+          Al apartarlo serás <b>primero en la fila</b> y tendrás
+          @if (item().myPickupWindowHours) {
+            hasta <b>{{ item().myPickupWindowHours }} h</b>
+          } @else {
+            un plazo
+          }
+          @if (item().eventSummary?.pickup_deadline) {
+            (antes de {{ item().eventSummary!.pickup_deadline | date:'EEE d MMM, h:mm a' }})
+          } para recogerlo.
+        </p>
+        @if (item().myRoleInEvent) {
+          <div class="text-xs rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 text-gray-600">
+            ⚠️ {{ roleExpiryConsequence(item().myRoleInEvent) }}
+          </div>
+        }
+        <div class="flex gap-2">
+          <button (click)="cancelConfirm()"
+                  class="flex-1 text-sm border border-gray-200 rounded-xl py-3 text-gray-600 hover:bg-gray-50 transition-colors">
+            Cancelar
+          </button>
+          <button (click)="confirmClaim()"
+                  class="flex-1 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl py-3 font-medium transition-colors">
+            Sí, apartar
+          </button>
+        </div>
+      </div>
+    </div>
+  }
 </div>
