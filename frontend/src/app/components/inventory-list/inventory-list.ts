@@ -221,6 +221,20 @@ export class InventoryList {
     return item.queue.some(q => q.userUuid === myUuid);
   }
 
+  /** ¿El usuario autenticado es el primero en la fila de este objeto? */
+  isFirstInLine(item: { queue: Array<{ userUuid: string }> }): boolean {
+    const myUuid = this.userService.currentUuid();
+    return !!myUuid && item.queue.length > 0 && item.queue[0].userUuid === myUuid;
+  }
+
+  /** Posición (1-based) del usuario en la fila, o null si no está en ella. */
+  myQueuePosition(item: { queue: Array<{ userUuid: string }> }): number | null {
+    const myUuid = this.userService.currentUuid();
+    if (!myUuid) return null;
+    const idx = item.queue.findIndex(q => q.userUuid === myUuid);
+    return idx >= 0 ? idx + 1 : null;
+  }
+
   async onClaimItem(itemId: string): Promise<void> {
     const userUuid = this.userService.currentUuid();
     const session = this.userService.session();

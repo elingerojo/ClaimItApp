@@ -211,6 +211,16 @@
                 🕐 Disponible para ti a partir del {{ item.effectiveAvailableFrom | date:'EEE d MMM, h:mm a' }}
               </div>
             }
+            @if (isFirstInLine(item) && item.myPickupDeadline) {
+              <div class="mt-2 inline-block text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5">
+                ⏰ Recoge antes de {{ item.myPickupDeadline | date:'EEE d MMM, h:mm a' }}
+              </div>
+            }
+            @if (!isFirstInLine(item) && myQueuePosition(item); as pos) {
+              <div class="mt-2 inline-block text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2.5 py-0.5">
+                ⏳ En espera #{{ pos }} — si el de adelante no recoge, el turno pasa a ti
+              </div>
+            }
           </div>
 
           <div class="mt-2 pt-2 border-t border-gray-50">
