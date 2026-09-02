@@ -34,6 +34,10 @@ export interface ItemWithQueue extends Item {
   myRoleInEvent?: string;
   myPickupWindowHours?: number | null;
   myPickupDeadline?: string | null;
+  /** Apartados activos del usuario en el evento al que pertenece este objeto. */
+  activeApartadosInEvent?: number;
+  /** Límite de apartados simultáneos del rol del usuario en el evento. */
+  simultaneousLimit?: number;
   precioVisible?: number | null;
   eventSummary?: EventSummary | null;
   queue: Array<QueueEntry>;

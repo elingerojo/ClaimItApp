@@ -6,6 +6,7 @@ import { UserService } from '../../services/user';
 import { ToastService } from '../../services/toast';
 import { railwayApiUrl } from '../../app.config';
 import { eventStatusBadge, eventStatusLabel } from '../../utils/event-status';
+import { roleDisplayName, roleExpiryConsequence } from '../../utils/role-info';
 
 @Component({
   selector: 'app-item-detail',
@@ -27,6 +28,8 @@ export class ItemDetail {
   /** Bindings de utilidades de estado de evento para la plantilla. */
   readonly eventStatusLabel = eventStatusLabel;
   readonly eventStatusBadge = eventStatusBadge;
+  readonly roleDisplayName = roleDisplayName;
+  readonly roleExpiryConsequence = roleExpiryConsequence;
 
   // Tick de 1s para las cuentas regresivas en vivo (se limpia al cerrar el modal).
   private tickTimer: number | null = null;

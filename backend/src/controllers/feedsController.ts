@@ -113,11 +113,24 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
 
     const now = Date.now();
 
-    const responsePayload = getItems()
+    const itemsSnapshot = getItems();
+    // Apartados activos del usuario por evento (items del catálogo cuya cola lo
+    // contiene) — para mostrar los límites simultáneos reales por evento.
+    const activeApartadosByEvent = new Map<string, number>();
+    if (userUuid) {
+      for (const it of itemsSnapshot) {
+        if (!it.eventId || !it.queue.some((q) => q.userUuid === userUuid)) continue;
+        activeApartadosByEvent.set(it.eventId, (activeApartadosByEvent.get(it.eventId) ?? 0) + 1);
+      }
+    }
+
+    const responsePayload = itemsSnapshot
       .map(item => {
         // 1. Resolve the SINGLE effective role for this item+user.
         const { role, bonusHours } = resolveItemRole(item, userUuid || undefined, userGlobalRole);
         const roleLevel = ROLE_HIERARCHY[role] || ROLE_HIERARCHY.publico;
+        // Límite de apartados simultáneos del rol en el evento (matriz de confianza).
+        const simultaneousLimit = getTrustSetting(role)?.max_apartados_simultaneos ?? 1;
 
         // 2. Visibility by RESOLVED role (membership > global fallback).
         if (item.visibilityLevel !== null && item.visibilityLevel < roleLevel) return null;
@@ -179,6 +192,10 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
                 pickup_schedule_info: event.pickup_schedule_info ?? null
               }
             : null,
+          // Límites de apartados simultáneos del rol dentro del evento (B4)
+          activeApartadosInEvent:
+            item.eventId && userUuid ? (activeApartadosByEvent.get(item.eventId) ?? 0) : 0,
+          simultaneousLimit,
           // NUMERIC viene como string de pg; normalizar a número para la UI
           precioVisible:
             (item as any)[precioKey] != null ? Number((item as any)[precioKey]) : null,
