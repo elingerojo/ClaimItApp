@@ -48,6 +48,11 @@ export class ItemDetail {
     return this.item().canClaim !== false;
   }
 
+  /** El evento ya no acepta nuevas separaciones (closing/closed). */
+  isClaimsClosed(): boolean {
+    return this.item().claimsClosed === true;
+  }
+
   async onShare(): Promise<void> {
     const eventId = this.item().eventId;
     const userUuid = this.userService.currentUuid();

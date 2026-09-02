@@ -44,7 +44,30 @@ export interface StoreItem {
     username: string;
     claimedAt: string;
     pickupDeadline: string | null;
+    roleAtAssignment?: string | null;
+    pickupWindowHours?: number | null;
   }>;
+}
+
+export interface StoreEvent {
+  id: string;
+  owner_uuid?: string;
+  title?: string;
+  available_from: string | null;
+  published_at: string | null;
+  status: string;
+  pickup_deadline: string | null;
+  claims_close_at: string | null;
+  pickup_window_hours: number | null;
+  familiares_advance_hours: number;
+  amigos_advance_hours: number;
+  conocidos_advance_hours: number;
+  publico_advance_hours: number;
+  familiares_pickup_hours: number | null;
+  amigos_pickup_hours: number | null;
+  conocidos_pickup_hours: number | null;
+  publico_pickup_hours: number | null;
+  pickup_schedule_info?: string | null;
 }
 
 export interface LedgerEntry {
@@ -95,14 +118,21 @@ export async function rehydrateAll(): Promise<void> {
     const itemsResult = await pool.query('SELECT * FROM items ORDER BY created_at DESC');
     const claimsResult = await pool.query(
       `SELECT c.item_id, c.user_uuid, u.alias AS username, c.claimed_at,
-              c.pickup_deadline
+              c.pickup_deadline, c.role_at_assignment, c.pickup_window_hours
        FROM claims c JOIN users u ON c.user_uuid = u.uuid
        ORDER BY c.claimed_at ASC`
     );
 
     const claimsMap: Record<
       string,
-      Array<{ userUuid: string; username: string; claimedAt: string; pickupDeadline: string | null }>
+      Array<{
+        userUuid: string;
+        username: string;
+        claimedAt: string;
+        pickupDeadline: string | null;
+        roleAtAssignment: string | null;
+        pickupWindowHours: number | null;
+      }>
     > = {};
     claimsResult.rows.forEach((row: any) => {
       if (!claimsMap[row.item_id]) claimsMap[row.item_id] = [];
@@ -110,7 +140,9 @@ export async function rehydrateAll(): Promise<void> {
         userUuid: row.user_uuid,
         username: row.username,
         claimedAt: row.claimed_at,
-        pickupDeadline: row.pickup_deadline
+        pickupDeadline: row.pickup_deadline,
+        roleAtAssignment: row.role_at_assignment ?? null,
+        pickupWindowHours: row.pickup_window_hours != null ? Number(row.pickup_window_hours) : null
       });
     });
 
@@ -181,8 +213,13 @@ export async function rehydrateAll(): Promise<void> {
 
     // 6. Eventos + membresías para calcular disponibilidad efectiva en RAM
     const eventsResult = await pool.query(
-      `SELECT id, available_from, familiares_advance_hours, amigos_advance_hours,
-              conocidos_advance_hours, publico_advance_hours, status, published_at
+      `SELECT id, title, available_from, published_at, status, pickup_deadline,
+              claims_close_at, pickup_window_hours,
+              familiares_advance_hours, amigos_advance_hours,
+              conocidos_advance_hours, publico_advance_hours,
+              familiares_pickup_hours, amigos_pickup_hours,
+              conocidos_pickup_hours, publico_pickup_hours,
+              pickup_schedule_info
        FROM events`
     );
     events = new Map(eventsResult.rows.map((e: any) => [e.id, e]));
@@ -243,6 +280,8 @@ export function addClaimToItem(
     username: string;
     claimedAt: string;
     pickupDeadline: string | null;
+    roleAtAssignment?: string | null;
+    pickupWindowHours?: number | null;
   },
   newStatus: string
 ): void {
@@ -259,6 +298,34 @@ export function removeClaimFromItem(itemId: string, userUuid: string, newStatus:
   items = items.map(i => {
     if (i.id !== itemId) return i;
     return { ...i, status: newStatus, queue: i.queue.filter(q => q.userUuid !== userUuid) };
+  });
+}
+
+/**
+ * Write-through: refresh the frozen deadline / role / window of a specific
+ * queue entry (typically the new first-in-line after an advance). Keeps the
+ * RAM store consistent with the frozen values persisted in Neon.
+ */
+export function refreshClaimDeadline(
+  itemId: string,
+  userUuid: string,
+  pickupDeadline: string | null,
+  roleAtAssignment?: string | null,
+  pickupWindowHours?: number | null
+): void {
+  items = items.map(i => {
+    if (i.id !== itemId) return i;
+    const queue = i.queue.map(q =>
+      q.userUuid === userUuid
+        ? {
+            ...q,
+            pickupDeadline,
+            roleAtAssignment: roleAtAssignment ?? q.roleAtAssignment ?? null,
+            pickupWindowHours: pickupWindowHours != null ? pickupWindowHours : q.pickupWindowHours ?? null
+          }
+        : q
+    );
+    return { ...i, queue };
   });
 }
 

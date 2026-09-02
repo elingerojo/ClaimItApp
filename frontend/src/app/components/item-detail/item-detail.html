@@ -78,6 +78,23 @@
         </div>
       }
 
+      <!-- Ventana de recogida por rol (antes de comprometerse) -->
+      @if (!esPrimeroEnFila() && isAvailableForMe() && !isClaimsClosed() && item().myPickupWindowHours) {
+        <div class="mt-4 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
+          📦 Al quedar primero en la fila tendrás hasta <b>{{ item().myPickupWindowHours }} h</b> para recoger
+          @if (item().eventSummary?.pickup_deadline) {
+            (antes de {{ item().eventSummary!.pickup_deadline | date:'EEE d MMM, h:mm a' }})
+          }.
+        </div>
+      }
+
+      <!-- Evento en closing/closed -->
+      @if (isClaimsClosed()) {
+        <div class="mt-4 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 border border-red-100">
+          ⛔ Este evento ya no acepta nuevas separaciones (fase de recolección o cerrado).
+        </div>
+      }
+
       <!-- Compartir invitación (roles no-público) -->
       @if (canShare()) {
         <div class="mt-4">
@@ -99,6 +116,11 @@
           <button disabled title="Ya no se aceptan más solicitudes para este objeto. La lista de espera está completa."
                   class="w-full text-center text-sm py-3 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed border border-gray-200">
             Lista de Espera Llena
+          </button>
+        } @else if (isClaimsClosed()) {
+          <button disabled title="El evento ya no acepta nuevas separaciones."
+                  class="w-full text-center text-sm py-3 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed border border-gray-200">
+            ⛔ Separaciones cerradas
           </button>
         } @else if (!isAvailableForMe()) {
           <button disabled title="Este objeto aún no está disponible para ti según tu rol."

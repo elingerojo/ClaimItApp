@@ -138,6 +138,13 @@ export function validateInvitationCode(code: string): boolean {
 }
 
 /**
+ * Validate a pickup-hours value (per-role window suggestion: 1-720 h)
+ */
+export function validatePickupHours(hours: any): boolean {
+  return Number.isInteger(hours) && hours >= 1 && hours <= 720;
+}
+
+/**
  * Validate event creation input
  */
 export function validateEventInput(data: any): ValidationResult {
@@ -173,6 +180,19 @@ export function validateEventInput(data: any): ValidationResult {
   }
   if (data.conocidos_share_bonus !== undefined && !validateBonusHours(data.conocidos_share_bonus)) {
     errors.push('conocidos_share_bonus: must be 0-500');
+  }
+
+  // Validate per-role pickup window suggestions if provided
+  const pickupFields: Array<[string, string]> = [
+    ['familiares_pickup_hours', 'familiares_pickup_hours'],
+    ['amigos_pickup_hours', 'amigos_pickup_hours'],
+    ['conocidos_pickup_hours', 'conocidos_pickup_hours'],
+    ['publico_pickup_hours', 'publico_pickup_hours']
+  ];
+  for (const [key] of pickupFields) {
+    if (data[key] !== undefined && data[key] !== null && !validatePickupHours(data[key])) {
+      errors.push(`${key}: must be 1-720`);
+    }
   }
 
   return { valid: errors.length === 0, errors };

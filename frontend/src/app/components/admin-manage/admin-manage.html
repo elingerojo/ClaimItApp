@@ -69,12 +69,18 @@
                       <button
                         (click)="handleEviction(item.id, user.username)"
                         title="Click para remover usuario de la cola"
-                        class="flex items-center space-x-1.5 px-2 py-1 border border-gray-200 rounded-lg hover:border-red-200 hover:bg-red-50 transition-all text-left"
+                        class="flex flex-col items-start space-y-0.5 px-2 py-1 border border-gray-200 rounded-lg hover:border-red-200 hover:bg-red-50 transition-all text-left"
                       >
-                        <span class="font-medium text-gray-900">
-                          {{ idx === 0 ? '👑' : '⏳' }} &#64;{{ user.username }}
+                        <span class="flex items-center gap-1.5 font-medium text-gray-900">
+                          <span>{{ idx === 0 ? '👑' : '⏳' }} &#64;{{ user.username }}</span>
+                          <span class="text-[10px] text-gray-400 group-hover:text-red-500 font-mono">×</span>
                         </span>
-                        <span class="text-[10px] text-gray-400 group-hover:text-red-500 font-mono">×</span>
+                        @if (user.pickupDeadline) {
+                          <span class="text-[10px] text-amber-600 font-mono">
+                            ⏰ recoge antes de {{ user.pickupDeadline | date:'EEE d MMM, h:mm a' }}
+                            @if (user.roleAtAssignment) { · rol: {{ user.roleAtAssignment }} }
+                          </span>
+                        }
                       </button>
                     } @empty {
                       <span class="text-gray-400 italic">Sin reclamos activos</span>

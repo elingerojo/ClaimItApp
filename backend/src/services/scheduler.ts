@@ -10,7 +10,7 @@
  *                           so it touches Neon only when there is real work).
  *  - releaseBatches()       broadcast items whose available_from arrived.
  *  - updateEventStatus()    advance events.status (draft -> scheduled -> active
- *                           -> completed).
+ *                           -> closing -> closed).
  *
  * Lazy mode (default): no periodic polling. The catch-up runs on activity
  * (feed read, claim, pickup, SSE connect) so Neon can autosuspend when idle
@@ -22,7 +22,7 @@
  */
 import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
-import { getItems, removeClaimFromItem } from '../cache/appStore.js';
+import { getItems, refreshClaimDeadline, removeClaimFromItem } from '../cache/appStore.js';
 import { advanceQueue } from './queueService.js';
 import { applyExpirationSanction } from './trustSanctions.js';
 
@@ -87,7 +87,8 @@ export async function expireOverdueClaims(): Promise<number> {
           ]);
         }
 
-        const { newStatus, newFirstUsername } = await advanceQueue(itemId, client);
+        const { newStatus, newFirstUsername, newFirstUuid, newFirstPickupDeadline } =
+          await advanceQueue(itemId, client);
 
         // Tolerancia a expiraciones: incrementar contador y aplicar sanción por rol
         if (eventId) {
@@ -102,6 +103,9 @@ export async function expireOverdueClaims(): Promise<number> {
         for (const u of evicted) {
           removeClaimFromItem(itemId, u.userUuid, newStatus);
         }
+        if (newFirstUuid) {
+          refreshClaimDeadline(itemId, newFirstUuid, newFirstPickupDeadline ?? null);
+        }
 
         for (const u of evicted) {
           broadcastSseEvent('item_updated', {
@@ -112,6 +116,8 @@ export async function expireOverdueClaims(): Promise<number> {
             evicted: true,
             evictedUsername: u.username,
             newFirstUsername,
+            newFirstUuid,
+            newFirstPickupDeadline,
             reason: 'deadline_expired'
           });
         }
@@ -176,30 +182,38 @@ export async function releaseBatches(): Promise<void> {
 }
 
 /**
- * Advance event lifecycle: draft -> scheduled -> active -> completed.
+ * Advance event lifecycle: draft -> scheduled -> active -> closing -> closed.
  * Only used in the optional poll mode.
  */
 export async function updateEventStatus(): Promise<void> {
   const client = await pool.connect();
   try {
+    // draft -> scheduled: the event is about to be published
     await client.query(
       `UPDATE events SET status = 'scheduled', updated_at = NOW()
        WHERE status = 'draft'
          AND published_at IS NOT NULL
          AND published_at <= NOW() + interval '1 day'`
     );
+    // scheduled -> active: reservations opened (available_from reached)
     await client.query(
       `UPDATE events SET status = 'active', updated_at = NOW()
        WHERE status IN ('draft','scheduled')
          AND available_from <= NOW()`
     );
+    // active -> closing: no more new claims accepted (claims_close_at reached)
     await client.query(
-      `UPDATE events SET status = 'completed', updated_at = NOW()
+      `UPDATE events SET status = 'closing', updated_at = NOW()
        WHERE status = 'active'
-         AND NOT EXISTS (
-           SELECT 1 FROM items i
-           WHERE i.event_id = events.id AND i.status <> 'available'
-         )`
+         AND claims_close_at IS NOT NULL
+         AND claims_close_at <= NOW()`
+    );
+    // closing -> closed: pickup window over (pickup_deadline reached)
+    await client.query(
+      `UPDATE events SET status = 'closed', updated_at = NOW()
+       WHERE status IN ('active','closing')
+         AND pickup_deadline IS NOT NULL
+         AND pickup_deadline <= NOW()`
     );
   } catch (err) {
     console.error('[Scheduler] updateEventStatus failed:', err);

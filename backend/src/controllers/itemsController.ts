@@ -49,20 +49,19 @@ function computePriceSnapshot(
     const m = setting?.multiplicador_precio_default;
     return m != null ? Number(m) : DEFAULT_MULTIPLIERS[level];
   };
-  const hours = (level: string): number => {
-    const setting = getTrustSetting(level);
-    return setting?.intervalo_recoleccion_horas_default ?? 24;
-  };
-
   return {
     precio_familiar: round2(base * multiplier('familiares')),
     precio_amigo: round2(base * multiplier('amigos')),
     precio_conocido: round2(base * multiplier('conocidos')),
     precio_publico: round2(base * multiplier('publico')),
-    horas_recoleccion_familiar: hours('familiares'),
-    horas_recoleccion_amigo: hours('amigos'),
-    horas_recoleccion_conocido: hours('conocidos'),
-    horas_recoleccion_publico: hours('publico')
+    // NOTE: horas_recoleccion_* per item are DEPRECATED as the authority for
+    // the pickup window. The window is resolved per role from the EVENT
+    // (events.<rol>_pickup_hours) with the trust matrix as fallback
+    // (see queueService.resolvePickupWindow). Items no longer freeze a snapshot.
+    horas_recoleccion_familiar: null,
+    horas_recoleccion_amigo: null,
+    horas_recoleccion_conocido: null,
+    horas_recoleccion_publico: null
   };
 }
 

@@ -18,7 +18,8 @@ import {
   upsertEventMember,
   setItemEvent,
   propagateEventDates,
-  detachItemsFromEvent
+  detachItemsFromEvent,
+  getTrustSetting
 } from '../cache/appStore.js';
 import {
   VALID_ROLES,
@@ -46,13 +47,19 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     description,
     available_from,
     pickup_deadline,
+    claims_close_at,
     published_at,
     familiares_advance_hours,
     amigos_advance_hours,
     conocidos_advance_hours,
     familiares_share_bonus,
     amigos_share_bonus,
-    conocidos_share_bonus
+    conocidos_share_bonus,
+    familiares_pickup_hours,
+    amigos_pickup_hours,
+    conocidos_pickup_hours,
+    publico_pickup_hours,
+    pickup_schedule_info
   } = req.body;
   const ownerUuid = req.body.userUuid || (req as any).userUuid; // Can come from auth context
   const adminCode = (req as any).adminCode || 'system'; // If called via admin endpoint
@@ -79,6 +86,23 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     return;
   }
 
+  if (claims_close_at && new Date(claims_close_at) <= new Date(available_from)) {
+    res.status(400).json({
+      error: 'Date validation failed',
+      details: ['claims_close_at must be after available_from'],
+      timestamp: new Date().toISOString()
+    });
+    return;
+  }
+  if (claims_close_at && new Date(claims_close_at) >= new Date(pickup_deadline)) {
+    res.status(400).json({
+      error: 'Date validation failed',
+      details: ['claims_close_at must be before pickup_deadline'],
+      timestamp: new Date().toISOString()
+    });
+    return;
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -93,28 +117,46 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
+    // Seed per-role pickup hours from the trust matrix (suggestion), unless the
+    // admin provided explicit values.
+    const matrixPickup = (role: string): number | null => {
+      const s = getTrustSetting(role);
+      return s?.intervalo_recoleccion_horas_default != null
+        ? Number(s.intervalo_recoleccion_horas_default)
+        : null;
+    };
+
     // Create event (persist role advance/share-bonus configuration; fall back to
     // the DB defaults when not provided)
     const eventResult = await client.query(
-      `INSERT INTO events 
-       (owner_uuid, title, description, available_from, pickup_deadline, published_at,
+      `INSERT INTO events
+       (owner_uuid, title, description, available_from, pickup_deadline, claims_close_at,
+        published_at,
         familiares_advance_hours, amigos_advance_hours, conocidos_advance_hours,
-        familiares_share_bonus, amigos_share_bonus, conocidos_share_bonus)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-       RETURNING id, created_at`,
+        familiares_share_bonus, amigos_share_bonus, conocidos_share_bonus,
+        familiares_pickup_hours, amigos_pickup_hours, conocidos_pickup_hours,
+        publico_pickup_hours, pickup_schedule_info)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+       RETURNING *`,
       [
         ownerUuid,
         title,
         description || null,
         available_from,
         pickup_deadline,
+        claims_close_at || null,
         published_at || null,
         familiares_advance_hours ?? 72,
         amigos_advance_hours ?? 24,
         conocidos_advance_hours ?? 0,
         familiares_share_bonus ?? 6,
         amigos_share_bonus ?? 4,
-        conocidos_share_bonus ?? 2
+        conocidos_share_bonus ?? 2,
+        familiares_pickup_hours ?? matrixPickup('familiares'),
+        amigos_pickup_hours ?? matrixPickup('amigos'),
+        conocidos_pickup_hours ?? matrixPickup('conocidos'),
+        publico_pickup_hours ?? matrixPickup('publico'),
+        pickup_schedule_info || null
       ]
     );
 
@@ -142,16 +184,26 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
 
     await client.query('COMMIT');
 
-    // Write-through: keep the RAM store in sync with Neon
+    // Write-through: keep the RAM store in sync with Neon (all event fields)
+    const ev = eventResult.rows[0];
     upsertEvent({
-      id: eventId,
-      available_from,
-      published_at: published_at || null,
-      status: 'draft',
-      familiares_advance_hours: familiares_advance_hours ?? 72,
-      amigos_advance_hours: amigos_advance_hours ?? 24,
-      conocidos_advance_hours: conocidos_advance_hours ?? 0,
-      publico_advance_hours: 0
+      id: ev.id,
+      title: ev.title,
+      available_from: ev.available_from,
+      published_at: ev.published_at,
+      status: ev.status ?? 'draft',
+      pickup_deadline: ev.pickup_deadline,
+      claims_close_at: ev.claims_close_at,
+      pickup_window_hours: ev.pickup_window_hours,
+      familiares_advance_hours: ev.familiares_advance_hours,
+      amigos_advance_hours: ev.amigos_advance_hours,
+      conocidos_advance_hours: ev.conocidos_advance_hours,
+      publico_advance_hours: ev.publico_advance_hours,
+      familiares_pickup_hours: ev.familiares_pickup_hours,
+      amigos_pickup_hours: ev.amigos_pickup_hours,
+      conocidos_pickup_hours: ev.conocidos_pickup_hours,
+      publico_pickup_hours: ev.publico_pickup_hours,
+      pickup_schedule_info: ev.pickup_schedule_info ?? null
     });
     upsertEventMember(ownerUuid, { eventId, role: 'familiares', bonusHours: 0, invitedBy: ownerUuid });
 
@@ -331,13 +383,19 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
     description,
     available_from,
     pickup_deadline,
+    claims_close_at,
     published_at,
     familiares_advance_hours,
     amigos_advance_hours,
     conocidos_advance_hours,
     familiares_share_bonus,
     amigos_share_bonus,
-    conocidos_share_bonus
+    conocidos_share_bonus,
+    familiares_pickup_hours,
+    amigos_pickup_hours,
+    conocidos_pickup_hours,
+    publico_pickup_hours,
+    pickup_schedule_info
   } = req.body;
   const adminCode = (req as any).adminCode || 'system';
 
@@ -358,21 +416,28 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
          description = COALESCE($2, description),
          available_from = COALESCE($3, available_from),
          pickup_deadline = COALESCE($4, pickup_deadline),
-         published_at = COALESCE($5, published_at),
-         familiares_advance_hours = COALESCE($6, familiares_advance_hours),
-         amigos_advance_hours = COALESCE($7, amigos_advance_hours),
-         conocidos_advance_hours = COALESCE($8, conocidos_advance_hours),
-         familiares_share_bonus = COALESCE($9, familiares_share_bonus),
-         amigos_share_bonus = COALESCE($10, amigos_share_bonus),
-         conocidos_share_bonus = COALESCE($11, conocidos_share_bonus),
+         claims_close_at = COALESCE($5, claims_close_at),
+         published_at = COALESCE($6, published_at),
+         familiares_advance_hours = COALESCE($7, familiares_advance_hours),
+         amigos_advance_hours = COALESCE($8, amigos_advance_hours),
+         conocidos_advance_hours = COALESCE($9, conocidos_advance_hours),
+         familiares_share_bonus = COALESCE($10, familiares_share_bonus),
+         amigos_share_bonus = COALESCE($11, amigos_share_bonus),
+         conocidos_share_bonus = COALESCE($12, conocidos_share_bonus),
+         familiares_pickup_hours = COALESCE($13, familiares_pickup_hours),
+         amigos_pickup_hours = COALESCE($14, amigos_pickup_hours),
+         conocidos_pickup_hours = COALESCE($15, conocidos_pickup_hours),
+         publico_pickup_hours = COALESCE($16, publico_pickup_hours),
+         pickup_schedule_info = COALESCE($17, pickup_schedule_info),
          updated_at = NOW()
-       WHERE id = $12
+       WHERE id = $18
        RETURNING *`,
       [
         title ?? null,
         description ?? null,
         available_from ?? null,
         pickup_deadline ?? null,
+        claims_close_at ?? null,
         published_at ?? null,
         familiares_advance_hours ?? null,
         amigos_advance_hours ?? null,
@@ -380,6 +445,11 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
         familiares_share_bonus ?? null,
         amigos_share_bonus ?? null,
         conocidos_share_bonus ?? null,
+        familiares_pickup_hours ?? null,
+        amigos_pickup_hours ?? null,
+        conocidos_pickup_hours ?? null,
+        publico_pickup_hours ?? null,
+        pickup_schedule_info ?? null,
         id
       ]
     );
@@ -404,13 +474,22 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
     const event = upd.rows[0];
     upsertEvent({
       id: event.id,
+      title: event.title,
       available_from: event.available_from,
       published_at: event.published_at,
       status: event.status,
+      pickup_deadline: event.pickup_deadline,
+      claims_close_at: event.claims_close_at,
+      pickup_window_hours: event.pickup_window_hours,
       familiares_advance_hours: event.familiares_advance_hours,
       amigos_advance_hours: event.amigos_advance_hours,
       conocidos_advance_hours: event.conocidos_advance_hours,
-      publico_advance_hours: event.publico_advance_hours
+      publico_advance_hours: event.publico_advance_hours,
+      familiares_pickup_hours: event.familiares_pickup_hours,
+      amigos_pickup_hours: event.amigos_pickup_hours,
+      conocidos_pickup_hours: event.conocidos_pickup_hours,
+      publico_pickup_hours: event.publico_pickup_hours,
+      pickup_schedule_info: event.pickup_schedule_info ?? null
     });
     propagateEventDates(id, {
       availableFrom: event.available_from,

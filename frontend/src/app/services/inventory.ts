@@ -9,6 +9,18 @@ export interface QueueEntry {
   username: string;
   claimedAt: string;
   pickupDeadline: string | null;
+  roleAtAssignment?: string | null;
+  pickupWindowHours?: number | null;
+}
+
+export interface EventSummary {
+  id: string;
+  title: string | null;
+  status: string;
+  available_from: string;
+  claims_close_at: string | null;
+  pickup_deadline: string | null;
+  pickup_schedule_info?: string | null;
 }
 
 export interface ItemWithQueue extends Item {
@@ -18,8 +30,12 @@ export interface ItemWithQueue extends Item {
   availableFrom?: string | null;
   effectiveAvailableFrom?: string | null;
   canClaim?: boolean;
+  claimsClosed?: boolean;
+  myRoleInEvent?: string;
+  myPickupWindowHours?: number | null;
   myPickupDeadline?: string | null;
   precioVisible?: number | null;
+  eventSummary?: EventSummary | null;
   queue: Array<QueueEntry>;
 }
 
@@ -108,6 +124,8 @@ export class InventoryService implements OnDestroy {
         pickedUp?: boolean;
         evictedUsername?: string;
         newFirstUsername?: string;
+        newFirstUuid?: string;
+        newFirstPickupDeadline?: string | null;
         reason?: string;
         pickupDeadline?: string | null;
       };
@@ -150,6 +168,16 @@ export class InventoryService implements OnDestroy {
                 }
               ];
             }
+          }
+
+          // When the queue advanced, refresh the frozen deadline of the new first
+          // in line so claimant + admin read the same value locally.
+          if (updateData.newFirstUuid && updateData.newFirstPickupDeadline !== undefined) {
+            updatedQueue = updatedQueue.map(q =>
+              q.userUuid === updateData.newFirstUuid
+                ? { ...q, pickupDeadline: updateData.newFirstPickupDeadline ?? null }
+                : q
+            );
           }
 
           return {

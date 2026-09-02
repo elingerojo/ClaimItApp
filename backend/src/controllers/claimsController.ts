@@ -1,7 +1,12 @@
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
-import { addClaimToItem, appendLedger, removeClaimFromItem } from '../cache/appStore.js';
+import {
+  addClaimToItem,
+  appendLedger,
+  refreshClaimDeadline,
+  removeClaimFromItem
+} from '../cache/appStore.js';
 import { validateClaimInput, validateEmailFormat, validatePhoneFormat } from '@claimitapp/shared';
 import { assignPickupDeadlineToFirst, advanceQueue } from '../services/queueService.js';
 import { reduceExpirationCount } from '../services/trustSanctions.js';
@@ -104,6 +109,35 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
+    // 2a. Ciclo de vida del evento: en closing (claims_close_at) o closed
+    //     (pickup_deadline) ya no se aceptan claims nuevos.
+    if (item.event_id) {
+      const evRes = await client.query(
+        `SELECT status, claims_close_at, pickup_deadline
+         FROM events WHERE id = $1`,
+        [item.event_id]
+      );
+      const ev = evRes.rows[0];
+      if (ev) {
+        const nowMs = Date.now();
+        const closeAt = ev.claims_close_at ? new Date(ev.claims_close_at).getTime() : null;
+        const pickupAt = ev.pickup_deadline ? new Date(ev.pickup_deadline).getTime() : null;
+        const claimsClosed =
+          ev.status === 'closed' ||
+          ev.status === 'closing' ||
+          (closeAt !== null && closeAt <= nowMs) ||
+          (pickupAt !== null && pickupAt <= nowMs);
+        if (claimsClosed) {
+          await client.query('ROLLBACK');
+          res.status(409).json({
+            error:
+              'El evento ya no acepta nuevas separaciones (fase de recolección o cerrado).'
+          });
+          return;
+        }
+      }
+    }
+
     // 2b. Límite de apartados simultáneos por rol dentro del mismo evento
     if (item.event_id) {
       const memberRes = await client.query(
@@ -192,8 +226,9 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
     await client.query('COMMIT');
 
     // 6b. Write-through: actualizar el store en RAM (mismo await)
-    const deadlineRes = await pool.query(
-      'SELECT pickup_deadline FROM claims WHERE item_id = $1 AND user_uuid = $2',
+    const claimRes = await pool.query(
+      `SELECT pickup_deadline, role_at_assignment, pickup_window_hours
+       FROM claims WHERE item_id = $1 AND user_uuid = $2`,
       [itemId, userUuid]
     );
     addClaimToItem(
@@ -202,7 +237,12 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
         userUuid,
         username,
         claimedAt: newClaim.claimed_at,
-        pickupDeadline: deadlineRes.rows[0]?.pickup_deadline ?? null
+        pickupDeadline: claimRes.rows[0]?.pickup_deadline ?? null,
+        roleAtAssignment: claimRes.rows[0]?.role_at_assignment ?? null,
+        pickupWindowHours:
+          claimRes.rows[0]?.pickup_window_hours != null
+            ? Number(claimRes.rows[0].pickup_window_hours)
+            : null
       },
       newStatus
     );
@@ -223,7 +263,8 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
       queuePosition: updatedCount,
       title: item.title,
       category: item.category,
-      claimedAt: newClaim.claimed_at
+      claimedAt: newClaim.claimed_at,
+      pickupDeadline: claimRes.rows[0]?.pickup_deadline ?? null
     });
 
     res.status(201).json({
@@ -293,7 +334,10 @@ export const confirmPickup = async (req: Request, res: Response): Promise<void> 
     ]);
 
     // Auto-advance the queue: next claim (if any) becomes first with a deadline
-    const { newStatus, newFirstUsername } = await advanceQueue(itemId, client);
+    const { newStatus, newFirstUsername, newFirstUuid, newFirstPickupDeadline } = await advanceQueue(
+      itemId,
+      client
+    );
 
     // Tolerancia: completar a tiempo reduce el contador de expiraciones
     if (targetEventId) {
@@ -302,8 +346,12 @@ export const confirmPickup = async (req: Request, res: Response): Promise<void> 
 
     await client.query('COMMIT');
 
-    // Write-through: remove the picked-up user from the RAM store queue
+    // Write-through: remove the picked-up user from the RAM store queue and
+    // refresh the frozen deadline of the new first-in-line (if any).
     removeClaimFromItem(itemId, userUuid, newStatus);
+    if (newFirstUuid) {
+      refreshClaimDeadline(itemId, newFirstUuid, newFirstPickupDeadline ?? null);
+    }
 
     // Broadcast with pickup context
     broadcastSseEvent('item_updated', {
@@ -313,6 +361,8 @@ export const confirmPickup = async (req: Request, res: Response): Promise<void> 
       username: claim.username,
       pickedUp: true,
       newFirstUsername,
+      newFirstUuid,
+      newFirstPickupDeadline,
       reason: 'pickup_confirmed'
     });
 
@@ -320,7 +370,8 @@ export const confirmPickup = async (req: Request, res: Response): Promise<void> 
       success: true,
       message: 'Pickup confirmed. Queue advanced.',
       newStatus,
-      newFirstUsername
+      newFirstUsername,
+      newFirstPickupDeadline
     });
   } catch (error) {
     await client.query('ROLLBACK');

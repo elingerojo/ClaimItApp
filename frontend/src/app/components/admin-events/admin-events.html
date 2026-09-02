@@ -36,7 +36,8 @@
           <input [(ngModel)]="title" type="text" placeholder="Título del evento *" class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
           <input [(ngModel)]="ownerUuid" type="text" placeholder="Owner UUID (del anfitrión) *" class="text-xs px-3 py-2 border border-gray-200 rounded-lg font-mono" />
           <input [(ngModel)]="availableFrom" type="datetime-local" placeholder="Disponible desde *" class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
-          <input [(ngModel)]="pickupDeadline" type="datetime-local" placeholder="Fecha límite de recogida *" class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
+          <input [(ngModel)]="claimsCloseAt" type="datetime-local" placeholder="Corte de claims (inicia closing)" title="Fecha a la que dejan de aceptarse nuevas separaciones e inicia la fase closing." class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
+          <input [(ngModel)]="pickupDeadline" type="datetime-local" placeholder="Fecha límite de recogida *" title="Fin del closing: último momento para recoger." class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
           <input [(ngModel)]="publishedAt" type="datetime-local" placeholder="Publicado en (opcional)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
           <textarea [(ngModel)]="description" placeholder="Descripción (opcional)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg"></textarea>
         </div>
@@ -48,6 +49,13 @@
           <label class="text-[10px] text-gray-500">Amig. bonus (h)<input [(ngModel)]="amigosShare" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
           <label class="text-[10px] text-gray-500">Conc. bonus (h)<input [(ngModel)]="conocidosShare" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
         </div>
+        <div class="grid grid-cols-4 gap-3">
+          <label class="text-[10px] text-gray-500">Fam. recogida (h)<input [(ngModel)]="familiaresPickup" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
+          <label class="text-[10px] text-gray-500">Amig. recogida (h)<input [(ngModel)]="amigosPickup" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
+          <label class="text-[10px] text-gray-500">Conc. recogida (h)<input [(ngModel)]="conocidosPickup" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
+          <label class="text-[10px] text-gray-500">Púb. recogida (h)<input [(ngModel)]="publicoPickup" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
+        </div>
+        <p class="text-[10px] text-gray-400">💡 Los campos de recogida por rol son sugerencias editables (ventana para el primero en fila); el deadline se clampa entre la apertura del evento y su fecha límite de recogida.</p>
         <button (click)="submitCreate()" [disabled]="saving()" class="text-xs px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
           {{ saving() ? 'Creando...' : 'Crear Evento' }}
         </button>

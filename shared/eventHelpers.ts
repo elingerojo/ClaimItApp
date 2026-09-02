@@ -30,6 +30,41 @@ export const ROLE_HIERARCHY: RoleHierarchy = {
 export const VALID_ROLES = Object.keys(ROLE_HIERARCHY);
 
 /**
+ * Event lifecycle states (final set):
+ * draft -> scheduled (published) -> active (available_from) ->
+ * closing (claims_close_at) -> closed (pickup_deadline).
+ */
+export const EVENT_STATUSES = ['draft', 'scheduled', 'active', 'closing', 'closed'] as const;
+
+/**
+ * Per-role pickup window column name on `events` for a given role.
+ * Example: resolvePickupHoursField('amigos') -> 'amigos_pickup_hours'
+ */
+export function resolvePickupHoursField(role: string): string | null {
+  const field = {
+    familiares: 'familiares_pickup_hours',
+    amigos: 'amigos_pickup_hours',
+    conocidos: 'conocidos_pickup_hours',
+    publico: 'publico_pickup_hours'
+  } as const;
+  return (field as Record<string, string>)[role] ?? null;
+}
+
+/**
+ * Single source of truth for a user's role within an event context.
+ * Priority: membership role in that event, then the GLOBAL role as fallback
+ * (a global friend sees friend-level items in any event even without an
+ * invitation). Resolves the "visibility vs membership" inconsistency: the same
+ * role is used for visibility, price and availability.
+ */
+export function resolveEffectiveRole(
+  membershipRole: string | null | undefined,
+  globalRole: string | null | undefined
+): string {
+  return membershipRole || globalRole || 'publico';
+}
+
+/**
  * Calculate effective availability for a user in an event
  * considering their role's advance_hours + bonus_hours from referrals
  */

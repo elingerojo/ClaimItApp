@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
-import { removeClaimFromItem } from '../cache/appStore.js';
+import { refreshClaimDeadline, removeClaimFromItem } from '../cache/appStore.js';
 import { advanceQueue } from '../services/queueService.js';
 
 export const evictClaimant = async (req: Request, res: Response): Promise<void> => {
@@ -41,12 +41,18 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
     const remainingCount = countResult.rows[0].active_count;
 
     // Auto-advance the queue: recompute status + assign deadline to the new first
-    const { newStatus, newFirstUsername } = await advanceQueue(itemId, client);
+    const { newStatus, newFirstUsername, newFirstUuid, newFirstPickupDeadline } = await advanceQueue(
+      itemId,
+      client
+    );
 
     await client.query('COMMIT');
 
-    // Write-through: actualizar el store en RAM
+    // Write-through: actualizar el store en RAM + refrescar deadline del nuevo primero
     removeClaimFromItem(itemId, userUuid, newStatus);
+    if (newFirstUuid) {
+      refreshClaimDeadline(itemId, newFirstUuid, newFirstPickupDeadline ?? null);
+    }
 
     // Log audit entry
     await logAudit({
@@ -73,6 +79,8 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
       evicted: true,
       evictedUsername: username,
       newFirstUsername,
+      newFirstUuid,
+      newFirstPickupDeadline,
       queuePosition: remainingCount,
       reason: 'manual_evict'
     });

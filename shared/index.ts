@@ -15,6 +15,7 @@ export {
   validateRoleLevel,
   validateAdvanceHours,
   validateBonusHours,
+  validatePickupHours,
   validateInvitationCode,
   validateEventInput
 } from './validators.js';
@@ -29,7 +30,10 @@ export {
   generateInvitationCode,
   validateEventDates,
   ROLE_HIERARCHY,
-  VALID_ROLES
+  VALID_ROLES,
+  EVENT_STATUSES,
+  resolvePickupHoursField,
+  resolveEffectiveRole
 } from './eventHelpers.js';
 
 export type {

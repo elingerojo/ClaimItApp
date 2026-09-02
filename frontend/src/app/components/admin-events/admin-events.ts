@@ -62,6 +62,7 @@ export class AdminEvents {
   readonly description = signal('');
   readonly availableFrom = signal('');
   readonly pickupDeadline = signal('');
+  readonly claimsCloseAt = signal('');
   readonly publishedAt = signal('');
   readonly familiaresAdvance = signal<number>(72);
   readonly amigosAdvance = signal<number>(24);
@@ -69,6 +70,10 @@ export class AdminEvents {
   readonly familiaresShare = signal<number>(6);
   readonly amigosShare = signal<number>(4);
   readonly conocidosShare = signal<number>(2);
+  readonly familiaresPickup = signal<number | null>(48);
+  readonly amigosPickup = signal<number | null>(36);
+  readonly conocidosPickup = signal<number | null>(24);
+  readonly publicoPickup = signal<number | null>(12);
 
   readonly roleLabels: Record<string, string> = {
     familiares: '👨‍👩‍👧‍👦 Familiares',
@@ -128,13 +133,18 @@ export class AdminEvents {
           description: this.description() || null,
           available_from: new Date(this.availableFrom()).toISOString(),
           pickup_deadline: new Date(this.pickupDeadline()).toISOString(),
+          claims_close_at: this.claimsCloseAt() ? new Date(this.claimsCloseAt()).toISOString() : null,
           published_at: this.publishedAt() ? new Date(this.publishedAt()).toISOString() : null,
           familiares_advance_hours: this.familiaresAdvance(),
           amigos_advance_hours: this.amigosAdvance(),
           conocidos_advance_hours: this.conocidosAdvance(),
           familiares_share_bonus: this.familiaresShare(),
           amigos_share_bonus: this.amigosShare(),
-          conocidos_share_bonus: this.conocidosShare()
+          conocidos_share_bonus: this.conocidosShare(),
+          familiares_pickup_hours: this.familiaresPickup() ?? null,
+          amigos_pickup_hours: this.amigosPickup() ?? null,
+          conocidos_pickup_hours: this.conocidosPickup() ?? null,
+          publico_pickup_hours: this.publicoPickup() ?? null
         })
       });
       const data = await res.json();
@@ -145,7 +155,18 @@ export class AdminEvents {
       this.description.set('');
       this.availableFrom.set('');
       this.pickupDeadline.set('');
+      this.claimsCloseAt.set('');
       this.publishedAt.set('');
+      this.familiaresAdvance.set(72);
+      this.amigosAdvance.set(24);
+      this.conocidosAdvance.set(0);
+      this.familiaresShare.set(6);
+      this.amigosShare.set(4);
+      this.conocidosShare.set(2);
+      this.familiaresPickup.set(48);
+      this.amigosPickup.set(36);
+      this.conocidosPickup.set(24);
+      this.publicoPickup.set(12);
       await this.loadEvents();
     } catch (err: any) {
       this.toastService.error(`Error: ${err.message}`);
