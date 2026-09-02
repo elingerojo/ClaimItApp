@@ -67,6 +67,15 @@ export class InventoryList {
   // Estado de carga para el botón Guardar
   readonly isSaving = signal(false);
 
+  /**
+   * Modo edición de identidad ("Cambiar Alias").
+   * Al activarlo NO se borra claimit_uuid del localStorage: conservar el UUID
+   * mantiene la identidad y por tanto los apartados previos (comparados por
+   * userUuid) siguen visibles, y el servidor toma la ruta de UPDATE (no crea
+   * un usuario nuevo ni devuelve databaseReset).
+   */
+  readonly isEditingIdentity = signal(false);
+
   constructor() {
     // Detectar cambios de tamaño de ventana en tiempo real
     if (typeof window !== 'undefined') {
@@ -199,8 +208,27 @@ export class InventoryList {
   }
 
   /**
+   * Abre el modo edición de identidad ("Cambiar Alias").
+   * NO borra claimit_uuid del localStorage: conserva el UUID (identidad) y por
+   * tanto los apartados previos; el guardado posterior toma la ruta UPDATE en
+   * el servidor (sin databaseReset ni alta de usuario nuevo).
+   */
+  beginAliasEdit(): void {
+    this.isEditingIdentity.set(true);
+  }
+
+  /**
+   * Cancela el modo edición de identidad y regresa al badge de sesión.
+   */
+  cancelAliasEdit(): void {
+    this.isEditingIdentity.set(false);
+  }
+
+  /**
    * Guarda los datos del usuario resolviendo la sesión contra el servidor.
    * Si hay conflicto de alias, muestra el diálogo correspondiente.
+   * Con la identidad conservada (mismo UUID) el servidor actualiza el alias en
+   * lugar de crear un usuario nuevo, así que no se emite databaseReset.
    */
   async onSaveSession(aliasInput: HTMLInputElement, emailInput: HTMLInputElement, phoneInput: HTMLInputElement): Promise<void> {
     const alias = aliasInput.value.trim();
@@ -219,7 +247,7 @@ export class InventoryList {
       const result = await this.userService.resolveSession(alias, email, phone);
 
       if (result.conflict && result.storedUuid && result.storedAlias) {
-        // Mostrar diálogo de conflicto
+        // Mostrar diálogo de conflicto; se mantiene el modo edición abierto
         this.conflictData.set({
           alias: result.storedAlias,
           storedUuid: result.storedUuid,
@@ -228,11 +256,19 @@ export class InventoryList {
           phone
         });
         this.conflictDialogVisible.set(true);
-      } else if (result.databaseReset) {
-        // BD fue reiniciada desde la última visita del usuario
+        return;
+      }
+
+      // Éxito: sesión resuelta (con el mismo UUID si el usuario ya existía).
+      // Cerrar el modo edición y refrescar para reflejar el alias en las colas.
+      this.isEditingIdentity.set(false);
+
+      if (result.databaseReset) {
+        // BD fue reiniciada desde la última visita del usuario (caso real de migración)
         this.toastService.info('La base de datos ha sido reiniciada desde tu última visita. Tus apartados anteriores ya no existen, pero tu identidad se ha conservado. ¡Bienvenido de nuevo!');
       }
-      // Si success normal, el UserService ya actualizó el signal
+
+      this.inventoryService.refresh().catch(() => {});
     } catch (err: any) {
       this.toastService.error(`Error: ${err.message}`);
     } finally {
@@ -249,6 +285,8 @@ export class InventoryList {
 
     this.userService.acceptServerUuid(data.storedUuid, data.storedAlias, data.email, data.phone);
     this.confirmDialogHidden();
+    this.isEditingIdentity.set(false);
+    this.inventoryService.refresh().catch(() => {});
   }
 
   /**
@@ -285,22 +323,25 @@ export class InventoryList {
     this.isSaving.set(true);
     this.confirmDialogHidden();
 
-    for (let n = 2; n <= 9; n++) {
-      const tocayoAlias = `${baseAlias}-tocayo-${n}`;
-      try {
+    try {
+      for (let n = 2; n <= 9; n++) {
+        const tocayoAlias = `${baseAlias}-tocayo-${n}`;
         const result = await this.userService.resolveSession(tocayoAlias, email, phone);
         if (result.success) {
           // Alias tocayo aceptado
+          this.isEditingIdentity.set(false);
+          this.inventoryService.refresh().catch(() => {});
           return;
         }
-        if (!result.conflict) return; // Error no esperado, salir
-      } catch {
-        break; // Error de red, salir
+        if (!result.conflict) break; // Error no esperado, salir
       }
-    }
 
-    // Si llegamos aquí, todos los tocayo-2..9 están ocupados
-    this.toastService.error(`El alias "${baseAlias}" y sus variantes tocayo están ocupados. Por favor elige un alias completamente diferente.`);
-    this.isSaving.set(false);
+      // Si llegamos aquí, todos los tocayo-2..9 están ocupados
+      this.toastService.error(`El alias "${baseAlias}" y sus variantes tocayo están ocupados. Por favor elige un alias completamente diferente.`);
+    } catch {
+      // Error de red: salir dejando el modo edición abierto para reintentar
+    } finally {
+      this.isSaving.set(false);
+    }
   }
 }

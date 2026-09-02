@@ -275,6 +275,41 @@ export function upsertUser(u: StoreUser): void {
   users.set(u.uuid, u);
 }
 
+/**
+ * Renombra el alias de un usuario en todo el store en RAM: colas de items,
+ * ledger y mapa de usuarios. Es el write-through del UPDATE de alias en Neon.
+ * Devuelve los itemIds donde el usuario tiene un claim (por si el emisor quiere
+ * notificar por SSE por item), aunque el broadcast suele ser un evento único.
+ */
+export function renameUserInStore(userUuid: string, newAlias: string): string[] {
+  const affectedItemIds: string[] = [];
+
+  items = items.map(i => {
+    let changed = false;
+    const queue = i.queue.map(q => {
+      if (q.userUuid === userUuid && q.username !== newAlias) {
+        changed = true;
+        return { ...q, username: newAlias };
+      }
+      return q;
+    });
+    if (changed) {
+      affectedItemIds.push(i.id);
+      return { ...i, queue };
+    }
+    return i;
+  });
+
+  ledger = ledger.map(l =>
+    l.user_uuid === userUuid && l.username !== newAlias ? { ...l, username: newAlias } : l
+  );
+
+  const u = users.get(userUuid);
+  if (u) users.set(userUuid, { ...u, alias: newAlias });
+
+  return affectedItemIds;
+}
+
 export function upsertEvent(evt: any): void {
   events.set(evt.id, evt);
 }

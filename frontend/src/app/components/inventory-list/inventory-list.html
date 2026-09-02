@@ -14,15 +14,26 @@
     </div>
     
     <div class="mt-4 md:mt-0 p-4 bg-gray-100 rounded-xl border border-gray-200">
-      @if (!userService.isAuthenticated()) {
+      @if (!userService.isAuthenticated() || isEditingIdentity()) {
         <div class="flex flex-col sm:flex-row gap-2">
-          <span>Para identificar tu lista de separados, ingresa un nombre distintivo</span>
-          <input #aliasInput type="text" placeholder="Apodo o alias (ej: JuanP)" title="Elige un apodo o alias único para identificar tus selecciones y mantener tu misma lista de objetos en futuras sesiones. No uses tu nombre real si prefieres privacidad." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
-          <input #emailInput type="email" placeholder="Correo (Opcional)" title="Opcional. Solo se usaría para notificarte si alguien más reclama un objeto que apartaste pero no has recogido. Es decir, solo para recordarte recogerlo para que no te lo ganen. No se comparte el correo a nadie." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
-          <input #phoneInput type="text" placeholder="Teléfono (Opcional)" title="Opcional. Solo se usaría para enviar un mensaje si alguien más reclama un objeto que apartaste pero no has recogido. Es decir, solo para recordarte recogerlo para que no te lo ganen. No se comparte el número a nadie." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
+          <span>
+            @if (isEditingIdentity()) {
+              Actualiza tu alias o datos de contacto — tus apartados se conservan
+            } @else {
+              Para identificar tu lista de separados, ingresa un nombre distintivo
+            }
+          </span>
+          <input #aliasInput type="text" placeholder="Apodo o alias (ej: JuanP)" [value]="isEditingIdentity() ? userService.currentUsername() : ''" title="Elige un apodo o alias único para identificar tus selecciones y mantener tu misma lista de objetos en futuras sesiones. No uses tu nombre real si prefieres privacidad." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
+          <input #emailInput type="email" placeholder="Correo (Opcional)" [value]="isEditingIdentity() ? (userService.session()?.email || '') : ''" title="Opcional. Solo se usaría para notificarte si alguien más reclama un objeto que apartaste pero no has recogido. Es decir, solo para recordarte recogerlo para que no te lo ganen. No se comparte el correo a nadie." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
+          <input #phoneInput type="text" placeholder="Teléfono (Opcional)" [value]="isEditingIdentity() ? (userService.session()?.phone || '') : ''" title="Opcional. Solo se usaría para enviar un mensaje si alguien más reclama un objeto que apartaste pero no has recogido. Es decir, solo para recordarte recogerlo para que no te lo ganen. No se comparte el número a nadie." class="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
           <button (click)="onSaveSession(aliasInput, emailInput, phoneInput)" [disabled]="isSaving()" title="Guarda tu alias y datos de contacto en tu navegador para poder apartar objetos." class="text-xs bg-gray-900 text-white px-4 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors disabled:opacity-50">
             {{ isSaving() ? 'Guardando...' : 'Guardar Datos' }}
           </button>
+          @if (isEditingIdentity()) {
+            <button (click)="cancelAliasEdit()" title="Descarta los cambios y conserva tu alias actual" class="text-xs bg-white border border-gray-300 text-gray-600 px-4 py-2 rounded-lg font-medium hover:bg-gray-50 transition-colors">
+              Cancelar
+            </button>
+          }
         </div>
       } @else {
         <div class="flex items-center justify-between gap-4 text-xs">
@@ -33,7 +44,7 @@
               {{ userService.currentRole() }}
             </span>
           </div>
-          <button (click)="userService.clearSession()" title="Cambia a un alias diferente o actualiza tus datos de contacto. Tus apartados anteriores se conservan." class="text-[10px] text-red-500 hover:underline font-medium">
+          <button (click)="beginAliasEdit()" title="Cambia a un alias diferente o actualiza tus datos de contacto. Tus apartados anteriores se conservan." class="text-[10px] text-red-500 hover:underline font-medium">
             Cambiar Alias
           </button>
         </div>

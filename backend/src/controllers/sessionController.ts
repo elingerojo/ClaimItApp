@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
-import { upsertUser } from '../cache/appStore.js';
+import { upsertUser, renameUserInStore } from '../cache/appStore.js';
+import { broadcastSseEvent } from '../config/sse.js';
 
 /**
  * POST /api/session
@@ -51,13 +52,22 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
 
       // 2. Alias existe — ¿coincide el UUID?
       if (existingUser.uuid === uuid) {
-        // Mismo usuario, mismo alias → todo bien
+        // Mismo usuario, mismo alias → todo bien.
+        // Caso A1: si el cliente reenvía correo/teléfono (p. ej. editar solo el
+        // contacto desde "Cambiar Alias" sin cambiar el alias), persistirlos.
+        await pool.query(
+          'UPDATE users SET email = COALESCE($2, email), phone = COALESCE($3, phone) WHERE uuid = $1',
+          [existingUser.uuid, email || null, phone || null]
+        );
+        const persistedEmail = email || existingUser.email;
+        const persistedPhone = phone || existingUser.phone;
+
         upsertUser({ uuid: existingUser.uuid, alias: existingUser.alias, global_role: existingUser.global_role });
         res.json({
           uuid: existingUser.uuid,
           alias: existingUser.alias,
-          email: existingUser.email,
-          phone: existingUser.phone,
+          email: persistedEmail,
+          phone: persistedPhone,
           globalRole: existingUser.global_role,
           isNew: false
         });
@@ -81,13 +91,25 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
     );
 
     if (uuidResult.rows.length > 0) {
-      // El UUID ya existe pero con diferente alias → actualizar alias
+      const isAliasChange = uuidResult.rows[0].alias !== cleanAlias;
+
+      // El UUID ya existe (cambio de alias / edición de contacto) → UPDATE.
+      // Mantener el MISMO UUID es lo que conserva los apartados (userUuid).
       await pool.query(
         'UPDATE users SET alias = $1, email = COALESCE($2, email), phone = COALESCE($3, phone) WHERE uuid = $4',
         [cleanAlias, email || null, phone || null, uuid]
       );
 
       upsertUser({ uuid, alias: cleanAlias, global_role: uuidResult.rows[0].global_role });
+
+      // Si el alias cambió, propagarlo a las colas existentes (claims.username
+      // en Neon + store RAM) y notificar por SSE para que todos los clientes
+      // muestren el nuevo vanity name.
+      if (isAliasChange) {
+        await pool.query('UPDATE claims SET username = $1 WHERE user_uuid = $2', [cleanAlias, uuid]);
+        renameUserInStore(uuid, cleanAlias);
+        broadcastSseEvent('user_renamed', { userUuid: uuid, alias: cleanAlias });
+      }
 
       res.json({
         uuid,

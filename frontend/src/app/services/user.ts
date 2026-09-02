@@ -87,8 +87,12 @@ export class UserService {
    *   { conflict: true, storedUuid, ... } → alias ocupado por otro UUID
    */
   async resolveSession(alias: string, email: string | null, phone: string | null): Promise<SessionResult> {
-    const uuid = this.getOrCreateUuid();
+    // IMPORTANTE: leer isFromSession ANTES de generar/persistir un UUID nuevo.
+    // getOrCreateUuid() escribe claimit_uuid en localStorage si no existía, por lo
+    // que leerlo después haría que este flag fuera SIEMPRE true (y el servidor
+    // respondería databaseReset en todo alta de usuario nuevo → letrero falso).
     const isFromSession = this.getIsFromSession();
+    const uuid = this.getOrCreateUuid();
 
     try {
       const response = await fetch(`${this.apiUrl}/session`, {

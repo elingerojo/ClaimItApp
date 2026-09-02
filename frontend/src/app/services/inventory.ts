@@ -177,6 +177,22 @@ export class InventoryService implements OnDestroy {
       );
     });
 
+    // Cambio de vanity name (alias): actualiza el alias mostrado en las colas de
+    // todos los items, sin necesidad de re-fetch completo.
+    eventSource.addEventListener('user_renamed', (event: MessageEvent) => {
+      this.sseRetryCount = 0; // Reset counter on successful event
+      const renameData = JSON.parse(event.data) as { userUuid: string; alias: string };
+      if (!renameData.userUuid || !renameData.alias) return;
+      this.itemsSignal.update(currentItems =>
+        currentItems.map(item => ({
+          ...item,
+          queue: item.queue.map(q =>
+            q.userUuid === renameData.userUuid ? { ...q, username: renameData.alias } : q
+          )
+        }))
+      );
+    });
+
     eventSource.onerror = () => {
       this.handleSseError();
     };
