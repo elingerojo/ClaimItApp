@@ -37,6 +37,26 @@
         }
       </div>
 
+      <!-- Contexto de evento (Fase 1) -->
+      @if (item().eventSummary; as ev) {
+        <div class="mt-2 rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-xs text-indigo-900">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-500">📅 Evento</span>
+            <span [class]="'shrink-0 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ' + eventStatusBadge(ev.status)">{{ eventStatusLabel(ev.status) }}</span>
+          </div>
+          <div class="mt-0.5 font-bold text-sm text-gray-900">{{ ev.title }}</div>
+          <div class="mt-0.5 text-indigo-800/90">
+            Reservas desde <b>{{ ev.available_from | date:'EEE d MMM, h:mm a' }}</b>
+            @if (ev.pickup_deadline) {
+              <span class="mx-1">·</span> Última recogida <b>{{ ev.pickup_deadline | date:'EEE d MMM, h:mm a' }}</b>
+            }
+          </div>
+          @if (ev.pickup_schedule_info) {
+            <div class="mt-1 text-indigo-800/80">📦 {{ ev.pickup_schedule_info }}</div>
+          }
+        </div>
+      }
+
       <!-- Title -->
       <h2 class="text-xl font-bold text-gray-900">{{ item().title }}</h2>
 

@@ -100,6 +100,42 @@
     }
   </div>
 
+  <!-- Contexto de evento (Fase 1) -->
+  @if (eventContexts().length === 1) {
+    <div class="rounded-2xl border p-4 space-y-1.5"
+         [class]="eventContexts()[0].status === 'closing' ? 'border-amber-200 bg-amber-50' : eventContexts()[0].status === 'closed' ? 'border-red-200 bg-red-50' : 'border-indigo-100 bg-indigo-50/70'">
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-lg" aria-hidden="true">📅</span>
+        <span class="flex-1 font-bold text-gray-900 truncate">{{ eventContexts()[0].title }}</span>
+        <span [class]="'shrink-0 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ' + eventStatusBadge(eventContexts()[0].status)">{{ eventStatusLabel(eventContexts()[0].status) }}</span>
+      </div>
+      <div class="text-xs text-gray-600">
+        Reservas desde <b>{{ eventContexts()[0].available_from | date:'EEE d MMM, h:mm a' }}</b>
+        @if (eventContexts()[0].pickup_deadline) {
+          <span class="mx-1">·</span> Última recogida <b>{{ eventContexts()[0].pickup_deadline | date:'EEE d MMM, h:mm a' }}</b>
+        }
+      </div>
+      @if (eventContexts()[0].pickup_schedule_info) {
+        <div class="text-[11px] text-gray-500">📦 {{ eventContexts()[0].pickup_schedule_info }}</div>
+      }
+    </div>
+  } @else if (eventContexts().length > 1) {
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">{{ 'Evento:' | stripAccents }}</span>
+      <button (click)="selectEvent(null)"
+              [class]="selectedEventId() === null ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'"
+              class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">Todos</button>
+      @for (ev of eventContexts(); track ev.id) {
+        <button (click)="selectEvent(selectedEventId() === ev.id ? null : ev.id)"
+                [title]="'Reservas desde ' + (ev.available_from | date:'medium') + (ev.pickup_deadline ? ' · Última recogida ' + (ev.pickup_deadline | date:'medium') : '')"
+                [class]="selectedEventId() === ev.id ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'"
+                class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+          {{ ev.title }} <span class="opacity-70">({{ ev.count }})</span>
+        </button>
+      }
+    </div>
+  }
+
   <!-- Barra de paginación superior -->
   @if (filteredItems().length > pageSize()) {
     <div class="flex items-center justify-between pt-2 border-t border-gray-100">
@@ -162,6 +198,9 @@
                    class="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5 shrink-0 ml-1">Ver Info Externa ↗</a>
               }
             </div>
+            @if (item.eventSummary) {
+              <span class="inline-flex text-[10px] font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full mb-1">📅 {{ item.eventSummary.title }}</span>
+            }
             <h2 class="text-sm font-bold text-gray-900 line-clamp-1">{{ item.title }}</h2>
             @if (item.precioVisible != null) {
               <div class="text-sm font-extrabold text-gray-900 mt-0.5">${{ item.precioVisible }}</div>

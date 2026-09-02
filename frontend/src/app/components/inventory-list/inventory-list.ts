@@ -1,11 +1,12 @@
 import { Component, signal, computed, inject, effect } from '@angular/core';
 import { CommonModule, NgOptimizedImage } from '@angular/common';
-import { InventoryService, ItemWithQueue } from '../../services/inventory';
+import { InventoryService, ItemWithQueue, EventSummary } from '../../services/inventory';
 import { UserService } from '../../services/user';
 import { ToastService } from '../../services/toast';
 import { ItemCategory, ItemStatus } from '@claimitapp/shared';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { ItemDetail } from '../item-detail/item-detail';
+import { eventStatusBadge, eventStatusLabel } from '../../utils/event-status';
 
 @Component({
   selector: 'app-inventory-list',
@@ -42,6 +43,30 @@ export class InventoryList {
   readonly activeCategory = signal<string>('All');
   readonly activeStatus = signal<string>('All');
   readonly showOnlyMyClaims = signal<boolean>(false);
+
+  // ---- Contexto de evento (Fase 1): derivado del feed (eventSummary por item) ----
+  /** Eventos presentes en el catálogo con su resumen y nº de objetos. */
+  readonly eventContexts = computed(() => {
+    const byId = new Map<string, EventSummary & { count: number }>();
+    for (const item of this.inventoryService.items()) {
+      const ev = item.eventSummary;
+      if (!ev) continue;
+      const prev = byId.get(ev.id);
+      if (prev) prev.count += 1;
+      else byId.set(ev.id, { ...ev, count: 1 });
+    }
+    return [...byId.values()];
+  });
+  /** Evento seleccionado como filtro (null = todos). */
+  readonly selectedEventId = signal<string | null>(null);
+  /** Bindings de utilidades de estado de evento para la plantilla. */
+  readonly eventStatusLabel = eventStatusLabel;
+  readonly eventStatusBadge = eventStatusBadge;
+
+  selectEvent(id: string | null): void {
+    this.selectedEventId.set(id);
+    this.currentPage.set(1);
+  }
 
   // Clases Tailwind para el badge de rol del usuario
   readonly roleBadgeClass = computed(() => {
@@ -91,6 +116,7 @@ export class InventoryList {
       this.activeCategory();
       this.activeStatus();
       this.showOnlyMyClaims();
+      this.selectedEventId();
       this.currentPage.set(1);
     });
 
@@ -134,6 +160,12 @@ export class InventoryList {
     const myUuid = this.userService.currentUuid();
     
     let list = this.inventoryService.items();
+
+    // 0. Filtro por evento (Fase 1): si hay un evento seleccionado, solo sus objetos.
+    const eventFilter = this.selectedEventId();
+    if (eventFilter) {
+      list = list.filter(item => item.eventSummary?.id === eventFilter);
+    }
 
     // 1. Filtrado Prioritario: Mis elegidos (comparado por userUuid)
     if (onlyMyClaims && myUuid) {

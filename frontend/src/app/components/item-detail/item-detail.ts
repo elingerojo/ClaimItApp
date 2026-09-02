@@ -5,6 +5,7 @@ import { InventoryService, ItemWithQueue } from '../../services/inventory';
 import { UserService } from '../../services/user';
 import { ToastService } from '../../services/toast';
 import { railwayApiUrl } from '../../app.config';
+import { eventStatusBadge, eventStatusLabel } from '../../utils/event-status';
 
 @Component({
   selector: 'app-item-detail',
@@ -22,6 +23,10 @@ export class ItemDetail {
 
   readonly shareLink = signal<string | null>(null);
   readonly shareVisible = signal(false);
+
+  /** Bindings de utilidades de estado de evento para la plantilla. */
+  readonly eventStatusLabel = eventStatusLabel;
+  readonly eventStatusBadge = eventStatusBadge;
 
   close(): void {
     this.onClose()();
