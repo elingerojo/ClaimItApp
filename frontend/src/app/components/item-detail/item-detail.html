@@ -68,8 +68,81 @@
       <!-- Full description (not truncated) -->
       <p class="text-sm text-gray-600 mt-3">{{ item().description || 'Sin descripción adicional.' }}</p>
 
+      <!-- Línea de tiempo del objeto para el usuario actual (Fase 3) -->
+      <div class="mt-5 pt-4 border-t border-gray-100 space-y-2">
+        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider">{{ 'Tu línea de tiempo:' | stripAccents }}</div>
+
+        <!-- Paso 1: disponibilidad para ti -->
+        <div class="flex items-start gap-2 text-xs text-gray-700">
+          <span class="mt-0.5 shrink-0">{{ isAvailableForMe() ? '✅' : (item().claimsClosed ? '⛔' : '🕐') }}</span>
+          <div>
+            @if (isAvailableForMe()) {
+              <b>Ya está disponible para ti.</b>
+            } @else if (item().claimsClosed) {
+              <b>El evento ya cerró las separaciones.</b>
+            } @else if (item().effectiveAvailableFrom) {
+              <b>Abre para ti el {{ item().effectiveAvailableFrom | date:'EEE d MMM, h:mm a' }}</b>
+              @if (countdown(item().effectiveAvailableFrom)) {
+                <span class="ml-1 font-mono text-purple-600">({{ countdown(item().effectiveAvailableFrom) }})</span>
+              }
+            } @else {
+              <b>Aún no está disponible para ti.</b>
+            }
+          </div>
+        </div>
+
+        <!-- Paso 2: eres primero en fila → tu deadline con cuenta regresiva -->
+        @if (esPrimeroEnFila() && item().myPickupDeadline) {
+          <div class="flex items-start gap-2 text-xs rounded-lg bg-amber-50 border border-amber-100 px-2.5 py-2">
+            <span class="mt-0.5 shrink-0">⏰</span>
+            <div>
+              <div><b>Eres primero en fila.</b> Recoge antes de
+                <b>{{ item().myPickupDeadline | date:'EEE d MMM, h:mm a' }}</b>.</div>
+              @if (countdown(item().myPickupDeadline)) {
+                <div class="mt-0.5 font-mono font-bold text-amber-700">⏳ Faltan {{ countdown(item().myPickupDeadline) }}</div>
+              }
+              <div class="mt-0.5 text-amber-700/80">Si no recoges a tiempo pierdes el objeto y afecta tu confianza en este evento.</div>
+            </div>
+          </div>
+        }
+
+        <!-- Paso 2b: estás en espera (posición 2+) -->
+        @if (!esPrimeroEnFila() && myWaitPosition(); as pos) {
+          <div class="flex items-start gap-2 text-xs rounded-lg bg-blue-50 border border-blue-100 px-2.5 py-2">
+            <span class="mt-0.5 shrink-0">⏳</span>
+            <div>
+              <div><b>Estás en espera (posición #{{ pos }}).</b></div>
+              <div class="mt-0.5">
+                @if (item().myPickupWindowHours) {
+                  Si quien está adelante no recoge, el turno pasa a ti y tendrás hasta
+                  <b>{{ item().myPickupWindowHours }} h</b>
+                  @if (item().eventSummary?.pickup_deadline) {
+                    (antes de {{ item().eventSummary!.pickup_deadline | date:'EEE d MMM, h:mm a' }})
+                  } para recogerlo.
+                } @else {
+                  Si quien está adelante no recoge, el turno pasa a ti.
+                }
+              </div>
+            </div>
+          </div>
+        }
+
+        <!-- Paso 3: fin global del evento -->
+        @if (item().eventSummary?.pickup_deadline; as evEnd) {
+          <div class="flex items-start gap-2 text-xs text-gray-600">
+            <span class="mt-0.5 shrink-0">🏁</span>
+            <div>
+              El evento cierra la recolección el <b>{{ evEnd | date:'EEE d MMM, h:mm a' }}</b>.
+              @if (item().claimsClosed) {
+                Ya no se aceptan nuevas separaciones.
+              }
+            </div>
+          </div>
+        }
+      </div>
+
       <!-- Queue / Waitlist -->
-      <div class="mt-5 pt-4 border-t border-gray-100">
+      <div class="mt-4 pt-4 border-t border-gray-100">
         <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">{{ 'Línea de Espera:' | stripAccents }}</div>
         <div class="flex flex-wrap gap-1.5">
           @for (claimer of item().queue; track claimer.userUuid; let idx = $index) {
@@ -90,30 +163,6 @@
           }
         </div>
       </div>
-
-      <!-- Deadline de recogida (primer en fila) -->
-      @if (esPrimeroEnFila() && item().myPickupDeadline) {
-        <div class="mt-4 text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2 border border-amber-100">
-          ⏰ Tienes hasta <b>{{ item().myPickupDeadline | date:'EEE d MMM, h:mm a' }}</b> para recoger.
-        </div>
-      }
-
-      <!-- Ventana de recogida por rol (antes de comprometerse) -->
-      @if (!esPrimeroEnFila() && isAvailableForMe() && !isClaimsClosed() && item().myPickupWindowHours) {
-        <div class="mt-4 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
-          📦 Al quedar primero en la fila tendrás hasta <b>{{ item().myPickupWindowHours }} h</b> para recoger
-          @if (item().eventSummary?.pickup_deadline) {
-            (antes de {{ item().eventSummary!.pickup_deadline | date:'EEE d MMM, h:mm a' }})
-          }.
-        </div>
-      }
-
-      <!-- Evento en closing/closed -->
-      @if (isClaimsClosed()) {
-        <div class="mt-4 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 border border-red-100">
-          ⛔ Este evento ya no acepta nuevas separaciones (fase de recolección o cerrado).
-        </div>
-      }
 
       <!-- Compartir invitación (roles no-público) -->
       @if (canShare()) {

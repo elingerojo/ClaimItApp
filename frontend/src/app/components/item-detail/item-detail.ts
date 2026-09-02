@@ -1,4 +1,4 @@
-import { Component, input, inject, signal } from '@angular/core';
+import { Component, input, inject, signal, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { InventoryService, ItemWithQueue } from '../../services/inventory';
@@ -27,6 +27,45 @@ export class ItemDetail {
   /** Bindings de utilidades de estado de evento para la plantilla. */
   readonly eventStatusLabel = eventStatusLabel;
   readonly eventStatusBadge = eventStatusBadge;
+
+  // Tick de 1s para las cuentas regresivas en vivo (se limpia al cerrar el modal).
+  private tickTimer: number | null = null;
+  readonly now = signal(Date.now());
+
+  ngOnInit(): void {
+    if (typeof window === 'undefined') return;
+    this.tickTimer = window.setInterval(() => this.now.set(Date.now()), 1000);
+  }
+
+  ngOnDestroy(): void {
+    if (this.tickTimer !== null) {
+      window.clearInterval(this.tickTimer);
+      this.tickTimer = null;
+    }
+  }
+
+  /** Cuenta regresiva legible hacia `target` (ISO), o '' si no aplica o ya venció. */
+  countdown(target: string | null | undefined): string {
+    if (!target) return '';
+    const diff = new Date(target).getTime() - this.now();
+    if (diff <= 0) return '';
+    const totalMin = Math.floor(diff / 60000);
+    const days = Math.floor(totalMin / 1440);
+    const hours = Math.floor((totalMin % 1440) / 60);
+    const minutes = totalMin % 60;
+    const seconds = Math.floor((diff % 60000) / 1000);
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+    return `${minutes}m ${seconds}s`;
+  }
+
+  /** Posición (1-based) del usuario en la cola, o null si no está. */
+  myWaitPosition(): number | null {
+    const myUuid = this.userService.currentUuid();
+    if (!myUuid) return null;
+    const idx = this.item().queue.findIndex(q => q.userUuid === myUuid);
+    return idx >= 0 ? idx + 1 : null;
+  }
 
   close(): void {
     this.onClose()();
