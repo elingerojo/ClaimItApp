@@ -124,6 +124,7 @@ coverage
 .env
 .env.*
 license.txt
+database/.db-snapshot.json
 exports
 .strapi
 dist

@@ -6,5 +6,12 @@
     "backend",
     "frontend",
     "shared"
-  ]
+  ],
+  "scripts": {
+    "db:snapshot": "node scripts/db-snapshot.js database/.db-snapshot.json",
+    "db:orphans": "node scripts/db-orphan-blobs.js database/.db-snapshot.json plans/orphan-blobs.txt",
+    "db:reset": "node scripts/db-reset.js --yes",
+    "db:seed": "node scripts/db-seed.js",
+    "db:validate": "node scripts/db-validate.js"
+  }
 }
