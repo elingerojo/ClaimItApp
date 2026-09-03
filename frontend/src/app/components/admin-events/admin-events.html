@@ -135,12 +135,12 @@
                           <input [value]="inviteUrl(inv.code)" readonly
                                  class="flex-1 min-w-0 text-[9px] font-mono px-1.5 py-1 bg-white border border-gray-200 rounded-md" />
                           <button (click)="copyInviteLink(inv.code)" title="Copiar enlace completo"
-                                  class="shrink-0 text-xs text-gray-500 hover:text-gray-800 px-1">📋</button>
+                                  class="shrink-0 text-md text-gray-500 hover:text-gray-800 px-1">📋</button>
                           <button (click)="shareInviteLink(inv.code)" title="Compartir enlace"
-                                  class="shrink-0 text-xs text-gray-500 hover:text-gray-800 px-1">📤</button>
+                                  class="shrink-0 text-md text-gray-500 hover:text-gray-800 px-1">📤</button>
                           <a [href]="whatsAppInviteUrl(inv.code)" target="_blank" rel="noopener"
                              title="Enviar por WhatsApp"
-                             class="shrink-0 text-xs text-gray-500 hover:text-gray-800 px-1">💬</a>
+                             class="shrink-0 text-md text-gray-500 hover:text-gray-800 px-1">💬</a>
                         </div>
                       </div>
                     }
