@@ -37,118 +37,158 @@
         }
       </div>
 
-      <!-- Contexto de evento (Fase 1) -->
-      @if (item().eventSummary; as ev) {
-        <div class="mt-2 rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-xs text-indigo-900">
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-500">📅 Evento</span>
-            <span [class]="'shrink-0 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ' + eventStatusBadge(ev.status)">{{ eventStatusLabel(ev.status) }}</span>
-          </div>
-          <div class="mt-0.5 font-bold text-sm text-gray-900">{{ ev.title }}</div>
-          <div class="mt-0.5 text-indigo-800/90">
-            Reservas desde <b>{{ ev.available_from | dateEs }}</b>
-            @if (ev.pickup_deadline) {
-              <span class="mx-1">·</span> Última recogida <b>{{ ev.pickup_deadline | dateEs }}</b>
-            }
-          </div>
-          @if (ev.pickup_schedule_info) {
-            <div class="mt-1 text-indigo-800/80">📦 {{ ev.pickup_schedule_info }}</div>
-          }
-        </div>
-      }
-
-      <!-- Title -->
-      <h2 class="text-xl font-bold text-gray-900">{{ item().title }}</h2>
-
-      <!-- Precio según el nivel del usuario -->
-      @if (item().precioVisible != null) {
-        <div class="mt-1 text-xl font-extrabold text-gray-900">${{ item().precioVisible }}</div>
-      }
-
-      <!-- Full description (not truncated) -->
-      <p class="text-sm text-gray-600 mt-3">{{ item().description || 'Sin descripción adicional.' }}</p>
-
-      <!-- Línea de tiempo del objeto para el usuario actual (Fase 3) -->
-      <div class="mt-5 pt-4 border-t border-gray-100 space-y-2">
-        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider">{{ 'Tu línea de tiempo:' | stripAccents }}</div>
-
-        <!-- Paso 1: disponibilidad para ti -->
-        <div class="flex items-start gap-2 text-xs text-gray-700">
-          <span class="mt-0.5 shrink-0">{{ isAvailableForMe() ? '✅' : (item().claimsClosed ? '⛔' : '🕐') }}</span>
-          <div>
-            @if (isAvailableForMe()) {
-              <b>Ya está disponible para ti.</b>
-            } @else if (item().claimsClosed) {
-              <b>El evento ya cerró las separaciones.</b>
-            } @else if (item().effectiveAvailableFrom) {
-              <b>Abre para ti el {{ item().effectiveAvailableFrom | dateEs }}</b>
-              @if (countdown(item().effectiveAvailableFrom)) {
-                <span class="ml-1 font-mono text-purple-600">({{ countdown(item().effectiveAvailableFrom) }})</span>
-              }
-            } @else {
-              <b>Aún no está disponible para ti.</b>
-            }
-          </div>
-        </div>
-
-        <!-- Paso 2: eres primero en fila → tu deadline con cuenta regresiva -->
-        @if (esPrimeroEnFila() && item().myPickupDeadline) {
-          <div class="flex items-start gap-2 text-xs rounded-lg bg-amber-50 border border-amber-100 px-2.5 py-2">
-            <span class="mt-0.5 shrink-0">⏰</span>
-            <div>
-              <div><b>Eres primero en fila.</b> Recoge antes de
-                <b>{{ item().myPickupDeadline | dateEs }}</b>.</div>
-              @if (countdown(item().myPickupDeadline)) {
-                <div class="mt-0.5 font-mono font-bold text-amber-700">⏳ Faltan {{ countdown(item().myPickupDeadline) }}</div>
-              }
-              <div class="mt-0.5 text-amber-700/80">Si no recoges a tiempo pierdes el objeto y afecta tu confianza en este evento.</div>
-            </div>
-          </div>
-        }
-
-        <!-- Paso 2b: estás en espera (posición 2+) -->
-        @if (!esPrimeroEnFila() && myWaitPosition(); as pos) {
-          <div class="flex items-start gap-2 text-xs rounded-lg bg-blue-50 border border-blue-100 px-2.5 py-2">
-            <span class="mt-0.5 shrink-0">⏳</span>
-            <div>
-              <div><b>Estás en espera (posición #{{ pos }}).</b></div>
-              <div class="mt-0.5">
-                @if (item().myPickupWindowHours) {
-                  Si quien está adelante no recoge, el turno pasa a ti y tendrás hasta
-                  <b>{{ item().myPickupWindowHours }} h</b>
-                  @if (item().eventSummary?.pickup_deadline) {
-                    (antes de {{ item().eventSummary!.pickup_deadline | dateEs }})
-                  } para recogerlo.
-                } @else {
-                  Si quien está adelante no recoge, el turno pasa a ti.
-                }
-              </div>
-            </div>
-          </div>
-        }
-
-        <!-- Paso 3: fin global del evento -->
-        @if (item().eventSummary?.pickup_deadline; as evEnd) {
-          <div class="flex items-start gap-2 text-xs text-gray-600">
-            <span class="mt-0.5 shrink-0">🏁</span>
-            <div>
-              El evento cierra la recolección el <b>{{ evEnd | dateEs }}</b>.
-              @if (item().claimsClosed) {
-                Ya no se aceptan nuevas separaciones.
-              }
-            </div>
-          </div>
-        }
+      <!-- Pestañas de detalle: Datos | Tiempos | Condiciones -->
+      <div class="mt-3 flex gap-1 rounded-lg bg-gray-100 p-1" role="tablist" aria-label="Detalles del objeto">
+        <button type="button" role="tab" [attr.aria-selected]="activeTab() === 'datos'"
+                (click)="selectTab('datos')"
+                [class]="activeTab() === 'datos' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'"
+                class="flex-1 rounded-md py-1.5 text-xs font-bold uppercase tracking-wider transition-colors">
+          Datos
+        </button>
+        <button type="button" role="tab" [attr.aria-selected]="activeTab() === 'tiempos'"
+                (click)="selectTab('tiempos')"
+                [class]="activeTab() === 'tiempos' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'"
+                class="flex-1 rounded-md py-1.5 text-xs font-bold uppercase tracking-wider transition-colors">
+          Tiempos
+        </button>
+        <button type="button" role="tab" [attr.aria-selected]="activeTab() === 'condiciones'"
+                (click)="selectTab('condiciones')"
+                [class]="activeTab() === 'condiciones' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'"
+                class="flex-1 rounded-md py-1.5 text-xs font-bold uppercase tracking-wider transition-colors">
+          Condiciones
+        </button>
       </div>
 
-      <!-- Límites y consecuencias por rol (Fase 4) -->
-      @if (userService.isAuthenticated() && item().eventSummary && item().myRoleInEvent) {
-        <div class="mt-4 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 space-y-1 text-xs text-gray-600">
-          <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{{ 'Tus límites y compromiso:' | stripAccents }}</div>
-          <div>🗂️ Apartados activos en este evento: <b>{{ item().activeApartadosInEvent ?? 0 }} de {{ item().simultaneousLimit ?? 1 }}</b> (rol {{ roleDisplayName(item().myRoleInEvent) }}).</div>
-          <div>⚠️ {{ roleExpiryConsequence(item().myRoleInEvent) }}</div>
-        </div>
-      }
+      <!-- Área de pestañas: alto fijo (referencia = 'Datos'); los demás tabs hacen scroll interno si exceden -->
+      <div #tabBody role="tabpanel"
+           [style.minHeight.px]="minTabAreaHeight"
+           [style.height.px]="tabAreaHeight()"
+           class="mt-3 overflow-y-auto">
+        @switch (activeTab()) {
+          @case ('datos') {
+            <!-- Datos: Contexto de evento, Título, Precio, Descripción completa -->
+            @if (item().eventSummary; as ev) {
+              <div class="rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-xs text-indigo-900">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-500">📅 Evento</span>
+                  <span [class]="'shrink-0 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ' + eventStatusBadge(ev.status)">{{ eventStatusLabel(ev.status) }}</span>
+                </div>
+                <div class="mt-0.5 font-bold text-sm text-gray-900">{{ ev.title }}</div>
+                <div class="mt-0.5 text-indigo-800/90">
+                  Reservas desde <b>{{ ev.available_from | dateEs }}</b>
+                  @if (ev.pickup_deadline) {
+                    <span class="mx-1">·</span> Última recogida <b>{{ ev.pickup_deadline | dateEs }}</b>
+                  }
+                </div>
+                @if (ev.pickup_schedule_info) {
+                  <div class="mt-1 text-indigo-800/80">📦 {{ ev.pickup_schedule_info }}</div>
+                }
+              </div>
+            }
+
+            <!-- Título -->
+            <h2 class="text-xl font-bold text-gray-900">{{ item().title }}</h2>
+
+            <!-- Precio según el nivel del usuario -->
+            @if (item().precioVisible != null) {
+              <div class="mt-1 text-xl font-extrabold text-gray-900">${{ item().precioVisible }}</div>
+            }
+
+            <!-- Descripción completa (sin truncar) -->
+            <p class="mt-3 text-sm text-gray-600">{{ item().description || 'Sin descripción adicional.' }}</p>
+          }
+
+          @case ('tiempos') {
+            <!-- Tiempos: línea de tiempo del objeto para el usuario actual (Fase 3) -->
+            <div class="space-y-2">
+              <div class="text-xs font-bold text-gray-400 uppercase tracking-wider">{{ 'Tu línea de tiempo:' | stripAccents }}</div>
+
+              <!-- Paso 1: disponibilidad para ti -->
+              <div class="flex items-start gap-2 text-xs text-gray-700">
+                <span class="mt-0.5 shrink-0">{{ isAvailableForMe() ? '✅' : (item().claimsClosed ? '⛔' : '🕐') }}</span>
+                <div>
+                  @if (isAvailableForMe()) {
+                    <b>Ya está disponible para ti.</b>
+                  } @else if (item().claimsClosed) {
+                    <b>El evento ya cerró las separaciones.</b>
+                  } @else if (item().effectiveAvailableFrom) {
+                    <b>Abre para ti el {{ item().effectiveAvailableFrom | dateEs }}</b>
+                    @if (countdown(item().effectiveAvailableFrom)) {
+                      <span class="ml-1 font-mono text-purple-600">({{ countdown(item().effectiveAvailableFrom) }})</span>
+                    }
+                  } @else {
+                    <b>Aún no está disponible para ti.</b>
+                  }
+                </div>
+              </div>
+
+              <!-- Paso 2: eres primero en fila → tu deadline con cuenta regresiva -->
+              @if (esPrimeroEnFila() && item().myPickupDeadline) {
+                <div class="flex items-start gap-2 text-xs rounded-lg bg-amber-50 border border-amber-100 px-2.5 py-2">
+                  <span class="mt-0.5 shrink-0">⏰</span>
+                  <div>
+                    <div><b>Eres primero en fila.</b> Recoge antes de
+                      <b>{{ item().myPickupDeadline | dateEs }}</b>.</div>
+                    @if (countdown(item().myPickupDeadline)) {
+                      <div class="mt-0.5 font-mono font-bold text-amber-700">⏳ Faltan {{ countdown(item().myPickupDeadline) }}</div>
+                    }
+                    <div class="mt-0.5 text-amber-700/80">Si no recoges a tiempo pierdes el objeto y afecta tu confianza en este evento.</div>
+                  </div>
+                </div>
+              }
+
+              <!-- Paso 2b: estás en espera (posición 2+) -->
+              @if (!esPrimeroEnFila() && myWaitPosition(); as pos) {
+                <div class="flex items-start gap-2 text-xs rounded-lg bg-blue-50 border border-blue-100 px-2.5 py-2">
+                  <span class="mt-0.5 shrink-0">⏳</span>
+                  <div>
+                    <div><b>Estás en espera (posición #{{ pos }}).</b></div>
+                    <div class="mt-0.5">
+                      @if (item().myPickupWindowHours) {
+                        Si quien está adelante no recoge, el turno pasa a ti y tendrás hasta
+                        <b>{{ item().myPickupWindowHours }} h</b>
+                        @if (item().eventSummary?.pickup_deadline) {
+                          (antes de {{ item().eventSummary!.pickup_deadline | dateEs }})
+                        } para recogerlo.
+                      } @else {
+                        Si quien está adelante no recoge, el turno pasa a ti.
+                      }
+                    </div>
+                  </div>
+                </div>
+              }
+
+              <!-- Paso 3: fin global del evento -->
+              @if (item().eventSummary?.pickup_deadline; as evEnd) {
+                <div class="flex items-start gap-2 text-xs text-gray-600">
+                  <span class="mt-0.5 shrink-0">🏁</span>
+                  <div>
+                    El evento cierra la recolección el <b>{{ evEnd | dateEs }}</b>.
+                    @if (item().claimsClosed) {
+                      Ya no se aceptan nuevas separaciones.
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          }
+
+          @case ('condiciones') {
+            <!-- Condiciones: límites y consecuencias por rol (Fase 4) -->
+            @if (hasLimits()) {
+              <div class="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 space-y-1 text-xs text-gray-600">
+                <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{{ 'Tus límites y compromiso:' | stripAccents }}</div>
+                <div>🗂️ Apartados activos en este evento: <b>{{ item().activeApartadosInEvent ?? 0 }} de {{ item().simultaneousLimit ?? 1 }}</b> (rol {{ roleDisplayName(item().myRoleInEvent) }}).</div>
+                <div>⚠️ {{ roleExpiryConsequence(item().myRoleInEvent) }}</div>
+              </div>
+            } @else {
+              <div class="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 text-xs text-gray-500 italic">
+                No hay condiciones adicionales para tu rol.
+              </div>
+            }
+          }
+        }
+      </div>
 
       <!-- Queue / Waitlist -->
       <div class="mt-4 pt-4 border-t border-gray-100">

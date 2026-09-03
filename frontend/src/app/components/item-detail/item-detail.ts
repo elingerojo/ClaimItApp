@@ -1,4 +1,15 @@
-import { Component, input, inject, signal, OnInit, OnDestroy } from '@angular/core';
+import {
+  Component,
+  input,
+  inject,
+  signal,
+  OnInit,
+  OnDestroy,
+  ElementRef,
+  viewChild,
+  effect,
+  afterNextRender
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
@@ -15,6 +26,9 @@ import {
   tryNativeShare,
   buildWhatsAppInviteUrl
 } from '../../utils/invite-share';
+
+/** Pestañas disponibles en el detalle del objeto. */
+type DetailTab = 'datos' | 'tiempos' | 'condiciones';
 
 @Component({
   selector: 'app-item-detail',
@@ -35,6 +49,16 @@ export class ItemDetail {
   /** Diálogo de confirmación previa al apartado (preflight, Fase 5). */
   readonly isConfirmingClaim = signal(false);
 
+  // ---- Pestañas (Datos / Tiempos / Condiciones) ----
+  /** Pestaña activa; 'Datos' es la inicial y la referencia de altura del área de tabs. */
+  readonly activeTab = signal<DetailTab>('datos');
+  /** Altura fija del área de tabs = alto natural de 'Datos' (con mínimo cómodo). */
+  readonly tabAreaHeight = signal<number | null>(null);
+  /** Altura mínima del área para que el card no se vea diminuto si 'Datos' es corto. */
+  readonly minTabAreaHeight = 220;
+  /** Contenedor del área de tabs (para medir su alto natural tras el primer render). */
+  readonly tabBody = viewChild<ElementRef<HTMLDivElement>>('tabBody');
+
   /** Bindings de utilidades de estado de evento para la plantilla. */
   readonly eventStatusLabel = eventStatusLabel;
   readonly eventStatusBadge = eventStatusBadge;
@@ -45,6 +69,17 @@ export class ItemDetail {
   private tickTimer: number | null = null;
   readonly now = signal(Date.now());
 
+  constructor() {
+    // Reinicia la primera pestaña (y reprograma la medición) al abrir el card, o
+    // defensivamente si `item` cambiara dentro de la misma instancia del modal.
+    effect(() => {
+      this.item();
+      this.activeTab.set('datos');
+      this.tabAreaHeight.set(null);
+      afterNextRender(() => this.lockTabAreaHeight());
+    });
+  }
+
   ngOnInit(): void {
     if (typeof window === 'undefined') return;
     this.tickTimer = window.setInterval(() => this.now.set(Date.now()), 1000);
@@ -54,6 +89,39 @@ export class ItemDetail {
     if (this.tickTimer !== null) {
       window.clearInterval(this.tickTimer);
       this.tickTimer = null;
+    }
+  }
+
+  /** Cambia la pestaña activa del detalle. */
+  selectTab(tab: DetailTab): void {
+    this.activeTab.set(tab);
+  }
+
+  /** ¿Aplican límites/consecuencias para el usuario actual en este evento? */
+  hasLimits(): boolean {
+    return (
+      this.userService.isAuthenticated() &&
+      !!this.item().eventSummary &&
+      !!this.item().myRoleInEvent
+    );
+  }
+
+  /**
+   * Fija la altura del área de tabs al alto natural de la pestaña 'Datos'
+   * (con un mínimo cómodo). Así el card no cambia de tamaño al alternar
+   * pestañas y 'Tiempos'/'Condiciones' solo hacen scroll interno si exceden.
+   */
+  private lockTabAreaHeight(): void {
+    if (this.tabAreaHeight() !== null) return;
+    const el = this.tabBody()?.nativeElement;
+    if (!el) return;
+    const natural = el.offsetHeight;
+    if (natural > 0) {
+      // +1 px evita un scrollbar fantasma por redondeo de subpíxeles.
+      this.tabAreaHeight.set(Math.max(natural + 1, this.minTabAreaHeight));
+    } else {
+      // El layout aún no está listo; reintenta tras el siguiente render.
+      afterNextRender(() => this.lockTabAreaHeight());
     }
   }
 
