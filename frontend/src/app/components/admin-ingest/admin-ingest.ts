@@ -1,4 +1,4 @@
-import { Component, signal, inject } from '@angular/core';
+import { Component, signal, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
@@ -11,13 +11,19 @@ import { railwayApiUrl } from '../../app.config';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { AdminAuth } from '../admin-auth/admin-auth';
 
+/** Opción de evento para el selector de captura (GET /api/events). */
+export interface EventOption {
+  id: string;
+  title: string;
+}
+
 @Component({
   selector: 'app-admin-ingest',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterModule, StripAccentsPipe, AdminAuth],
   templateUrl: './admin-ingest.html'
 })
-export class AdminIngest {
+export class AdminIngest implements OnInit {
   readonly inventoryService = inject(InventoryService);
   readonly adminTokenService = inject(AdminTokenService);
   readonly toastService = inject(ToastService);
@@ -25,6 +31,12 @@ export class AdminIngest {
   readonly isAiProcessing = signal<boolean>(false);
   readonly previewUrl = signal<string>('');
   readonly uploadedBlobUrl = signal<string>('');
+
+  // Evento destino de la captura (persistente en localStorage hasta cambiarlo)
+  readonly events = signal<EventOption[]>([]);
+  readonly selectedEventId = signal<string>(''); // '' = Sin evento
+  readonly loadingEvents = signal(false);
+  private readonly INGEST_EVENT_STORAGE_KEY = 'claimit_ingest_event_id';
 
   // Form signals for AI auto-fill
   readonly formTitle = signal<string>('');
@@ -46,6 +58,71 @@ export class AdminIngest {
   ];
 
   private readonly apiUrl = railwayApiUrl;
+
+  /**
+   * Al iniciar la vista: carga los eventos disponibles y restaura el event_id
+   * persistido. Si no hay evento guardado (o ya no existe) queda 'Sin evento'.
+   */
+  ngOnInit(): void {
+    this.loadEventsAndRestoreSelection();
+  }
+
+  /** Carga los eventos desde GET /api/events y restaura el event_id persistido. */
+  private async loadEventsAndRestoreSelection(): Promise<void> {
+    this.loadingEvents.set(true);
+    try {
+      const res = await fetch(`${this.apiUrl}/events`);
+      if (!res.ok) throw new Error('No se pudo obtener la lista de eventos');
+      const data = await res.json();
+      const events: EventOption[] = (data.events ?? []).map((ev: any) => ({
+        id: ev.id,
+        title: ev.title ?? 'Evento sin título'
+      }));
+      this.events.set(events);
+
+      const storedId = this.readStoredEventId();
+      if (storedId && events.some(ev => ev.id === storedId)) {
+        this.selectedEventId.set(storedId);
+      } else if (storedId) {
+        // El evento guardado ya no existe (pudo ser eliminado): limpiar la clave
+        this.clearStoredEventId();
+      }
+    } catch (err: any) {
+      this.toastService.error(`No se pudieron cargar los eventos: ${err.message}`);
+    } finally {
+      this.loadingEvents.set(false);
+    }
+  }
+
+  /**
+   * Cambia el evento actual de la captura y lo persiste: de aquí en adelante
+   * todas las capturas serán de este evento hasta que se cambie manualmente.
+   */
+  onEventChange(eventId: string): void {
+    this.selectedEventId.set(eventId);
+    this.writeStoredEventId(eventId);
+  }
+
+  /** Persiste el event_id elegido tras guardar una captura (cubre la primera vez). */
+  private persistSelectedEvent(): void {
+    this.writeStoredEventId(this.selectedEventId());
+  }
+
+  private readStoredEventId(): string {
+    if (typeof localStorage === 'undefined') return '';
+    return localStorage.getItem(this.INGEST_EVENT_STORAGE_KEY) ?? '';
+  }
+
+  private writeStoredEventId(eventId: string): void {
+    if (typeof localStorage === 'undefined') return;
+    if (eventId) localStorage.setItem(this.INGEST_EVENT_STORAGE_KEY, eventId);
+    else localStorage.removeItem(this.INGEST_EVENT_STORAGE_KEY);
+  }
+
+  private clearStoredEventId(): void {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.removeItem(this.INGEST_EVENT_STORAGE_KEY);
+  }
 
   /**
    * Captures photo from camera, uploads to Vercel Blobs, triggers AI analysis
@@ -110,7 +187,8 @@ export class AdminIngest {
           category: this.formCategory(),
           infoUrl: this.formInfoUrl(),
           imageUrl: this.uploadedBlobUrl(),
-          precio_base_costo: this.formPrecioBase()
+          precio_base_costo: this.formPrecioBase(),
+          event_id: this.selectedEventId() || null
         })
       });
 
@@ -118,6 +196,7 @@ export class AdminIngest {
       if (!res.ok) throw new Error(result.error || 'Error al persistir el objeto.');
 
       this.toastService.success('¡Objeto publicado con éxito en el inventario!');
+      this.persistSelectedEvent();
 
       // Auto-open vertical editor for the newly created item
       const newItem = result.item;

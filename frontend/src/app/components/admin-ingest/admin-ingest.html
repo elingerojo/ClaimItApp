@@ -65,6 +65,25 @@
           </div>
         }
 
+        <!-- Evento destino de la captura (persistente en localStorage hasta cambiarlo) -->
+        <div>
+          <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ 'Evento de la Captura' | stripAccents }}</label>
+          <select
+            [ngModel]="selectedEventId()"
+            (ngModelChange)="onEventChange($event)"
+            [disabled]="loadingEvents()"
+            class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white"
+          >
+            <option value="">Sin evento</option>
+            @for (ev of events(); track ev.id) {
+              <option [value]="ev.id">{{ ev.title }}</option>
+            }
+          </select>
+          <p class="text-[10px] text-gray-400 mt-1">
+            La captura se agregará a este evento. Se mantiene para las siguientes capturas hasta que lo cambies manualmente.
+          </p>
+        </div>
+
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ 'Título del Objeto' | stripAccents }}</label>
