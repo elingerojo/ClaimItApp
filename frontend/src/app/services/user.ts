@@ -7,6 +7,17 @@ export interface UserSession {
   email: string | null;
   phone: string | null;
   globalRole: string | null;
+  blockedFromClaiming?: boolean;
+}
+
+/** Perfil de usuario (DTO) que devuelve el backend en /session (éxito y conflicto). */
+export interface StoredUserProfile {
+  uuid: string;
+  alias: string;
+  email: string | null;
+  phone: string | null;
+  globalRole: string;
+  blockedFromClaiming: boolean;
 }
 
 export interface SessionResult {
@@ -15,6 +26,8 @@ export interface SessionResult {
   browserUuid?: string;
   storedUuid?: string;
   storedAlias?: string;
+  /** Perfil completo del usuario que ocupa el alias (para adoptarlo en 'soy la misma persona'). */
+  storedUser?: StoredUserProfile;
   message?: string;
   /** Indica que la BD fue reiniciada desde la última visita del usuario */
   databaseReset?: boolean;
@@ -36,6 +49,8 @@ export class UserService {
   readonly currentUsername = computed(() => this.userSessionSignal()?.alias || '');
   /** Rol global (familiares > amigos > conocidos > publico). Default: publico. */
   readonly currentRole = computed(() => this.userSessionSignal()?.globalRole || 'publico');
+  /** true si el usuario está en blacklist (bloqueado para apartar). */
+  readonly blockedFromClaiming = computed(() => this.userSessionSignal()?.blockedFromClaiming || false);
 
   constructor() {
     this.loadSessionFromStorage();
@@ -53,7 +68,8 @@ export class UserService {
       alias,
       email: localStorage.getItem('claimit_email'),
       phone: localStorage.getItem('claimit_phone'),
-      globalRole: localStorage.getItem('claimit_role')
+      globalRole: localStorage.getItem('claimit_role'),
+      blockedFromClaiming: localStorage.getItem('claimit_blocked') === 'true'
     });
   }
 
@@ -110,6 +126,7 @@ export class UserService {
           browserUuid: uuid,
           storedUuid: data.storedUuid,
           storedAlias: data.storedAlias,
+          storedUser: data.storedUser,
           message: data.message || `El alias "${alias}" ya está siendo usado.`
         };
       }
@@ -118,8 +135,8 @@ export class UserService {
         throw new Error(data.error || 'Error al resolver sesión');
       }
 
-      // Éxito: guardar sesión con UUID, alias y rol global
-      this.commitSession(data.uuid, data.alias, data.email, data.phone, data.globalRole);
+      // Éxito: guardar sesión con UUID, alias, rol global y estado de bloqueo
+      this.commitSession(data.uuid, data.alias, data.email, data.phone, data.globalRole, !!data.blockedFromClaiming);
 
       // Si el servidor indica que hubo un reset de BD, lo comunicamos
       const result: SessionResult = { success: true };
@@ -141,11 +158,30 @@ export class UserService {
     alias: string,
     email: string | null,
     phone: string | null,
-    globalRole: string | null = null
+    globalRole: string | null = null,
+    blockedFromClaiming = false
   ): void {
     // Reemplazar el UUID del browser con el del servidor
     localStorage.setItem('claimit_uuid', storedUuid);
-    this.commitSession(storedUuid, alias, email, phone, globalRole);
+    this.commitSession(storedUuid, alias, email, phone, globalRole, blockedFromClaiming);
+  }
+
+  /**
+   * El usuario afirma ser la misma persona en un nuevo dispositivo ('soy la
+   * misma persona'): adopta el perfil completo (contacto, rol global y estado
+   * de bloqueo) que el servidor devolvió para el alias ocupado, de modo que el
+   * 'pill' refleje el rol real (p. ej. 'amigos') en lugar de 'publico'.
+   */
+  adoptStoredUser(profile: StoredUserProfile): void {
+    localStorage.setItem('claimit_uuid', profile.uuid);
+    this.commitSession(
+      profile.uuid,
+      profile.alias,
+      profile.email,
+      profile.phone,
+      profile.globalRole,
+      profile.blockedFromClaiming
+    );
   }
 
   /**
@@ -173,7 +209,8 @@ export class UserService {
     alias: string,
     email: string | null,
     phone: string | null,
-    globalRole: string | null
+    globalRole: string | null,
+    blockedFromClaiming = false
   ): void {
     const cleanAlias = alias.trim();
 
@@ -189,12 +226,16 @@ export class UserService {
     if (globalRole) localStorage.setItem('claimit_role', globalRole);
     else localStorage.removeItem('claimit_role');
 
+    if (blockedFromClaiming) localStorage.setItem('claimit_blocked', 'true');
+    else localStorage.removeItem('claimit_blocked');
+
     this.userSessionSignal.set({
       uuid,
       alias: cleanAlias,
       email: email?.trim() || null,
       phone: phone?.trim() || null,
-      globalRole: globalRole || null
+      globalRole: globalRole || null,
+      blockedFromClaiming
     });
   }
 
@@ -207,6 +248,7 @@ export class UserService {
     localStorage.removeItem('claimit_email');
     localStorage.removeItem('claimit_phone');
     localStorage.removeItem('claimit_role');
+    localStorage.removeItem('claimit_blocked');
     this.userSessionSignal.set(null);
   }
 }

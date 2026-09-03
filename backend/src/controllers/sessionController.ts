@@ -28,8 +28,45 @@ import { broadcastSseEvent } from '../config/sse.js';
  * Caso B: Alias SÍ existe en BD
  *   - Si UUID coincide → OK, misma sesión
  *   - Si UUID NO coincide → CONFLICTO
- *   → Response 409 { conflict: true, storedUuid, storedAlias }
+ *   → Response 409 { conflict: true, storedUser: {...}, storedUuid, storedAlias }
  */
+
+interface UserRow {
+  uuid: string;
+  alias: string;
+  email: string | null;
+  phone: string | null;
+  global_role: string;
+  bloqueado_apartar?: boolean | null;
+}
+
+/**
+ * DTO único de usuario para TODAS las respuestas de /session (éxito y
+ * conflicto). Centralizarlo en un solo serializer evita que las ramas
+ * diverjan: antes el conflicto omitía globalRole, así que al reclamar un alias
+ * ('soy la misma persona, nuevo dispositivo') el 'pill' se quedaba en publico.
+ */
+function serializeUser(
+  row: UserRow,
+  overrides: Partial<Pick<UserRow, 'alias' | 'email' | 'phone'>> = {}
+): {
+  uuid: string;
+  alias: string;
+  email: string | null;
+  phone: string | null;
+  globalRole: string;
+  blockedFromClaiming: boolean;
+} {
+  return {
+    uuid: row.uuid,
+    alias: overrides.alias ?? row.alias,
+    email: overrides.email !== undefined ? overrides.email : row.email ?? null,
+    phone: overrides.phone !== undefined ? overrides.phone : row.phone ?? null,
+    globalRole: row.global_role,
+    blockedFromClaiming: !!row.bloqueado_apartar
+  };
+}
+
 export const resolveSession = async (req: Request, res: Response): Promise<void> => {
   const { uuid, alias, email, phone, isFromSession } = req.body;
 
@@ -43,7 +80,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
   try {
     // 1. Buscar si el alias ya existe (case-insensitive)
     const aliasResult = await pool.query(
-      'SELECT uuid, alias, email, phone, global_role FROM users WHERE LOWER(alias) = LOWER($1)',
+      'SELECT uuid, alias, email, phone, global_role, bloqueado_apartar FROM users WHERE LOWER(alias) = LOWER($1)',
       [cleanAlias]
     );
 
@@ -64,11 +101,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
 
         upsertUser({ uuid: existingUser.uuid, alias: existingUser.alias, global_role: existingUser.global_role });
         res.json({
-          uuid: existingUser.uuid,
-          alias: existingUser.alias,
-          email: persistedEmail,
-          phone: persistedPhone,
-          globalRole: existingUser.global_role,
+          ...serializeUser(existingUser, { email: persistedEmail, phone: persistedPhone }),
           isNew: false
         });
         return;
@@ -78,6 +111,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
           conflict: true,
           storedUuid: existingUser.uuid,
           storedAlias: existingUser.alias,
+          storedUser: serializeUser(existingUser),
           message: `El alias "${cleanAlias}" ya está siendo usado.`
         });
         return;
@@ -86,7 +120,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
 
     // 3. Alias no existe — ¿existe el UUID? (cambio de alias)
     const uuidResult = await pool.query(
-      'SELECT uuid, alias, email, phone, global_role FROM users WHERE uuid = $1',
+      'SELECT uuid, alias, email, phone, global_role, bloqueado_apartar FROM users WHERE uuid = $1',
       [uuid]
     );
 
@@ -112,11 +146,11 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
       }
 
       res.json({
-        uuid,
-        alias: cleanAlias,
-        email: email || uuidResult.rows[0].email,
-        phone: phone || uuidResult.rows[0].phone,
-        globalRole: uuidResult.rows[0].global_role,
+        ...serializeUser(uuidResult.rows[0], {
+          alias: cleanAlias,
+          email: email || uuidResult.rows[0].email,
+          phone: phone || uuidResult.rows[0].phone
+        }),
         isNew: false
       });
       return;
@@ -147,6 +181,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
       email: email || null,
       phone: phone || null,
       globalRole: 'publico',
+      blockedFromClaiming: false,
       isNew: true,
       ...(isLegacyUser && { databaseReset: true })
     });
@@ -162,10 +197,20 @@ interface SessionResponse {
   alias: string;
   email: string | null;
   phone: string | null;
+  globalRole?: string;
+  blockedFromClaiming?: boolean;
   isNew?: boolean;
   conflict?: boolean;
   storedUuid?: string;
   storedAlias?: string;
+  storedUser?: {
+    uuid: string;
+    alias: string;
+    email: string | null;
+    phone: string | null;
+    globalRole: string;
+    blockedFromClaiming: boolean;
+  };
   message?: string;
   databaseReset?: boolean;
 }

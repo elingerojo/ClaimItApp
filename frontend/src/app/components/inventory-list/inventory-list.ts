@@ -1,7 +1,7 @@
 import { Component, signal, computed, inject, effect, OnInit } from '@angular/core';
 import { CommonModule, NgOptimizedImage } from '@angular/common';
 import { InventoryService, ItemWithQueue, EventSummary } from '../../services/inventory';
-import { UserService } from '../../services/user';
+import { UserService, StoredUserProfile } from '../../services/user';
 import { ToastService } from '../../services/toast';
 import { InvitationService } from '../../services/invitations';
 import { ItemCategory, ItemStatus } from '@claimitapp/shared';
@@ -90,6 +90,7 @@ export class InventoryList implements OnInit {
     storedAlias: string;
     email: string | null;
     phone: string | null;
+    storedUser?: StoredUserProfile;
   } | null>(null);
 
   // Estado de carga para el botón Guardar
@@ -334,7 +335,8 @@ export class InventoryList implements OnInit {
           storedUuid: result.storedUuid,
           storedAlias: result.storedAlias,
           email,
-          phone
+          phone,
+          storedUser: result.storedUser
         });
         this.conflictDialogVisible.set(true);
         return;
@@ -365,7 +367,14 @@ export class InventoryList implements OnInit {
     const data = this.conflictData();
     if (!data) return;
 
-    this.userService.acceptServerUuid(data.storedUuid, data.storedAlias, data.email, data.phone);
+    if (data.storedUser) {
+      // 'soy la misma persona': adoptar el perfil completo del alias ocupado
+      // (contacto, rol global 'amigos', etc.) para que el 'pill' sea correcto.
+      this.userService.adoptStoredUser(data.storedUser);
+    } else {
+      // Fallback: solo reutilizar el UUID/alias almacenado (compatibilidad).
+      this.userService.acceptServerUuid(data.storedUuid, data.storedAlias, data.email, data.phone);
+    }
     this.confirmDialogHidden();
     this.isEditingIdentity.set(false);
     this.inventoryService.refresh().catch(() => {});
