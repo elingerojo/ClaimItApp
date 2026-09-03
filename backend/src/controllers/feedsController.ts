@@ -14,29 +14,25 @@ import { runLazyCatchUp } from '../services/scheduler.js';
 const HOUR_MS = 60 * 60 * 1000;
 
 /**
- * Single role resolution for a user in the context of an item's event:
- * membership role if the user is a member of that event, otherwise the user's
- * GLOBAL role as fallback. This is the ONLY place role is resolved for the
- * feed, so visibility, price and availability always agree (fixes the
- * "visibility vs membership" inconsistency).
+ * Role resolution for an item's event: roles are now GLOBAL (single source of
+ * truth, relative to the sole admin), so the resolved role is simply the user's
+ * global role. Membership only contributes referral bonus hours. This is the
+ * ONLY place role is resolved for the feed, so visibility, price and
+ * availability always agree.
  */
 function resolveItemRole(
   item: { eventId: string | null },
   userUuid: string | undefined,
   userGlobalRole: string
 ): { role: string; bonusHours: number } {
-  let membershipRole: string | null = null;
   let bonusHours = 0;
 
   if (item.eventId && userUuid) {
     const membership = getEventMembership(userUuid, item.eventId);
-    if (membership) {
-      membershipRole = membership.role;
-      bonusHours = membership.bonusHours || 0;
-    }
+    if (membership) bonusHours = membership.bonusHours || 0;
   }
 
-  const role = resolveEffectiveRole(membershipRole, userGlobalRole);
+  const role = resolveEffectiveRole(null, userGlobalRole);
   return { role, bonusHours };
 }
 

@@ -138,19 +138,12 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
       }
     }
 
-    // 2b. Límite de apartados simultáneos por rol dentro del mismo evento
+    // 2b. Límite de apartados simultáneos por rol (global: única fuente de verdad)
     if (item.event_id) {
-      const memberRes = await client.query(
-        'SELECT role FROM event_members WHERE event_id = $1 AND user_uuid = $2',
-        [item.event_id, userUuid]
-      );
-      let role = memberRes.rows[0]?.role;
-      if (!role) {
-        const userRoleRes = await client.query('SELECT global_role FROM users WHERE uuid = $1', [
-          userUuid
-        ]);
-        role = userRoleRes.rows[0]?.global_role || 'publico';
-      }
+      const userRoleRes = await client.query('SELECT global_role FROM users WHERE uuid = $1', [
+        userUuid
+      ]);
+      const role = userRoleRes.rows[0]?.global_role || 'publico';
 
       const setting = await client.query(
         'SELECT max_apartados_simultaneos FROM trust_levels_settings WHERE id = $1',

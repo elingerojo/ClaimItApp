@@ -279,13 +279,15 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     const newRole = determineRoleAfterInvitation(currentRole, invitationRole);
     const roleCascaded = newRole !== currentRole;
 
-    // 4. Register user in event_members
+    // 4. Register user in event_members. La membresía ya no guarda rol (rol
+    //    GLOBAL = única fuente de verdad): la invitación solo puede elevar
+    //    users.global_role (paso 5).
     await client.query(
-      `INSERT INTO event_members (event_id, user_uuid, role, invited_by, joined_at)
-       VALUES ($1, $2, $3, $4, NOW())
+      `INSERT INTO event_members (event_id, user_uuid, invited_by, joined_at)
+       VALUES ($1, $2, $3, NOW())
        ON CONFLICT (event_id, user_uuid) DO UPDATE
-       SET role = $3, invited_by = $4`,
-      [eventId, userUuid, invitationRole, null]
+       SET invited_by = $3`,
+      [eventId, userUuid, null]
     );
 
     // 5. Update user's global role if cascaded
@@ -309,7 +311,6 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     });
     upsertEventMember(userUuid, {
       eventId,
-      role: invitationRole,
       bonusHours: 0,
       invitedBy: null
     });
@@ -554,10 +555,10 @@ export const getEventDetail = async (req: Request, res: Response): Promise<void>
       [id]
     );
     const members = await pool.query(
-      `SELECT em.user_uuid, u.alias, em.role, em.bonus_hours, em.invited_by, em.joined_at
+      `SELECT em.user_uuid, u.alias, u.global_role AS role, em.bonus_hours, em.invited_by, em.joined_at
        FROM event_members em
        JOIN users u ON em.user_uuid = u.uuid
-       WHERE em.event_id = $1 ORDER BY em.role, em.joined_at`,
+       WHERE em.event_id = $1 ORDER BY u.global_role, em.joined_at`,
       [id]
     );
     const invites = await pool.query(

@@ -32,39 +32,35 @@ export interface SanctionResult {
 
 /**
  * Increments the accumulated expirations of a member in an event and applies
- * the corresponding sanction if the threshold is crossed. Runs inside the
- * caller's transaction (client). Returns null when the user is not a member.
+ * the corresponding sanction when the threshold is crossed. Fase 2: el rol es
+ * GLOBAL (única fuente de verdad), así que la tolerancia/degradación aplica
+ * contra users.global_role; la membresía conserva solo su contador por evento
+ * (expiraciones_acumuladas) y el bloqueo de invitar por evento. Corre dentro
+ * de la transacción del llamador (client).
  */
 export async function applyExpirationSanction(
   eventId: string,
   userUuid: string,
   client: any
 ): Promise<SanctionResult | null> {
+  // Rol único = rol global del usuario.
+  const u = await client.query('SELECT global_role FROM users WHERE uuid = $1', [userUuid]);
+  const role = u.rows[0]?.global_role || 'publico';
+
+  // Incrementar el contador de expiraciones del miembro en el evento (si lo es).
   const upd = await client.query(
     `UPDATE event_members
      SET expiraciones_acumuladas = expiraciones_acumuladas + 1
      WHERE event_id = $1 AND user_uuid = $2
-     RETURNING role, expiraciones_acumuladas`,
+     RETURNING expiraciones_acumuladas`,
     [eventId, userUuid]
   );
+  const expiraciones_acumuladas =
+    upd.rows.length > 0 ? upd.rows[0].expiraciones_acumuladas : 1;
 
-  let role: string;
-  let expiraciones_acumuladas: number;
-  if (upd.rows.length === 0) {
-    // Sin membresía: se usa el rol global. Un 'publico' se bloquea desde la
-    // primera expiración (umbral 1), aunque no sea miembro del evento.
-    const u = await client.query('SELECT global_role FROM users WHERE uuid = $1', [userUuid]);
-    role = u.rows[0]?.global_role || 'publico';
-    if (role === 'publico') {
-      await client.query('UPDATE users SET bloqueado_apartar = true WHERE uuid = $1', [userUuid]);
-      return { role, expiraciones: 1, sanctioned: 'blacklisted' };
-    }
-    return null; // no-miembro y no-publico: sin seguimiento de tolerancia
-  }
-  role = upd.rows[0].role;
-  expiraciones_acumuladas = upd.rows[0].expiraciones_acumuladas;
   const threshold = TOLERANCE_THRESHOLDS[role];
   if (threshold == null) {
+    // familiares: tolerancia infinita.
     return { role, expiraciones: expiraciones_acumuladas, sanctioned: 'none' };
   }
   if (expiraciones_acumuladas < threshold) {
@@ -72,6 +68,7 @@ export async function applyExpirationSanction(
   }
 
   if (role === 'amigos') {
+    // Pierde temporalmente el derecho a invitar (por evento).
     await client.query(
       `UPDATE event_members SET bloqueado_invitar = true
        WHERE event_id = $1 AND user_uuid = $2`,
@@ -81,8 +78,9 @@ export async function applyExpirationSanction(
   }
 
   if (role === 'conocidos') {
+    // Degradación global permanente a publico + bloqueo de invitar en el evento.
     await client.query(
-      `UPDATE event_members SET role = 'publico', bloqueado_invitar = true
+      `UPDATE event_members SET bloqueado_invitar = true
        WHERE event_id = $1 AND user_uuid = $2`,
       [eventId, userUuid]
     );
@@ -90,7 +88,7 @@ export async function applyExpirationSanction(
     return { role, expiraciones: expiraciones_acumuladas, sanctioned: 'degraded' };
   }
 
-  // publico: blacklist for future separation phases
+  // publico: blacklist global para futuras fases de separación.
   await client.query(`UPDATE users SET bloqueado_apartar = true WHERE uuid = $1`, [userUuid]);
   return { role, expiraciones: expiraciones_acumuladas, sanctioned: 'blacklisted' };
 }
@@ -98,7 +96,8 @@ export async function applyExpirationSanction(
 /**
  * Reduces the accumulated expirations when a user completes a purchase on
  * time and lifts the invite-block sanction if the count drops below the
- * threshold. Runs inside the caller's transaction (client).
+ * threshold (evaluated against the user's GLOBAL role). Runs inside the
+ * caller's transaction (client).
  */
 export async function reduceExpirationCount(
   eventId: string,
@@ -109,12 +108,14 @@ export async function reduceExpirationCount(
     `UPDATE event_members
      SET expiraciones_acumuladas = GREATEST(expiraciones_acumuladas - 1, 0)
      WHERE event_id = $1 AND user_uuid = $2
-     RETURNING role, expiraciones_acumuladas`,
+     RETURNING expiraciones_acumuladas`,
     [eventId, userUuid]
   );
   if (upd.rows.length === 0) return;
 
-  const { role, expiraciones_acumuladas } = upd.rows[0];
+  const expiraciones_acumuladas = upd.rows[0].expiraciones_acumuladas;
+  const u = await client.query('SELECT global_role FROM users WHERE uuid = $1', [userUuid]);
+  const role = u.rows[0]?.global_role || 'publico';
   const threshold = TOLERANCE_THRESHOLDS[role];
   if (threshold != null && expiraciones_acumuladas < threshold) {
     await client.query(

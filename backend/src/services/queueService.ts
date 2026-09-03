@@ -63,26 +63,16 @@ async function getItemPickupContext(itemId: string, client: any) {
 }
 
 /**
- * Effective role of a user inside an event: membership role, else global role.
- * Mirrors the feed resolution so the deadline is consistent with what the
- * claimant sees (visibility/price/availability use the same role).
+ * Effective role of a user in an event. Fase 2: roles are GLOBAL (single source
+ * of truth relative to the sole admin), so the resolved role is the user's
+ * global role; eventId is kept only for call-site compatibility. Mirrors the
+ * feed resolution so the deadline is consistent with what the claimant sees.
  */
 export async function resolveRoleForEvent(
-  eventId: string | null,
+  _eventId: string | null,
   userUuid: string,
   client: any
 ): Promise<string> {
-  let membershipRole: string | null = null;
-
-  if (eventId) {
-    const memberRes = await client.query(
-      'SELECT role FROM event_members WHERE event_id = $1 AND user_uuid = $2',
-      [eventId, userUuid]
-    );
-    membershipRole = memberRes.rows[0]?.role ?? null;
-    if (membershipRole) return membershipRole;
-  }
-
   const userRes = await client.query('SELECT global_role FROM users WHERE uuid = $1', [userUuid]);
   const globalRole = userRes.rows[0]?.global_role ?? null;
 

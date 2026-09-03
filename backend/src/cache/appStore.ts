@@ -92,7 +92,6 @@ export interface StoreUser {
 
 export interface StoreEventMember {
   eventId: string;
-  role: string;
   bonusHours: number;
   invitedBy: string | null;
   bloqueadoInvitar?: boolean;
@@ -232,7 +231,7 @@ export async function rehydrateAll(): Promise<boolean> {
     events = new Map(eventsResult.rows.map((e: any) => [e.id, e]));
 
     const membersResult = await pool.query(
-      `SELECT event_id, user_uuid, role, bonus_hours, invited_by, bloqueado_invitar
+      `SELECT event_id, user_uuid, bonus_hours, invited_by, bloqueado_invitar
        FROM event_members`
     );
     eventMembers = new Map<string, StoreEventMember[]>();
@@ -240,7 +239,6 @@ export async function rehydrateAll(): Promise<boolean> {
       const list = eventMembers.get(m.user_uuid) || [];
       list.push({
         eventId: m.event_id,
-        role: m.role,
         bonusHours: m.bonus_hours,
         invitedBy: m.invited_by,
         bloqueadoInvitar: m.bloqueado_invitar

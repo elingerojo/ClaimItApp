@@ -73,19 +73,22 @@ export async function calculateEffectiveAvailability(
   eventId: string,
   dbPool: any
 ): Promise<EffectiveAvailability> {
+  // Fase 2: rol GLOBAL como única fuente de verdad (em.role ya no existe);
+  // la membresía solo aporta bonus_hours.
   const result = await dbPool.query(
-    `SELECT 
+    `SELECT
        e.available_from,
-       COALESCE(em.role, 'publico') as user_role,
+       COALESCE(u.global_role, 'publico') as user_role,
        COALESCE(em.bonus_hours, 0) as bonus_hours,
-       CASE 
-         WHEN COALESCE(em.role, 'publico') = 'familiares' THEN e.familiares_advance_hours
-         WHEN COALESCE(em.role, 'publico') = 'amigos' THEN e.amigos_advance_hours
-         WHEN COALESCE(em.role, 'publico') = 'conocidos' THEN e.conocidos_advance_hours
+       CASE
+         WHEN COALESCE(u.global_role, 'publico') = 'familiares' THEN e.familiares_advance_hours
+         WHEN COALESCE(u.global_role, 'publico') = 'amigos' THEN e.amigos_advance_hours
+         WHEN COALESCE(u.global_role, 'publico') = 'conocidos' THEN e.conocidos_advance_hours
          ELSE 0
        END as role_advance_hours
      FROM events e
      LEFT JOIN event_members em ON e.id = em.event_id AND em.user_uuid = $1
+     LEFT JOIN users u ON u.uuid = $1
      WHERE e.id = $2`,
     [userUuid, eventId]
   );
