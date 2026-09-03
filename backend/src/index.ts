@@ -12,7 +12,7 @@ import { createClaim, confirmPickup } from './controllers/claimsController.js';
 import { startScheduler, runLazyCatchUp } from './services/scheduler.js';
 import { getUploadToken } from './controllers/uploadController.js';
 import { analyzeItem } from './controllers/analyzerController.js';
-import { createItem, updateItem, deleteItem } from './controllers/itemsController.js';
+import { createItem, updateItem, deleteItem, getItemDetail } from './controllers/itemsController.js';
 import { getInventoryFeed, getLedgerFeed } from './controllers/feedsController.js';
 import { evictClaimant } from './controllers/adminController.js';
 import { adminLogin, adminSessionStatus, adminLogout } from './controllers/adminAuthController.js';
@@ -99,6 +99,7 @@ app.patch('/api/admin/events/:id', requireAdminSession, updateEvent);
 app.delete('/api/admin/events/:id', requireAdminSession, deleteEvent);
 app.post('/api/admin/events/:id/items', requireAdminSession, assignItems);
 app.post('/api/admin/evict', requireAdminSession, evictClaimant);
+app.get('/api/admin/items/:id', requireAdminSession, getItemDetail);
 app.patch('/api/admin/items/:id', requireAdminSession, updateItem);
 app.delete('/api/admin/items/:id', requireAdminSession, deleteItem);
 

@@ -56,4 +56,11 @@ export class AdminManage {
       this.toastService.error(`Error: ${err.message}`);
     }
   }
+
+  /** Recorta el título de un evento a ~12 caracteres + puntos suspensivos. */
+  truncateEventTitle(title: string | null | undefined, max = 12): string {
+    const t = (title ?? '').trim();
+    if (!t) return '';
+    return t.length > max ? `${t.slice(0, max)}…` : t;
+  }
 }

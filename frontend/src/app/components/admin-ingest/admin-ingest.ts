@@ -1,7 +1,7 @@
 import { Component, signal, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { InventoryService, ItemWithQueue } from '../../services/inventory';
 import { AdminTokenService } from '../../services/admin-token';
 import { ToastService } from '../../services/toast';
@@ -27,6 +27,8 @@ export class AdminIngest implements OnInit {
   readonly inventoryService = inject(InventoryService);
   readonly adminTokenService = inject(AdminTokenService);
   readonly toastService = inject(ToastService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
 
   readonly isAiProcessing = signal<boolean>(false);
   readonly previewUrl = signal<string>('');
@@ -51,10 +53,28 @@ export class AdminIngest implements OnInit {
   readonly editDescription = signal<string>('');
   readonly editInfoUrl = signal<string>('');
 
+  // Campos adicionales del editor vertical (todo lo que soporta el PATCH admin).
+  readonly editEventId = signal<string>(''); // '' = Sin evento
+  readonly editPriceBase = signal<number | null>(null);
+  readonly editVisibilityLevel = signal<number>(4);
+  readonly editAvailableFrom = signal<string>(''); // datetime-local
+  readonly editVisibleAt = signal<string>(''); // datetime-local
+  /** true si el editor se abrió desde Gestionar Inventario (?edit=ITEM_ID). */
+  readonly isPreloadedEdit = signal(false);
+
   readonly categories: ItemCategory[] = [
     'Kitchen', 'Electronics', 'Decor', 'Books', 'Media',
     'Clothing', 'Bedding', 'Shoes', 'Accessories', 'Bathroom',
     'Office', 'Utilities', 'Cleaning', 'Sports', 'Misc.'
+  ];
+
+  /** Opciones de visibilidad: 0=admin only, 1=familiares, 2=amigos, 3=conocidos, 4=público. */
+  readonly visibilityOptions = [
+    { value: 0, label: '0 — Solo admin' },
+    { value: 1, label: '1 — Familiares' },
+    { value: 2, label: '2 — Amigos' },
+    { value: 3, label: '3 — Conocidos' },
+    { value: 4, label: '4 — Público' }
   ];
 
   private readonly apiUrl = railwayApiUrl;
@@ -64,7 +84,80 @@ export class AdminIngest implements OnInit {
    * persistido. Si no hay evento guardado (o ya no existe) queda 'Sin evento'.
    */
   ngOnInit(): void {
-    this.loadEventsAndRestoreSelection();
+    void this.init();
+  }
+
+  /**
+   * Flujo inicial: carga los eventos/selección persistida y, si venimos con
+   * ?edit=ITEM_ID (botón Editar de Gestionar Inventario), precarga el editor
+   * vertical con ese objeto para reutilizar el mismo código de edición.
+   */
+  private async init(): Promise<void> {
+    await this.loadEventsAndRestoreSelection();
+
+    const editId = this.route.snapshot.queryParamMap.get('edit');
+    if (editId) {
+      await this.preloadItemForEdit(editId);
+    }
+  }
+
+  /** Carga un objeto existente (GET admin) y abre el editor vertical precargado. */
+  private async preloadItemForEdit(itemId: string): Promise<void> {
+    try {
+      const res = await fetch(`${this.apiUrl}/admin/items/${itemId}`, {
+        headers: { 'X-Admin-Token': this.adminTokenService.token() }
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'No autorizado');
+      const item = await res.json();
+
+      this.editingItem.set({
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        category: item.category,
+        infoUrl: item.infoUrl,
+        imageUrl: item.imageUrl,
+        status: item.status,
+        createdAt: item.createdAt,
+        queue: item.queue ?? []
+      });
+      this.editTitle.set(item.title ?? '');
+      this.editDescription.set(item.description ?? '');
+      this.editInfoUrl.set(item.infoUrl ?? '');
+      this.editEventId.set(item.eventId ?? '');
+      this.editPriceBase.set(item.precioBaseCosto != null ? Number(item.precioBaseCosto) : null);
+      this.editVisibilityLevel.set(item.visibilityLevel ?? 4);
+      this.editAvailableFrom.set(this.toLocalInputValue(item.availableFrom));
+      this.editVisibleAt.set(this.toLocalInputValue(item.visibleAt));
+      this.isPreloadedEdit.set(true);
+
+      this.scrollToEditor();
+    } catch (err: any) {
+      this.toastService.error(`Error al cargar el objeto para editar: ${err.message}`);
+    }
+  }
+
+  /** ISO (UTC) → valor local para un <input type="datetime-local">. */
+  private toLocalInputValue(iso: string | null | undefined): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n: number): string => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  /** Valor de datetime-local → ISO (UTC), o null si viene vacío. */
+  private fromLocalInputValue(value: string): string | null {
+    if (!value) return null;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  /** Lleva al editor a la vista una vez que se haya renderizado. */
+  private scrollToEditor(): void {
+    setTimeout(() => {
+      document.getElementById('item-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
   }
 
   /** Carga los eventos desde GET /api/events y restaura el event_id persistido. */
@@ -214,6 +307,12 @@ export class AdminIngest implements OnInit {
       this.editTitle.set(newItem.title);
       this.editDescription.set(newItem.description || '');
       this.editInfoUrl.set(newItem.infoUrl || '');
+      this.editEventId.set(this.selectedEventId());
+      this.editPriceBase.set(this.formPrecioBase());
+      this.editVisibilityLevel.set(4);
+      this.editAvailableFrom.set('');
+      this.editVisibleAt.set('');
+      this.isPreloadedEdit.set(false);
 
       // Clear the ingest form for the next item
       this.previewUrl.set('');
@@ -235,6 +334,21 @@ export class AdminIngest implements OnInit {
   async onSaveEdit(): Promise<void> {
     const item = this.editingItem();
     if (!item) return;
+    if (!this.editTitle().trim()) {
+      this.toastService.error('El título es obligatorio.');
+      return;
+    }
+
+    const body: Record<string, any> = {
+      title: this.editTitle().trim(),
+      description: this.editDescription() === '' ? null : this.editDescription(),
+      infoUrl: this.editInfoUrl() === '' ? null : this.editInfoUrl(),
+      event_id: this.editEventId() || null,
+      precio_base_costo: this.editPriceBase(),
+      visibility_level: this.editVisibilityLevel(),
+      available_from: this.fromLocalInputValue(this.editAvailableFrom()),
+      visible_at: this.fromLocalInputValue(this.editVisibleAt())
+    };
 
     try {
       const res = await fetch(`${this.apiUrl}/admin/items/${item.id}`, {
@@ -243,18 +357,24 @@ export class AdminIngest implements OnInit {
           'Content-Type': 'application/json',
           'X-Admin-Token': this.adminTokenService.token()
         },
-        body: JSON.stringify({
-          title: this.editTitle(),
-          description: this.editDescription(),
-          infoUrl: this.editInfoUrl()
-        })
+        body: JSON.stringify(body)
       });
 
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Error al actualizar el objeto.');
 
       this.toastService.success('✅ Objeto actualizado con éxito.');
+
+      // Refrescar el catálogo para propagar eventSummary/estado/visibilidad.
+      await this.inventoryService.refresh().catch(() => {});
+
+      const returnToManage = this.isPreloadedEdit();
       this.cancelEdit();
+
+      if (returnToManage) {
+        // El editor se abrió desde Gestionar Inventario: regresar a esa vista.
+        await this.router.navigate(['/admin/manage']);
+      }
     } catch (err: any) {
       this.toastService.error(`Error al guardar: ${err.message}`);
     }
@@ -268,5 +388,11 @@ export class AdminIngest implements OnInit {
     this.editTitle.set('');
     this.editDescription.set('');
     this.editInfoUrl.set('');
+    this.editEventId.set('');
+    this.editPriceBase.set(null);
+    this.editVisibilityLevel.set(4);
+    this.editAvailableFrom.set('');
+    this.editVisibleAt.set('');
+    this.isPreloadedEdit.set(false);
   }
 }

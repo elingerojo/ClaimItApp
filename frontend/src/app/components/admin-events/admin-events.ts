@@ -1,7 +1,8 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterModule } from '@angular/router';
+import { ActivatedRoute, RouterModule } from '@angular/router';
+import { Subscription } from 'rxjs';
 import { AdminTokenService } from '../../services/admin-token';
 import { ToastService } from '../../services/toast';
 import { InventoryService } from '../../services/inventory';
@@ -47,11 +48,13 @@ export interface EventDetail {
   imports: [CommonModule, FormsModule, RouterModule, AdminAuth, DateEsPipe],
   templateUrl: './admin-events.html'
 })
-export class AdminEvents {
+export class AdminEvents implements OnInit, OnDestroy {
   readonly adminTokenService = inject(AdminTokenService);
   readonly toastService = inject(ToastService);
   readonly inventoryService = inject(InventoryService);
   readonly userService = inject(UserService);
+  private readonly route = inject(ActivatedRoute);
+  private querySub?: Subscription;
 
   private readonly apiUrl = railwayApiUrl;
 
@@ -88,6 +91,24 @@ export class AdminEvents {
     conocidos: '👋 Conocidos',
     publico: '🌐 Público'
   };
+
+  ngOnInit(): void {
+    // Auto-carga la lista al entrar (antes quedaba vacía hasta pulsar
+    // "Refrescar") y, si llegamos con ?open=EVENT_ID (enlace desde Gestionar
+    // Inventario), abre automáticamente el panel Detalle de ese evento.
+    this.querySub = this.route.queryParamMap.subscribe(async (params) => {
+      const openId = params.get('open');
+      await this.loadEvents();
+
+      if (openId && this.adminTokenService.authenticated() && this.events().some(ev => ev.id === openId)) {
+        await this.openDetail(openId);
+      }
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.querySub?.unsubscribe();
+  }
 
   async loadEvents(): Promise<void> {
     this.loading.set(true);

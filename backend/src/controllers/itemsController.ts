@@ -198,80 +198,81 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
 export const updateItem = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
   const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
-  const { title, description, infoUrl, visibility_level, event_id, available_from, visible_at, precio_base_costo } =
-    req.body;
+  const {
+    title,
+    description,
+    infoUrl,
+    visibility_level,
+    event_id,
+    available_from,
+    visible_at,
+    precio_base_costo
+  } = req.body;
 
   if (!id) {
     res.status(400).json({ error: 'Missing item id parameter.' });
     return;
   }
 
-  if (
-    !title &&
-    description === undefined &&
-    infoUrl === undefined &&
-    visibility_level === undefined &&
-    event_id === undefined &&
-    available_from === undefined &&
-    visible_at === undefined &&
-    precio_base_costo === undefined
-  ) {
+  if (visibility_level !== undefined) {
+    const level = Number(visibility_level);
+    if (!Number.isInteger(level) || level < 0 || level > 4) {
+      res.status(400).json({ error: 'visibility_level must be an integer between 0 and 4.' });
+      return;
+    }
+  }
+
+  // Construir el SET dinámicamente SOLO con las llaves presentes en el body.
+  // Así se puede asignar NULL explícito para limpiar un campo opcional
+  // (por ejemplo desasignar el evento o borrar available_from/visible_at),
+  // algo imposible con el enfoque anterior basado en COALESCE.
+  const assignments: string[] = [];
+  const params: any[] = [];
+  const changedFields: Record<string, boolean> = {};
+  const set = (column: string, value: any, key: string): void => {
+    params.push(value);
+    assignments.push(`${column} = $${params.length}`);
+    changedFields[key] = true;
+  };
+
+  if (title !== undefined) set('title', title, 'title');
+  if (description !== undefined) set('description', description, 'description');
+  if (infoUrl !== undefined) set('info_url', infoUrl, 'infoUrl');
+  if (visibility_level !== undefined) set('visibility_level', visibility_level, 'visibility_level');
+  if (event_id !== undefined) set('event_id', event_id, 'event_id');
+  if (available_from !== undefined) set('available_from', available_from, 'available_from');
+  if (visible_at !== undefined) set('visible_at', visible_at, 'visible_at');
+  if (precio_base_costo !== undefined) {
+    // Si cambia el precio base, re-congelar el snapshot (null → sin precios)
+    const snapshot = computePriceSnapshot(precio_base_costo != null ? Number(precio_base_costo) : null);
+    set('precio_base_costo', precio_base_costo, 'precio_base_costo');
+    set('precio_familiar', snapshot.precio_familiar, 'precio_familiar');
+    set('precio_amigo', snapshot.precio_amigo, 'precio_amigo');
+    set('precio_conocido', snapshot.precio_conocido, 'precio_conocido');
+    set('precio_publico', snapshot.precio_publico, 'precio_publico');
+  }
+
+  if (assignments.length === 0) {
     res.status(400).json({
       error: 'At least one editable field must be provided.'
     });
     return;
   }
 
-  // Si cambia el precio base, re-congelar el snapshot
-  const snapshot = computePriceSnapshot(precio_base_costo != null ? Number(precio_base_costo) : null);
-
   try {
+    params.push(id);
     const updateQuery = `
       UPDATE items
-      SET
-        title = COALESCE($1, title),
-        description = COALESCE($2, description),
-        info_url = COALESCE($3, info_url),
-        visibility_level = COALESCE($4, visibility_level),
-        event_id = COALESCE($5, event_id),
-        available_from = COALESCE($6, available_from),
-        visible_at = COALESCE($7, visible_at),
-        precio_base_costo = COALESCE($8, precio_base_costo),
-        precio_familiar = COALESCE($9, precio_familiar),
-        precio_amigo = COALESCE($10, precio_amigo),
-        precio_conocido = COALESCE($11, precio_conocido),
-        precio_publico = COALESCE($12, precio_publico),
-        horas_recoleccion_familiar = COALESCE($13, horas_recoleccion_familiar),
-        horas_recoleccion_amigo = COALESCE($14, horas_recoleccion_amigo),
-        horas_recoleccion_conocido = COALESCE($15, horas_recoleccion_conocido),
-        horas_recoleccion_publico = COALESCE($16, horas_recoleccion_publico),
-        updated_at = NOW()
-      WHERE id = $17
+      SET ${assignments.join(', ')},
+          updated_at = NOW()
+      WHERE id = $${params.length}
       RETURNING id, title, description, category, info_url, image_url, status,
                 visibility_level, event_id, available_from, visible_at, expires_at,
                 precio_base_costo, precio_familiar, precio_amigo, precio_conocido, precio_publico,
                 horas_recoleccion_familiar, horas_recoleccion_amigo, horas_recoleccion_conocido,
                 horas_recoleccion_publico, nivel_acceso_minimo, created_at
     `;
-    const result = await pool.query(updateQuery, [
-      title || null,
-      description !== undefined ? description : null,
-      infoUrl !== undefined ? infoUrl : null,
-      visibility_level !== undefined ? visibility_level : null,
-      event_id !== undefined ? event_id : null,
-      available_from !== undefined ? available_from : null,
-      visible_at !== undefined ? visible_at : null,
-      precio_base_costo !== undefined ? precio_base_costo : null,
-      snapshot.precio_familiar,
-      snapshot.precio_amigo,
-      snapshot.precio_conocido,
-      snapshot.precio_publico,
-      snapshot.horas_recoleccion_familiar,
-      snapshot.horas_recoleccion_amigo,
-      snapshot.horas_recoleccion_conocido,
-      snapshot.horas_recoleccion_publico,
-      id
-    ]);
+    const result = await pool.query(updateQuery, params);
 
     if (result.rows.length === 0) {
       res.status(404).json({ error: 'Item not found.' });
@@ -316,7 +317,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       itemId: updatedItem.id,
       details: {
         title: updatedItem.title,
-        changedFields: { title: !!title, description: description !== undefined, infoUrl: infoUrl !== undefined }
+        changedFields
       }
     });
 
@@ -395,4 +396,47 @@ export const deleteItem = async (req: Request, res: Response): Promise<void> => 
     console.error('Failed to delete item:', error);
     res.status(500).json({ error: 'Database execution error deleting item record.' });
   }
+};
+
+/**
+ * GET /api/admin/items/:id
+ * Devuelve el registro completo de un objeto (admin only) para poder precargar
+ * el editor. Se sirve desde el store en RAM (misma fuente que GET /api/items),
+ * sin consultar Neon.
+ */
+export const getItemDetail = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+
+  if (!id) {
+    res.status(400).json({ error: 'Missing item id parameter.' });
+    return;
+  }
+
+  const item = getItems().find(i => i.id === id);
+  if (!item) {
+    res.status(404).json({ error: 'Item not found.' });
+    return;
+  }
+
+  res.status(200).json({
+    id: item.id,
+    title: item.title,
+    description: item.description,
+    category: item.category,
+    infoUrl: item.infoUrl,
+    imageUrl: item.imageUrl,
+    status: item.status,
+    visibilityLevel: item.visibilityLevel,
+    eventId: item.eventId,
+    visibleAt: item.visibleAt,
+    availableFrom: item.availableFrom,
+    expiresAt: item.expiresAt,
+    precioBaseCosto: item.precioBaseCosto,
+    precioFamiliar: item.precioFamiliar,
+    precioAmigo: item.precioAmigo,
+    precioConocido: item.precioConocido,
+    precioPublico: item.precioPublico,
+    createdAt: item.createdAt,
+    queue: item.queue
+  });
 };

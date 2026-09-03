@@ -35,6 +35,7 @@
               <th class="px-6 py-4">{{ 'Objeto' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Categoría' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Estado' | stripAccents }}</th>
+              <th class="px-6 py-4">{{ 'Eventos' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Línea de Espera (Click para expulsar)' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Acciones' | stripAccents }}</th>
             </tr>
@@ -64,6 +65,18 @@
                   </span>
                 </td>
                 <td class="px-6 py-4">
+                  @if (item.eventSummary) {
+                    <a
+                      routerLink="/admin/events"
+                      [queryParams]="{ open: item.eventSummary.id }"
+                      [title]="'Ver detalles del evento: ' + (item.eventSummary.title || 'Evento sin título')"
+                      class="inline-flex items-center gap-1 text-indigo-600 hover:underline font-medium"
+                    >🎯 {{ truncateEventTitle(item.eventSummary.title) }}</a>
+                  } @else {
+                    <span class="text-gray-300" title="Este objeto no pertenece a ningún evento">—</span>
+                  }
+                </td>
+                <td class="px-6 py-4">
                   <div class="flex flex-wrap gap-2">
                     @for (user of item.queue; track user.username; let idx = $index) {
                       <button
@@ -88,13 +101,23 @@
                   </div>
                 </td>
                 <td class="px-6 py-4">
-                  <button
-                    (click)="handleDeleteItem(item.id, item.title)"
-                    title="Eliminar objeto permanentemente"
-                    class="flex items-center space-x-1.5 px-2.5 py-1 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-all text-xs font-medium"
-                  >
-                    🗑️ Eliminar
-                  </button>
+                  <div class="flex items-center gap-2">
+                    <a
+                      routerLink="/admin/ingest"
+                      [queryParams]="{ edit: item.id }"
+                      title="Editar objeto (título, evento, precio, visibilidad, fechas)"
+                      class="flex items-center space-x-1.5 px-2.5 py-1 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-all text-xs font-medium"
+                    >
+                      ✏️ Editar
+                    </a>
+                    <button
+                      (click)="handleDeleteItem(item.id, item.title)"
+                      title="Eliminar objeto permanentemente"
+                      class="flex items-center space-x-1.5 px-2.5 py-1 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-all text-xs font-medium"
+                    >
+                      🗑️ Eliminar
+                    </button>
+                  </div>
                 </td>
               </tr>
             }
