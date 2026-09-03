@@ -61,7 +61,6 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     publico_pickup_hours,
     pickup_schedule_info
   } = req.body;
-  const ownerUuid = req.body.userUuid || (req as any).userUuid; // Can come from auth context
   const adminCode = (req as any).adminCode || 'system'; // If called via admin endpoint
 
   // Validate input
@@ -107,16 +106,6 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
   try {
     await client.query('BEGIN');
 
-    // Check owner exists
-    const ownerResult = await client.query('SELECT uuid, global_role FROM users WHERE uuid = $1', [
-      ownerUuid
-    ]);
-    if (ownerResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      res.status(404).json({ error: 'Owner user not found' });
-      return;
-    }
-
     // Seed per-role pickup hours from the trust matrix (suggestion), unless the
     // admin provided explicit values.
     const matrixPickup = (role: string): number | null => {
@@ -130,16 +119,15 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     // the DB defaults when not provided)
     const eventResult = await client.query(
       `INSERT INTO events
-       (owner_uuid, title, description, available_from, pickup_deadline, claims_close_at,
+       (title, description, available_from, pickup_deadline, claims_close_at,
         published_at,
         familiares_advance_hours, amigos_advance_hours, conocidos_advance_hours,
         familiares_share_bonus, amigos_share_bonus, conocidos_share_bonus,
         familiares_pickup_hours, amigos_pickup_hours, conocidos_pickup_hours,
         publico_pickup_hours, pickup_schedule_info)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
        RETURNING *`,
       [
-        ownerUuid,
         title,
         description || null,
         available_from,
@@ -162,13 +150,6 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
 
     const eventId = eventResult.rows[0].id;
 
-    // Add owner as event member with 'familiares' role automatically
-    await client.query(
-      `INSERT INTO event_members (event_id, user_uuid, role, invited_by, joined_at)
-       VALUES ($1, $2, $3, $4, NOW())`,
-      [eventId, ownerUuid, 'familiares', ownerUuid]
-    );
-
     // Generate 4 cryptic invitation codes (one per role)
     const invitationCodes: Record<string, string> = {};
     for (const role of VALID_ROLES) {
@@ -178,7 +159,7 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
       await client.query(
         `INSERT INTO event_invitations (event_id, role, code, created_by, is_active)
          VALUES ($1, $2, $3, $4, true)`,
-        [eventId, role, code, ownerUuid]
+        [eventId, role, code, null]
       );
     }
 
@@ -205,13 +186,10 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
       publico_pickup_hours: ev.publico_pickup_hours,
       pickup_schedule_info: ev.pickup_schedule_info ?? null
     });
-    upsertEventMember(ownerUuid, { eventId, role: 'familiares', bonusHours: 0, invitedBy: ownerUuid });
-
     // Log audit entry (no itemId: events are not items and would violate the FK)
     await logAudit({
       action: 'EVENT_CREATED',
       adminCodeSuffix: maskAdminCode(adminCode),
-      userId: ownerUuid,
       details: {
         title: title,
         available_from: available_from,
@@ -265,7 +243,7 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
 
     // 1. Validate invitation
     const invResult = await client.query(
-      `SELECT ei.role, ei.event_id, e.title, e.owner_uuid
+      `SELECT ei.role, ei.event_id, e.title
        FROM event_invitations ei
        JOIN events e ON ei.event_id = e.id
        WHERE ei.code = $1 AND ei.is_active = true`,
@@ -278,8 +256,7 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    const { role: invitationRole, event_id: eventId, title: eventTitle, owner_uuid: ownerUuid } =
-      invResult.rows[0];
+    const { role: invitationRole, event_id: eventId, title: eventTitle } = invResult.rows[0];
 
     // 2. Get or create user, get current role
     let userResult = await client.query('SELECT uuid, global_role FROM users WHERE uuid = $1', [
@@ -308,7 +285,7 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
        VALUES ($1, $2, $3, $4, NOW())
        ON CONFLICT (event_id, user_uuid) DO UPDATE
        SET role = $3, invited_by = $4`,
-      [eventId, userUuid, invitationRole, ownerUuid]
+      [eventId, userUuid, invitationRole, null]
     );
 
     // 5. Update user's global role if cascaded
@@ -334,7 +311,7 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
       eventId,
       role: invitationRole,
       bonusHours: 0,
-      invitedBy: ownerUuid
+      invitedBy: null
     });
 
     // Log audit entry (no itemId: events are not items and would violate the FK)
@@ -792,7 +769,7 @@ export const listEvents = async (req: Request, res: Response): Promise<void> => 
     const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
 
     const result = await pool.query(
-      `SELECT id, owner_uuid, title, description, available_from, pickup_deadline, created_at
+      `SELECT id, title, description, available_from, pickup_deadline, created_at
        FROM events
        ORDER BY created_at DESC
        LIMIT $1 OFFSET $2`,

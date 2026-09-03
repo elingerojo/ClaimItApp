@@ -51,7 +51,6 @@ export interface StoreItem {
 
 export interface StoreEvent {
   id: string;
-  owner_uuid?: string;
   title?: string;
   available_from: string | null;
   published_at: string | null;

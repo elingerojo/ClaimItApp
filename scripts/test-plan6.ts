@@ -71,9 +71,9 @@ async function main(): Promise<void> {
     await client.query('INSERT INTO users (uuid, alias, global_role) VALUES ($1,$2,$3)', [famUuid, `p6_fam_${stamp}`, 'familiares']);
 
     const ev = await client.query(
-      `INSERT INTO events (owner_uuid, title, available_from, pickup_deadline)
-       VALUES ($1, $2, NOW() + interval '1 hour', NOW() + interval '3 days') RETURNING id`,
-      [owner, `Plan6 Event ${stamp}`]
+      `INSERT INTO events (title, available_from, pickup_deadline)
+       VALUES ($1, NOW() + interval '1 hour', NOW() + interval '3 days') RETURNING id`,
+      [`Plan6 Event ${stamp}`]
     );
     eventId = ev.rows[0].id;
 
@@ -82,8 +82,8 @@ async function main(): Promise<void> {
       const code = crypto.randomBytes(8).toString('hex');
       await client.query(
         `INSERT INTO event_invitations (event_id, role, code, created_by)
-         VALUES ($1, $2, $3, $4)`,
-        [eventId, role, code, owner]
+         VALUES ($1, $2, $3, NULL)`,
+        [eventId, role, code]
       );
     }
 

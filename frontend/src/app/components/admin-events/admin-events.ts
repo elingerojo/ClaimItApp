@@ -6,7 +6,6 @@ import { Subscription } from 'rxjs';
 import { AdminTokenService } from '../../services/admin-token';
 import { ToastService } from '../../services/toast';
 import { InventoryService } from '../../services/inventory';
-import { UserService } from '../../services/user';
 import { railwayApiUrl } from '../../app.config';
 import { AdminAuth } from '../admin-auth/admin-auth';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
@@ -19,7 +18,6 @@ import {
 
 export interface EventSummary {
   id: string;
-  owner_uuid: string;
   title: string;
   description: string | null;
   available_from: string;
@@ -52,7 +50,6 @@ export class AdminEvents implements OnInit, OnDestroy {
   readonly adminTokenService = inject(AdminTokenService);
   readonly toastService = inject(ToastService);
   readonly inventoryService = inject(InventoryService);
-  readonly userService = inject(UserService);
   private readonly route = inject(ActivatedRoute);
   private querySub?: Subscription;
 
@@ -63,11 +60,12 @@ export class AdminEvents implements OnInit, OnDestroy {
   readonly loading = signal(false);
   readonly saving = signal(false);
   readonly formVisible = signal(false);
+  /** Evento en edición (null = modo crear). */
+  readonly editingEventId = signal<string | null>(null);
   readonly assignPanelId = signal<string | null>(null);
   readonly selectedItemIds = signal<string[]>([]);
 
-  // Form fields (create)
-  readonly ownerUuid = signal('');
+  // Form fields (create / edit)
   readonly title = signal('');
   readonly description = signal('');
   readonly availableFrom = signal('');
@@ -137,65 +135,144 @@ export class AdminEvents implements OnInit, OnDestroy {
   }
 
   toggleForm(): void {
-    this.formVisible.update(v => !v);
-    // Pre-llenar el owner con la sesión de usuario actual si existe
-    if (!this.ownerUuid()) this.ownerUuid.set(this.userService.currentUuid());
+    if (this.formVisible()) {
+      // Cerrar el form (create o edit)
+      this.formVisible.set(false);
+      this.editingEventId.set(null);
+      return;
+    }
+    this.resetForm();
+    this.formVisible.set(true);
   }
 
-  async submitCreate(): Promise<void> {
-    if (!this.title() || !this.availableFrom() || !this.pickupDeadline() || !this.ownerUuid()) {
-      this.toastService.error('Título, owner UUID, fecha disponible y fecha límite son requeridos.');
+  /** Limpia el form para crear (por defecto, los eventos son del admin). */
+  private resetForm(): void {
+    this.title.set('');
+    this.description.set('');
+    this.availableFrom.set('');
+    this.pickupDeadline.set('');
+    this.claimsCloseAt.set('');
+    this.publishedAt.set('');
+    this.familiaresAdvance.set(72);
+    this.amigosAdvance.set(24);
+    this.conocidosAdvance.set(0);
+    this.familiaresShare.set(6);
+    this.amigosShare.set(4);
+    this.conocidosShare.set(2);
+    this.familiaresPickup.set(48);
+    this.amigosPickup.set(36);
+    this.conocidosPickup.set(24);
+    this.publicoPickup.set(12);
+    this.editingEventId.set(null);
+  }
+
+  /** ISO (UTC) → valor para un <input type="datetime-local"> (local). */
+  private toLocalInputValue(iso: string | null | undefined): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n: number): string => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  /** Valor datetime-local → ISO (UTC), o null si viene vacío. */
+  private toUtcIsoOrNull(value: string): string | null {
+    if (!value) return null;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  /** Abre el formulario precargado con los datos del evento para editarlo. */
+  async editEvent(id: string): Promise<void> {
+    try {
+      const res = await fetch(`${this.apiUrl}/admin/events/${id}`, {
+        headers: { 'X-Admin-Token': this.adminTokenService.token() }
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'No autorizado');
+      const data = await res.json();
+      const ev = data.event;
+
+      this.title.set(ev.title ?? '');
+      this.description.set(ev.description ?? '');
+      this.availableFrom.set(this.toLocalInputValue(ev.available_from));
+      this.pickupDeadline.set(this.toLocalInputValue(ev.pickup_deadline));
+      this.claimsCloseAt.set(this.toLocalInputValue(ev.claims_close_at));
+      this.publishedAt.set(this.toLocalInputValue(ev.published_at));
+      this.familiaresAdvance.set(ev.familiares_advance_hours ?? 72);
+      this.amigosAdvance.set(ev.amigos_advance_hours ?? 24);
+      this.conocidosAdvance.set(ev.conocidos_advance_hours ?? 0);
+      this.familiaresShare.set(ev.familiares_share_bonus ?? 6);
+      this.amigosShare.set(ev.amigos_share_bonus ?? 4);
+      this.conocidosShare.set(ev.conocidos_share_bonus ?? 2);
+      this.familiaresPickup.set(ev.familiares_pickup_hours ?? null);
+      this.amigosPickup.set(ev.amigos_pickup_hours ?? null);
+      this.conocidosPickup.set(ev.conocidos_pickup_hours ?? null);
+      this.publicoPickup.set(ev.publico_pickup_hours ?? null);
+
+      this.editingEventId.set(id);
+      this.formVisible.set(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err: any) {
+      this.toastService.error(`Error al cargar el evento para editar: ${err.message}`);
+    }
+  }
+
+  private buildPayload(): Record<string, any> {
+    return {
+      title: this.title(),
+      description: this.description() || null,
+      available_from: this.toUtcIsoOrNull(this.availableFrom()),
+      pickup_deadline: this.toUtcIsoOrNull(this.pickupDeadline()),
+      claims_close_at: this.toUtcIsoOrNull(this.claimsCloseAt()),
+      published_at: this.toUtcIsoOrNull(this.publishedAt()),
+      familiares_advance_hours: this.familiaresAdvance(),
+      amigos_advance_hours: this.amigosAdvance(),
+      conocidos_advance_hours: this.conocidosAdvance(),
+      familiares_share_bonus: this.familiaresShare(),
+      amigos_share_bonus: this.amigosShare(),
+      conocidos_share_bonus: this.conocidosShare(),
+      familiares_pickup_hours: this.familiaresPickup(),
+      amigos_pickup_hours: this.amigosPickup(),
+      conocidos_pickup_hours: this.conocidosPickup(),
+      publico_pickup_hours: this.publicoPickup()
+    };
+  }
+
+  /** Crea (POST) o actualiza (PATCH) un evento según `editingEventId`. */
+  async submit(): Promise<void> {
+    const editingId = this.editingEventId();
+    if (!this.title() || !this.availableFrom() || !this.pickupDeadline()) {
+      this.toastService.error('Título, fecha disponible y fecha límite son requeridos.');
       return;
     }
     this.saving.set(true);
     try {
-      const res = await fetch(`${this.apiUrl}/admin/events`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Admin-Token': this.adminTokenService.token()
-        },
-        body: JSON.stringify({
-          userUuid: this.ownerUuid(),
-          title: this.title(),
-          description: this.description() || null,
-          available_from: new Date(this.availableFrom()).toISOString(),
-          pickup_deadline: new Date(this.pickupDeadline()).toISOString(),
-          claims_close_at: this.claimsCloseAt() ? new Date(this.claimsCloseAt()).toISOString() : null,
-          published_at: this.publishedAt() ? new Date(this.publishedAt()).toISOString() : null,
-          familiares_advance_hours: this.familiaresAdvance(),
-          amigos_advance_hours: this.amigosAdvance(),
-          conocidos_advance_hours: this.conocidosAdvance(),
-          familiares_share_bonus: this.familiaresShare(),
-          amigos_share_bonus: this.amigosShare(),
-          conocidos_share_bonus: this.conocidosShare(),
-          familiares_pickup_hours: this.familiaresPickup() ?? null,
-          amigos_pickup_hours: this.amigosPickup() ?? null,
-          conocidos_pickup_hours: this.conocidosPickup() ?? null,
-          publico_pickup_hours: this.publicoPickup() ?? null
-        })
-      });
+      const res = await fetch(
+        editingId ? `${this.apiUrl}/admin/events/${editingId}` : `${this.apiUrl}/admin/events`,
+        {
+          method: editingId ? 'PATCH' : 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Token': this.adminTokenService.token()
+          },
+          body: JSON.stringify(this.buildPayload())
+        }
+      );
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al crear evento');
-      this.toastService.success('Evento creado con 4 links de invitación.');
+      if (!res.ok) {
+        throw new Error(
+          data.error || (editingId ? 'Error al actualizar evento' : 'Error al crear evento')
+        );
+      }
+      this.toastService.success(
+        editingId ? 'Evento actualizado.' : 'Evento creado con 4 links de invitación.'
+      );
       this.formVisible.set(false);
-      this.title.set('');
-      this.description.set('');
-      this.availableFrom.set('');
-      this.pickupDeadline.set('');
-      this.claimsCloseAt.set('');
-      this.publishedAt.set('');
-      this.familiaresAdvance.set(72);
-      this.amigosAdvance.set(24);
-      this.conocidosAdvance.set(0);
-      this.familiaresShare.set(6);
-      this.amigosShare.set(4);
-      this.conocidosShare.set(2);
-      this.familiaresPickup.set(48);
-      this.amigosPickup.set(36);
-      this.conocidosPickup.set(24);
-      this.publicoPickup.set(12);
+      this.resetForm();
       await this.loadEvents();
+      if (editingId && this.detail()?.event?.id === editingId) {
+        await this.openDetail(editingId);
+      }
     } catch (err: any) {
       this.toastService.error(`Error: ${err.message}`);
     } finally {

@@ -114,10 +114,10 @@ async function main(): Promise<void> {
       'publico'
     ]);
     const evRes = await pool.query(
-      `INSERT INTO events (owner_uuid, title, available_from, pickup_deadline)
-       VALUES ($1, $2, NOW() + interval '1 hour', NOW() + interval '3 days')
+      `INSERT INTO events (title, available_from, pickup_deadline)
+       VALUES ($1, NOW() + interval '1 hour', NOW() + interval '3 days')
        RETURNING id`,
-      [owner, `Plan5 Event ${stamp}`]
+      [`Plan5 Event ${stamp}`]
     );
     eventId = evRes.rows[0].id;
 

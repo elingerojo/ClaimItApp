@@ -24,7 +24,13 @@ import {
 } from '../backend/src/controllers/eventsController.js';
 import { createItem } from '../backend/src/controllers/itemsController.js';
 import { getInventoryFeed } from '../backend/src/controllers/feedsController.js';
-import { getEvent, getItems, getEventMembership, upsertUser } from '../backend/src/cache/appStore.js';
+import {
+  getEvent,
+  getItems,
+  getEventMembership,
+  upsertUser,
+  upsertEventMember
+} from '../backend/src/cache/appStore.js';
 
 dotenv.config({ path: path.resolve('backend/.env') });
 
@@ -103,7 +109,6 @@ async function main(): Promise<void> {
     await createEvent(
       mockReq({
         body: {
-          userUuid: owner,
           title: `Plan3 Event ${stamp}`,
           description: 'temporary event',
           available_from: availableFrom,
@@ -130,7 +135,17 @@ async function main(): Promise<void> {
     check('amigos_advance_hours persisted (12)', evRow.rows[0]?.amigos_advance_hours === 12);
     check('amigos_share_bonus persisted (10)', evRow.rows[0]?.amigos_share_bonus === 10);
     check('event in store', !!getEvent(eventId!));
-    check('owner membership familiares', getEventMembership(owner, eventId!)?.role === 'familiares');
+    check('no owner membership (admin event)', getEventMembership(owner, eventId!) === undefined);
+
+    // Los eventos son del admin (sin dueño). Registramos un invitado "familiares"
+    // (como entraría por un link real) para ejercitar feed/share por rol.
+    await pool.query(
+      `INSERT INTO event_members (event_id, user_uuid, role, invited_by, joined_at)
+       VALUES ($1, $2, 'familiares', NULL, NOW())`,
+      [eventId, owner]
+    );
+    upsertEventMember(owner, { eventId: eventId!, role: 'familiares', bonusHours: 0, invitedBy: null });
+    check('familiares guest membership', getEventMembership(owner, eventId!)?.role === 'familiares');
 
     // --- 2. assignItems batch ---
     console.log('Test 2: assignItems');
@@ -174,7 +189,7 @@ async function main(): Promise<void> {
     check('detail -> 200', detRes._status === 200, detRes._json);
     check('detail has 1 item', detRes._json?.items?.length === 1);
     check(
-      'detail has owner member',
+      'detail has familiares member',
       detRes._json?.members?.some((m: any) => m.role === 'familiares')
     );
     check('detail has 4 invitations', detRes._json?.invitations?.length === 4);

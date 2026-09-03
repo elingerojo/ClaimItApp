@@ -102,4 +102,11 @@ export class EventInvitation implements OnInit {
       this.joining.set(false);
     }
   }
+
+  /** Verdadero si la invitación trae el alias real de quién invita (handle @alias).
+   *  En caso contrario se muestra el texto decorativo "el anfitrión". */
+  inviterIsHandle(): boolean {
+    const a = this.inviterAlias();
+    return !!a && a !== 'el anfitrión';
+  }
 }

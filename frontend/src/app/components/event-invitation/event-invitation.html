@@ -19,7 +19,13 @@
       <div class="text-center">
         <div class="text-4xl mb-3">🎟️</div>
         <h1 class="text-lg font-bold text-gray-900">Invitación a "{{ eventTitle() }}"</h1>
-        <p class="text-xs text-gray-500 mt-1">Invitado por <span class="font-semibold text-gray-700">&#64;{{ inviterAlias() }}</span></p>
+        <p class="text-xs text-gray-500 mt-1">Invitado por
+          @if (inviterIsHandle()) {
+            <span class="font-semibold text-gray-700">&#64;{{ inviterAlias() }}</span>
+          } @else {
+            <span class="font-semibold text-gray-700">el anfitrión</span>
+          }
+        </p>
 
         <div class="mt-4 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-gray-100 text-gray-700 font-medium">
           Recibirás el rol: <span class="font-bold">{{ roleLabels[role()] ?? role() }}</span>

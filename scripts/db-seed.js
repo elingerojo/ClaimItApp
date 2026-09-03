@@ -3,7 +3,7 @@
  * scripts/db-seed.js
  *
  * Etapa 1 — seeds the freshly rebuilt Neon schema with:
- *   - Owner user (familiares) + demo users per role.
+ *   - Demo users per role.
  *   - An invented moving-giveaway event with a realistic timeline that
  *     exercises the closing lifecycle (published_at / available_from past,
  *     claims_close_at +4d, pickup_deadline +6d) and per-role pickup windows.
@@ -132,16 +132,16 @@ async function main() {
       );
     }
 
-    // 2. Event with realistic lifecycle.
+    // 2. Event with realistic lifecycle (los eventos son del admin, sin dueño).
     const evRes = await client.query(
       `INSERT INTO events
-        (owner_uuid, title, description, available_from, pickup_deadline, claims_close_at,
+        (title, description, available_from, pickup_deadline, claims_close_at,
          published_at, status,
          familiares_advance_hours, amigos_advance_hours, conocidos_advance_hours, publico_advance_hours,
          familiares_share_bonus, amigos_share_bonus, conocidos_share_bonus, publico_share_bonus,
          familiares_pickup_hours, amigos_pickup_hours, conocidos_pickup_hours, publico_pickup_hours,
          pickup_window_hours, pickup_schedule_info)
-       VALUES ($1, $2, $3,
+       VALUES ($1, $2,
                NOW() - interval '1 day', NOW() + interval '6 days', NOW() + interval '4 days',
                NOW() - interval '3 days', 'active',
                72, 24, 0, 0,
@@ -149,35 +149,35 @@ async function main() {
                48, 30, 24, 12,
                24, 'Entrega en sitio; el horario de recolección se coordina con el anfitrión.')
        RETURNING id`,
-      [users[0].uuid, 'Mudanza familiar — Regalo todo antes de partir',
+      ['Mudanza familiar — Regalo todo antes de partir',
        'Regalo objetos antes de mudarme. Familiares y amigos pueden reservar con anticipación; la recolección ocurre en el domicilio.']
     );
     const eventId = evRes.rows[0].id;
 
-    // 3. Memberships (owner familiares, Marcos amigos, Lucía conocidos).
+    // 3. Memberships (miembros demo que entraron por invitación; invited_by NULL).
     await client.query(
-      `INSERT INTO event_members (event_id, user_uuid, role, invited_by, joined_at)
-       VALUES ($1, $2, 'familiares', $2, NOW())`,
+      `INSERT INTO event_members (event_id, user_uuid, role, joined_at)
+       VALUES ($1, $2, 'familiares', NOW())`,
       [eventId, users[0].uuid]
     );
     await client.query(
-      `INSERT INTO event_members (event_id, user_uuid, role, invited_by, joined_at)
-       VALUES ($1, $2, 'amigos', $3, NOW())`,
-      [eventId, users[1].uuid, users[0].uuid]
+      `INSERT INTO event_members (event_id, user_uuid, role, joined_at)
+       VALUES ($1, $2, 'amigos', NOW())`,
+      [eventId, users[1].uuid]
     );
     await client.query(
-      `INSERT INTO event_members (event_id, user_uuid, role, invited_by, joined_at)
-       VALUES ($1, $2, 'conocidos', $3, NOW())`,
-      [eventId, users[2].uuid, users[0].uuid]
+      `INSERT INTO event_members (event_id, user_uuid, role, joined_at)
+       VALUES ($1, $2, 'conocidos', NOW())`,
+      [eventId, users[2].uuid]
     );
 
-    // 4. Invitation codes (1 per role).
+    // 4. Invitation codes (1 per role). created_by = NULL (eventos del admin).
     for (const role of ['familiares', 'amigos', 'conocidos', 'publico']) {
       await client.query(
         `INSERT INTO event_invitations (event_id, role, code, created_by, is_active)
-         VALUES ($1, $2, $3, $4, true)
+         VALUES ($1, $2, $3, NULL, true)
          ON CONFLICT (event_id, role) DO NOTHING`,
-        [eventId, role, genCode(), users[0].uuid]
+        [eventId, role, genCode()]
       );
     }
 
