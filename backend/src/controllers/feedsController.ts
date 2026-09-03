@@ -1,6 +1,14 @@
 import { Request, Response } from 'express';
 import { ROLE_HIERARCHY, resolveEffectiveRole, resolvePickupHoursField } from '@claimitapp/shared';
-import { getItems, getLedger, getUser, getEvent, getEventMembership, getTrustSetting } from '../cache/appStore.js';
+import {
+  getItems,
+  getLedger,
+  getUser,
+  getEvent,
+  getEventMembership,
+  getTrustSetting,
+  ensureHydrated
+} from '../cache/appStore.js';
 import { runLazyCatchUp } from '../services/scheduler.js';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -98,6 +106,11 @@ function resolveUserPickupWindowHours(
  */
 export const getInventoryFeed = async (req: Request, res: Response): Promise<void> => {
   try {
+    // Self-heal: si el rehidratado de arranque falló (Neon frío), la primera
+    // lectura recarga el store desde Neon. Sin esto el feed quedaría vacío
+    // hasta el próximo redeploy. En el caso sano NO toca la BD.
+    await ensureHydrated();
+
     // Catch-up perezoso: resolver deadlines vencidos solo si hay actividad.
     // Con store limpio no toca Neon (preserva el autosuspend).
     await runLazyCatchUp();
@@ -219,6 +232,10 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
  */
 export const getLedgerFeed = async (_req: Request, res: Response): Promise<void> => {
   try {
+    // Mismo self-heal que el feed de items: sin esto el historial quedaría
+    // vacío tras un rehidratado de arranque fallido.
+    await ensureHydrated();
+
     res.status(200).json(getLedger());
   } catch (error) {
     console.error('Failed to retrieve activity logs:', error);

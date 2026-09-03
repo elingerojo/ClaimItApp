@@ -111,8 +111,16 @@ let events: Map<string, any> = new Map();
 let eventMembers: Map<string, StoreEventMember[]> = new Map(); // userUuid -> memberships
 let trustSettings: Map<string, any> = new Map(); // level id -> trust_levels_settings row
 
+// Estado de hidratación: evita releer Neon cuando el arranque ya fue exitoso y
+// permite auto-recuperarse (single-flight + cooldown) si el rehidratado inicial
+// falló porque Neon estaba autosuspendido (cold start > connectionTimeout).
+let hydrated = false;
+let hydrateInFlight: Promise<boolean> | null = null;
+let lastHydrateAttemptAt = 0;
+const HYDRATE_RETRY_COOLDOWN_MS = 15_000;
+
 /** Carga todo desde Neon al arrancar. Único acceso a BD en frío. */
-export async function rehydrateAll(): Promise<void> {
+export async function rehydrateAll(): Promise<boolean> {
   try {
     // 1. Items + claims (queues)
     const itemsResult = await pool.query('SELECT * FROM items ORDER BY created_at DESC');
@@ -244,9 +252,48 @@ export async function rehydrateAll(): Promise<void> {
     console.log(
       `[APPSTORE] Rehydrated: ${items.length} items, ${ledger.length} ledger, ${feedHistory.length} feeds, ${users.size} users, ${events.size} events, ${membersResult.rows.length} memberships`
     );
+    hydrated = true;
+    return true;
   } catch (err) {
-    console.error('[APPSTORE] Rehydrate failed:', err);
+    hydrated = false;
+    console.error(
+      '[APPSTORE] Rehydrate failed (store vacío; se reintentará en la próxima lectura):',
+      err
+    );
+    return false;
   }
+}
+
+/**
+ * true cuando el store en RAM ya fue rehidratado correctamente desde Neon.
+ */
+export function isHydrated(): boolean {
+  return hydrated;
+}
+
+/**
+ * Self-heal perezoso del store: si el rehidratado de arranque falló (Neon
+ * autosuspendido), la primera lectura que pase por aquí reintenta cargar todo.
+ * - Single-flight: solo hay un intento en curso a la vez (sin estampida).
+ * - Cooldown: tras un fallo no se vuelve a tocar Neon durante unos segundos,
+ *   aunque lleguen varias peticiones seguidas (sin gasto de compute innecesario).
+ * En el caso sano (hydrated === true) NO toca la BD: regresa al instante.
+ */
+export function ensureHydrated(): Promise<void> {
+  if (hydrated) return Promise.resolve();
+
+  const now = Date.now();
+  if (now - lastHydrateAttemptAt < HYDRATE_RETRY_COOLDOWN_MS) {
+    return Promise.resolve();
+  }
+  lastHydrateAttemptAt = now;
+
+  if (!hydrateInFlight) {
+    hydrateInFlight = rehydrateAll().finally(() => {
+      hydrateInFlight = null;
+    });
+  }
+  return hydrateInFlight.then(() => undefined);
 }
 
 // --- Lecturas (sin BD) ---

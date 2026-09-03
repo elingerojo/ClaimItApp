@@ -14,7 +14,12 @@ const pool = new pg.Pool({
   ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
   max: 20, // Max concurrent connections in backend pool
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  // Neon puede estar autosuspendido ("siesta") y tardar varios segundos en
+  // aceptar la primera conexión tras un cold start. Con 2s el rehidratado de
+  // arranque fallaba y el feed quedaba vacío. El pool conecta de forma perezosa
+  // (solo ante una query real), así que subir el timeout NO mantiene Neon
+  // despierto: solo da margen a la primera conexión en frío.
+  connectionTimeoutMillis: 10000,
 });
 
 export const query = (text: string, params?: any[]) => {
