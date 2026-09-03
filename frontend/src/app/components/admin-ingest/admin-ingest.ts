@@ -1,4 +1,4 @@
-import { Component, signal, inject, OnInit } from '@angular/core';
+import { Component, signal, computed, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -11,10 +11,12 @@ import { railwayApiUrl } from '../../app.config';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { AdminAuth } from '../admin-auth/admin-auth';
 
-/** Opción de evento para el selector de captura (GET /api/events). */
+/** Opción de evento para los selectores (GET /api/events). */
 export interface EventOption {
   id: string;
   title: string;
+  /** Estado del evento (draft|scheduled|active|closing|closed). */
+  status?: string;
 }
 
 @Component({
@@ -57,10 +59,27 @@ export class AdminIngest implements OnInit {
   readonly editEventId = signal<string>(''); // '' = Sin evento
   readonly editPriceBase = signal<number | null>(null);
   readonly editVisibilityLevel = signal<number>(4);
-  readonly editAvailableFrom = signal<string>(''); // datetime-local
-  readonly editVisibleAt = signal<string>(''); // datetime-local
   /** true si el editor se abrió desde Gestionar Inventario (?edit=ITEM_ID). */
   readonly isPreloadedEdit = signal(false);
+
+  /** Eventos no cerrados: candidatos para asignar un item (captura y edición). */
+  readonly availableEvents = computed<EventOption[]>(() =>
+    this.events().filter(ev => ev.status !== 'closed')
+  );
+
+  /**
+   * Opciones del select del editor: los eventos disponibles + el evento actual
+   * del item aunque esté 'closed' (Cerrado), para que se vea pre-seleccionado
+   * y no se pierda la asignación al guardar sin cambiarlo.
+   */
+  readonly editorEventOptions = computed<EventOption[]>(() => {
+    const options = this.availableEvents();
+    const currentId = this.editEventId();
+    if (!currentId) return options;
+    if (options.some(ev => ev.id === currentId)) return options;
+    const current = this.events().find(ev => ev.id === currentId);
+    return current ? [...options, current] : options;
+  });
 
   readonly categories: ItemCategory[] = [
     'Kitchen', 'Electronics', 'Decor', 'Books', 'Media',
@@ -127,30 +146,12 @@ export class AdminIngest implements OnInit {
       this.editEventId.set(item.eventId ?? '');
       this.editPriceBase.set(item.precioBaseCosto != null ? Number(item.precioBaseCosto) : null);
       this.editVisibilityLevel.set(item.visibilityLevel ?? 4);
-      this.editAvailableFrom.set(this.toLocalInputValue(item.availableFrom));
-      this.editVisibleAt.set(this.toLocalInputValue(item.visibleAt));
       this.isPreloadedEdit.set(true);
 
       this.scrollToEditor();
     } catch (err: any) {
       this.toastService.error(`Error al cargar el objeto para editar: ${err.message}`);
     }
-  }
-
-  /** ISO (UTC) → valor local para un <input type="datetime-local">. */
-  private toLocalInputValue(iso: string | null | undefined): string {
-    if (!iso) return '';
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return '';
-    const pad = (n: number): string => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-
-  /** Valor de datetime-local → ISO (UTC), o null si viene vacío. */
-  private fromLocalInputValue(value: string): string | null {
-    if (!value) return null;
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }
 
   /** Lleva al editor a la vista una vez que se haya renderizado. */
@@ -160,24 +161,26 @@ export class AdminIngest implements OnInit {
     }, 60);
   }
 
-  /** Carga los eventos desde GET /api/events y restaura el event_id persistido. */
+  /** Carga los eventos (con status) desde GET /api/events y restaura el event_id persistido. */
   private async loadEventsAndRestoreSelection(): Promise<void> {
     this.loadingEvents.set(true);
     try {
-      const res = await fetch(`${this.apiUrl}/events`);
+      const res = await fetch(`${this.apiUrl}/events?limit=100`);
       if (!res.ok) throw new Error('No se pudo obtener la lista de eventos');
       const data = await res.json();
       const events: EventOption[] = (data.events ?? []).map((ev: any) => ({
         id: ev.id,
-        title: ev.title ?? 'Evento sin título'
+        title: ev.title ?? 'Evento sin título',
+        status: ev.status ?? ''
       }));
       this.events.set(events);
 
+      // Solo se restaura como destino de captura un evento que no esté cerrado.
       const storedId = this.readStoredEventId();
-      if (storedId && events.some(ev => ev.id === storedId)) {
+      if (storedId && events.some(ev => ev.id === storedId && ev.status !== 'closed')) {
         this.selectedEventId.set(storedId);
       } else if (storedId) {
-        // El evento guardado ya no existe (pudo ser eliminado): limpiar la clave
+        // El evento guardado ya no existe o quedó 'closed' (Cerrado): limpiar la clave
         this.clearStoredEventId();
       }
     } catch (err: any) {
@@ -310,8 +313,6 @@ export class AdminIngest implements OnInit {
       this.editEventId.set(this.selectedEventId());
       this.editPriceBase.set(this.formPrecioBase());
       this.editVisibilityLevel.set(4);
-      this.editAvailableFrom.set('');
-      this.editVisibleAt.set('');
       this.isPreloadedEdit.set(false);
 
       // Clear the ingest form for the next item
@@ -345,9 +346,7 @@ export class AdminIngest implements OnInit {
       infoUrl: this.editInfoUrl() === '' ? null : this.editInfoUrl(),
       event_id: this.editEventId() || null,
       precio_base_costo: this.editPriceBase(),
-      visibility_level: this.editVisibilityLevel(),
-      available_from: this.fromLocalInputValue(this.editAvailableFrom()),
-      visible_at: this.fromLocalInputValue(this.editVisibleAt())
+      visibility_level: this.editVisibilityLevel()
     };
 
     try {
@@ -391,8 +390,6 @@ export class AdminIngest implements OnInit {
     this.editEventId.set('');
     this.editPriceBase.set(null);
     this.editVisibilityLevel.set(4);
-    this.editAvailableFrom.set('');
-    this.editVisibleAt.set('');
     this.isPreloadedEdit.set(false);
   }
 }

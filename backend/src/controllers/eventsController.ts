@@ -770,7 +770,7 @@ export const listEvents = async (req: Request, res: Response): Promise<void> => 
     const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
 
     const result = await pool.query(
-      `SELECT id, title, description, available_from, pickup_deadline, created_at
+      `SELECT id, title, description, available_from, pickup_deadline, status, created_at
        FROM events
        ORDER BY created_at DESC
        LIMIT $1 OFFSET $2`,
