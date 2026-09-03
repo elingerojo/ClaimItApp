@@ -1,8 +1,9 @@
-import { Component, signal, computed, inject, effect } from '@angular/core';
+import { Component, signal, computed, inject, effect, OnInit } from '@angular/core';
 import { CommonModule, NgOptimizedImage } from '@angular/common';
 import { InventoryService, ItemWithQueue, EventSummary } from '../../services/inventory';
 import { UserService } from '../../services/user';
 import { ToastService } from '../../services/toast';
+import { InvitationService } from '../../services/invitations';
 import { ItemCategory, ItemStatus } from '@claimitapp/shared';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
@@ -15,10 +16,11 @@ import { eventStatusBadge, eventStatusLabel } from '../../utils/event-status';
   imports: [CommonModule, NgOptimizedImage, StripAccentsPipe, DateEsPipe, ItemDetail],
   templateUrl: './inventory-list.html'
 })
-export class InventoryList {
+export class InventoryList implements OnInit {
   readonly inventoryService = inject(InventoryService);
   readonly userService = inject(UserService);
   readonly toastService = inject(ToastService);
+  private readonly invitationService = inject(InvitationService);
 
   // Señal para el item seleccionado en el modal de detalle
   readonly selectedItem = signal<ItemWithQueue | null>(null);
@@ -101,6 +103,38 @@ export class InventoryList {
    * un usuario nuevo ni devuelve databaseReset).
    */
   readonly isEditingIdentity = signal(false);
+
+  ngOnInit(): void {
+    // Visitante que YA tiene sesión guardada y llega con ?invite=TOKEN:
+    // la invitación se acepta automáticamente (el home no cambia su aspecto).
+    if (this.userService.isAuthenticated()) {
+      void this.acceptPendingInvite();
+    }
+  }
+
+  /**
+   * "Magia" al resolver la identidad: si hay una invitación pendiente
+   * (detectada en la URL del home), se acepta contra el backend. En éxito se
+   * aplica el rol otorgado y se refresca el catálogo; si el enlace ya no es
+   * válido, se avisa sin bloquear (el usuario sigue como público).
+   */
+  private async acceptPendingInvite(): Promise<void> {
+    if (!this.invitationService.hasPending()) return;
+    const uuid = this.userService.currentUuid();
+    if (!uuid) return;
+
+    const result = await this.invitationService.acceptPending(uuid);
+    if (result.accepted) {
+      if (result.role) this.userService.setRole(result.role);
+      this.inventoryService.refresh().catch(() => {});
+      this.toastService.success(result.message || '🎉 ¡Ya formas parte del evento!');
+    } else if (result.invalid) {
+      this.toastService.info(
+        'El enlace de invitación ya no es válido. Pídele un enlace nuevo a quien te invitó; mientras tanto puedes navegar el catálogo.'
+      );
+    }
+    // Error de red: se conserva el pendiente para reintentar en la siguiente acción.
+  }
 
   constructor() {
     // Detectar cambios de tamaño de ventana en tiempo real
@@ -316,6 +350,7 @@ export class InventoryList {
       }
 
       this.inventoryService.refresh().catch(() => {});
+      await this.acceptPendingInvite();
     } catch (err: any) {
       this.toastService.error(`Error: ${err.message}`);
     } finally {
@@ -334,6 +369,7 @@ export class InventoryList {
     this.confirmDialogHidden();
     this.isEditingIdentity.set(false);
     this.inventoryService.refresh().catch(() => {});
+    void this.acceptPendingInvite();
   }
 
   /**
@@ -378,6 +414,7 @@ export class InventoryList {
           // Alias tocayo aceptado
           this.isEditingIdentity.set(false);
           this.inventoryService.refresh().catch(() => {});
+          await this.acceptPendingInvite();
           return;
         }
         if (!result.conflict) break; // Error no esperado, salir

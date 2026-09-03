@@ -120,11 +120,28 @@
                 <!-- Links de invitación -->
                 <div>
                   <div class="text-xs font-bold text-gray-500 mb-1.5">Links de invitación (1 por rol)</div>
-                  <div class="space-y-1">
+                  <div class="space-y-1.5">
                     @for (inv of d.invitations; track inv.role) {
-                      <div class="flex items-center justify-between text-[10px] font-mono bg-gray-50 border border-gray-100 rounded-lg px-2 py-1">
-                        <span>{{ roleLabels[inv.role] ?? inv.role }} · {{ inv.code }}</span>
-                        <button (click)="copyCode(inv.code)" class="text-gray-500 hover:text-gray-800">📋</button>
+                      <div class="rounded-lg border border-gray-100 bg-gray-50 px-2 py-1.5">
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="text-[10px] font-semibold text-gray-700">{{ roleLabels[inv.role] ?? inv.role }}</span>
+                          <span [class.bg-emerald-100]="inv.is_active" [class.text-emerald-700]="inv.is_active"
+                                [class.bg-red-100]="!inv.is_active" [class.text-red-600]="!inv.is_active"
+                                class="shrink-0 text-[9px] font-medium px-1.5 py-0.5 rounded-full">
+                            {{ inv.is_active ? 'Activo' : 'Inactivo' }} · {{ inv.use_count ?? 0 }} uso(s)
+                          </span>
+                        </div>
+                        <div class="mt-1 flex items-center gap-1.5">
+                          <input [value]="inviteUrl(inv.code)" readonly
+                                 class="flex-1 min-w-0 text-[9px] font-mono px-1.5 py-1 bg-white border border-gray-200 rounded-md" />
+                          <button (click)="copyInviteLink(inv.code)" title="Copiar enlace completo"
+                                  class="shrink-0 text-xs text-gray-500 hover:text-gray-800 px-1">📋</button>
+                          <button (click)="shareInviteLink(inv.code)" title="Compartir enlace"
+                                  class="shrink-0 text-xs text-gray-500 hover:text-gray-800 px-1">📤</button>
+                          <a [href]="whatsAppInviteUrl(inv.code)" target="_blank" rel="noopener"
+                             title="Enviar por WhatsApp"
+                             class="shrink-0 text-xs text-gray-500 hover:text-gray-800 px-1">💬</a>
+                        </div>
                       </div>
                     }
                   </div>

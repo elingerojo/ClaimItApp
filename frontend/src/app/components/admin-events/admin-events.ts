@@ -9,6 +9,12 @@ import { UserService } from '../../services/user';
 import { railwayApiUrl } from '../../app.config';
 import { AdminAuth } from '../admin-auth/admin-auth';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
+import {
+  buildInviteUrl,
+  copyText,
+  tryNativeShare,
+  buildWhatsAppInviteUrl
+} from '../../utils/invite-share';
 
 export interface EventSummary {
   id: string;
@@ -227,10 +233,28 @@ export class AdminEvents {
     }
   }
 
-  copyCode(code: string): void {
-    navigator.clipboard?.writeText(code).then(
-      () => this.toastService.success('Código copiado.'),
-      () => this.toastService.error('No se pudo copiar.')
-    );
+  /** Enlace completo compartible: HOME + token (https://SITIO/?invite=CODE). */
+  inviteUrl(code: string): string {
+    return buildInviteUrl(code);
+  }
+
+  async copyInviteLink(code: string): Promise<void> {
+    const ok = await copyText(buildInviteUrl(code));
+    this.toastService[ok ? 'success' : 'error'](ok ? 'Enlace copiado.' : 'No se pudo copiar.');
+  }
+
+  async shareInviteLink(code: string): Promise<void> {
+    const link = buildInviteUrl(code);
+    const shared = await tryNativeShare(link);
+    if (!shared) {
+      const ok = await copyText(link);
+      this.toastService[ok ? 'success' : 'error'](
+        ok ? 'Enlace copiado (pégalo en WhatsApp).' : 'No se pudo copiar.'
+      );
+    }
+  }
+
+  whatsAppInviteUrl(code: string): string {
+    return buildWhatsAppInviteUrl(buildInviteUrl(code));
   }
 }

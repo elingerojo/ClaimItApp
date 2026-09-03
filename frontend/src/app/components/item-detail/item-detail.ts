@@ -9,6 +9,12 @@ import { ToastService } from '../../services/toast';
 import { railwayApiUrl } from '../../app.config';
 import { eventStatusBadge, eventStatusLabel } from '../../utils/event-status';
 import { roleDisplayName, roleExpiryConsequence } from '../../utils/role-info';
+import {
+  buildInviteUrl,
+  copyText,
+  tryNativeShare,
+  buildWhatsAppInviteUrl
+} from '../../utils/invite-share';
 
 @Component({
   selector: 'app-item-detail',
@@ -114,20 +120,36 @@ export class ItemDetail {
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'No se pudo generar el link.');
-      this.shareLink.set(`${window.location.origin}/events/${eventId}/invite/${data.code}`);
+      // Enlace completo: HOME + token (https://SITIO/?invite=CODE)
+      this.shareLink.set(buildInviteUrl(data.code));
       this.shareVisible.set(true);
     } catch (err: any) {
       this.toastService.error(`Error: ${err.message}`);
     }
   }
 
-  copyShareLink(): void {
+  async copyShareLink(): Promise<void> {
     const link = this.shareLink();
     if (!link) return;
-    navigator.clipboard?.writeText(link).then(
-      () => this.toastService.success('Link copiado.'),
-      () => this.toastService.error('No se pudo copiar.')
-    );
+    const ok = await copyText(link);
+    this.toastService[ok ? 'success' : 'error'](ok ? 'Enlace copiado.' : 'No se pudo copiar.');
+  }
+
+  async shareShareLink(): Promise<void> {
+    const link = this.shareLink();
+    if (!link) return;
+    const shared = await tryNativeShare(link);
+    if (!shared) {
+      const ok = await copyText(link);
+      this.toastService[ok ? 'success' : 'error'](
+        ok ? 'Enlace copiado (pégalo en WhatsApp).' : 'No se pudo copiar.'
+      );
+    }
+  }
+
+  whatsAppShareUrl(): string {
+    const link = this.shareLink();
+    return link ? buildWhatsAppInviteUrl(link) : '#';
   }
 
   /**

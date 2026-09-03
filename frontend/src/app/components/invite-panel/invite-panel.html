@@ -1,0 +1,43 @@
+@if (visible()) {
+  <section class="rounded-2xl border border-gray-100 bg-white shadow-sm p-6">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div class="min-w-0">
+        <h2 class="text-sm font-bold text-gray-900">🔗 Invita a alguien más</h2>
+        <p class="text-xs text-gray-500 mt-0.5">Comparte el enlace y quien lo reciba podrá entrar y apartar lo que le guste.</p>
+      </div>
+      @if (events().length > 1) {
+        <div class="flex flex-wrap gap-1.5 shrink-0">
+          @for (ev of events(); track ev.id) {
+            <button (click)="selectEvent(ev.id)" [class.bg-gray-900]="isCurrent(ev.id)"
+                    [class.text-white]="isCurrent(ev.id)" [class.bg-white]="!isCurrent(ev.id)"
+                    [class.text-gray-600]="!isCurrent(ev.id)"
+                    class="text-[10px] px-2.5 py-1 rounded-full border border-gray-200 font-medium transition-colors">
+              {{ ev.title }}
+            </button>
+          }
+        </div>
+      }
+    </div>
+
+    @if (!link()) {
+      <button (click)="generateLink()" [disabled]="loading()"
+              class="mt-4 text-xs px-4 py-2 rounded-lg font-medium bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:opacity-50">
+        {{ loading() ? 'Generando...' : 'Generar enlace de invitación' }}
+      </button>
+    } @else if (link(); as link) {
+      <div class="mt-4 flex flex-col sm:flex-row gap-2">
+        <input [value]="link" readonly
+               class="flex-1 min-w-0 text-[10px] font-mono px-2.5 py-2 border border-gray-200 rounded-lg bg-gray-50" />
+        <div class="flex gap-1.5 shrink-0">
+          <button (click)="copy()" title="Copiar el enlace completo"
+                  class="text-[11px] px-3 py-2 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">📋 Copiar</button>
+          <button (click)="share()" title="Compartir enlace (WhatsApp, etc.)"
+                  class="text-[11px] px-3 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors">📤 Compartir</button>
+          <a [href]="whatsAppUrl()" target="_blank" rel="noopener"
+             title="Abrir WhatsApp con el mensaje listo"
+             class="inline-flex items-center text-[11px] px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">💬 WhatsApp</a>
+        </div>
+      </div>
+    }
+  </section>
+}
