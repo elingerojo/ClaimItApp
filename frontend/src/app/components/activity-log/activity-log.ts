@@ -2,6 +2,7 @@ import { Component, signal, inject, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { railwayApiUrl } from '../../app.config';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
+import { DateEsPipe } from '../../pipes/date-es.pipe';
 
 export interface LedgerLog {
   username: string;
@@ -13,7 +14,7 @@ export interface LedgerLog {
 @Component({
   selector: 'app-activity-log',
   standalone: true,
-  imports: [CommonModule, StripAccentsPipe],
+  imports: [CommonModule, StripAccentsPipe, DateEsPipe],
   templateUrl: './activity-log.html'
 })
 export class ActivityLog implements OnInit, OnDestroy {

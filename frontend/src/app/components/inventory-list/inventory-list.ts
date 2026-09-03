@@ -5,13 +5,14 @@ import { UserService } from '../../services/user';
 import { ToastService } from '../../services/toast';
 import { ItemCategory, ItemStatus } from '@claimitapp/shared';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
+import { DateEsPipe } from '../../pipes/date-es.pipe';
 import { ItemDetail } from '../item-detail/item-detail';
 import { eventStatusBadge, eventStatusLabel } from '../../utils/event-status';
 
 @Component({
   selector: 'app-inventory-list',
   standalone: true,
-  imports: [CommonModule, NgOptimizedImage, StripAccentsPipe, ItemDetail],
+  imports: [CommonModule, NgOptimizedImage, StripAccentsPipe, DateEsPipe, ItemDetail],
   templateUrl: './inventory-list.html'
 })
 export class InventoryList {

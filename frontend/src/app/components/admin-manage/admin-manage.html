@@ -77,7 +77,7 @@
                         </span>
                         @if (user.pickupDeadline) {
                           <span class="text-[10px] text-amber-600 font-mono">
-                            ⏰ recoge antes de {{ user.pickupDeadline | date:'EEE d MMM, h:mm a' }}
+                            ⏰ recoge antes de {{ user.pickupDeadline | dateEs }}
                             @if (user.roleAtAssignment) { · rol: {{ user.roleAtAssignment }} }
                           </span>
                         }

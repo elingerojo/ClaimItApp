@@ -8,6 +8,7 @@ import { InventoryService } from '../../services/inventory';
 import { UserService } from '../../services/user';
 import { railwayApiUrl } from '../../app.config';
 import { AdminAuth } from '../admin-auth/admin-auth';
+import { DateEsPipe } from '../../pipes/date-es.pipe';
 
 export interface EventSummary {
   id: string;
@@ -37,7 +38,7 @@ export interface EventDetail {
 @Component({
   selector: 'app-admin-events',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, AdminAuth],
+  imports: [CommonModule, FormsModule, RouterModule, AdminAuth, DateEsPipe],
   templateUrl: './admin-events.html'
 })
 export class AdminEvents {

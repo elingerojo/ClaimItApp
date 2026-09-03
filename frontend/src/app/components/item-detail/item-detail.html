@@ -46,9 +46,9 @@
           </div>
           <div class="mt-0.5 font-bold text-sm text-gray-900">{{ ev.title }}</div>
           <div class="mt-0.5 text-indigo-800/90">
-            Reservas desde <b>{{ ev.available_from | date:'EEE d MMM, h:mm a' }}</b>
+            Reservas desde <b>{{ ev.available_from | dateEs }}</b>
             @if (ev.pickup_deadline) {
-              <span class="mx-1">·</span> Última recogida <b>{{ ev.pickup_deadline | date:'EEE d MMM, h:mm a' }}</b>
+              <span class="mx-1">·</span> Última recogida <b>{{ ev.pickup_deadline | dateEs }}</b>
             }
           </div>
           @if (ev.pickup_schedule_info) {
@@ -81,7 +81,7 @@
             } @else if (item().claimsClosed) {
               <b>El evento ya cerró las separaciones.</b>
             } @else if (item().effectiveAvailableFrom) {
-              <b>Abre para ti el {{ item().effectiveAvailableFrom | date:'EEE d MMM, h:mm a' }}</b>
+              <b>Abre para ti el {{ item().effectiveAvailableFrom | dateEs }}</b>
               @if (countdown(item().effectiveAvailableFrom)) {
                 <span class="ml-1 font-mono text-purple-600">({{ countdown(item().effectiveAvailableFrom) }})</span>
               }
@@ -97,7 +97,7 @@
             <span class="mt-0.5 shrink-0">⏰</span>
             <div>
               <div><b>Eres primero en fila.</b> Recoge antes de
-                <b>{{ item().myPickupDeadline | date:'EEE d MMM, h:mm a' }}</b>.</div>
+                <b>{{ item().myPickupDeadline | dateEs }}</b>.</div>
               @if (countdown(item().myPickupDeadline)) {
                 <div class="mt-0.5 font-mono font-bold text-amber-700">⏳ Faltan {{ countdown(item().myPickupDeadline) }}</div>
               }
@@ -117,7 +117,7 @@
                   Si quien está adelante no recoge, el turno pasa a ti y tendrás hasta
                   <b>{{ item().myPickupWindowHours }} h</b>
                   @if (item().eventSummary?.pickup_deadline) {
-                    (antes de {{ item().eventSummary!.pickup_deadline | date:'EEE d MMM, h:mm a' }})
+                    (antes de {{ item().eventSummary!.pickup_deadline | dateEs }})
                   } para recogerlo.
                 } @else {
                   Si quien está adelante no recoge, el turno pasa a ti.
@@ -132,7 +132,7 @@
           <div class="flex items-start gap-2 text-xs text-gray-600">
             <span class="mt-0.5 shrink-0">🏁</span>
             <div>
-              El evento cierra la recolección el <b>{{ evEnd | date:'EEE d MMM, h:mm a' }}</b>.
+              El evento cierra la recolección el <b>{{ evEnd | dateEs }}</b>.
               @if (item().claimsClosed) {
                 Ya no se aceptan nuevas separaciones.
               }
@@ -257,7 +257,7 @@
             un plazo
           }
           @if (item().eventSummary?.pickup_deadline) {
-            (antes de {{ item().eventSummary!.pickup_deadline | date:'EEE d MMM, h:mm a' }})
+            (antes de {{ item().eventSummary!.pickup_deadline | dateEs }})
           } para recogerlo.
         </p>
         @if (item().myRoleInEvent) {

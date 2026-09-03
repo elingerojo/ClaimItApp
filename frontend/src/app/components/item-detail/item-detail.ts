@@ -1,6 +1,8 @@
 import { Component, input, inject, signal, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
+import { DateEsPipe } from '../../pipes/date-es.pipe';
+import { formatDateEs } from '../../utils/date-es';
 import { InventoryService, ItemWithQueue } from '../../services/inventory';
 import { UserService } from '../../services/user';
 import { ToastService } from '../../services/toast';
@@ -11,7 +13,7 @@ import { roleDisplayName, roleExpiryConsequence } from '../../utils/role-info';
 @Component({
   selector: 'app-item-detail',
   standalone: true,
-  imports: [CommonModule, StripAccentsPipe],
+  imports: [CommonModule, StripAccentsPipe, DateEsPipe],
   templateUrl: './item-detail.html'
 })
 export class ItemDetail {
@@ -179,9 +181,11 @@ export class ItemDetail {
       if (response?.queuePosition === 1 && (response.pickupDeadline || item.myPickupDeadline)) {
         const deadline = response.pickupDeadline || item.myPickupDeadline;
         this.toastService.success(
-          `🎉 ¡Eres primero en la fila! Recoge antes de ${new Date(deadline).toLocaleString('es-MX', {
-            dateStyle: 'medium',
-            timeStyle: 'short'
+          `🎉 ¡Eres primero en la fila! Recoge antes de ${formatDateEs(deadline, {
+            withWeekday: false,
+            withYear: true,
+            withDay: true,
+            withTime: true
           })}.`
         );
       } else {
