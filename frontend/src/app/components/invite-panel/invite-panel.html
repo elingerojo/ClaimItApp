@@ -21,21 +21,21 @@
 
     @if (!link()) {
       <button (click)="generateLink()" [disabled]="loading()"
-              class="mt-4 text-xs px-4 py-2 rounded-lg font-medium bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:opacity-50">
+              class="mt-4 text-lg px-6 py-3 rounded-xl font-semibold bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:opacity-50">
         {{ loading() ? 'Generando...' : 'Generar enlace de invitación' }}
       </button>
     } @else if (link(); as link) {
       <div class="mt-4 flex flex-col sm:flex-row gap-2">
         <input [value]="link" readonly
                class="flex-1 min-w-0 text-[10px] font-mono px-2.5 py-2 border border-gray-200 rounded-lg bg-gray-50" />
-        <div class="flex gap-1.5 shrink-0">
+        <div class="flex gap-2 shrink-0">
           <button (click)="copy()" title="Copiar el enlace completo"
-                  class="text-[11px] px-3 py-2 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">📋 Copiar</button>
+                  class="text-base px-4 py-3 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">📋 Copiar</button>
           <button (click)="share()" title="Compartir enlace (WhatsApp, etc.)"
-                  class="text-[11px] px-3 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors">📤 Compartir</button>
+                  class="text-base px-4 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors">📤 Compartir</button>
           <a [href]="whatsAppUrl()" target="_blank" rel="noopener"
              title="Abrir WhatsApp con el mensaje listo"
-             class="inline-flex items-center text-[11px] px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">💬 WhatsApp</a>
+             class="inline-flex items-center text-base px-4 py-3 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">💬 WhatsApp</a>
         </div>
       </div>
     }
