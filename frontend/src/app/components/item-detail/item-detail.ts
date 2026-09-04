@@ -76,7 +76,14 @@ export class ItemDetail {
       this.item();
       this.activeTab.set('datos');
       this.tabAreaHeight.set(null);
-      afterNextRender(() => this.lockTabAreaHeight());
+      // [DEBUG] Validación: afterNextRender requiere un contexto de inyección;
+      // el callback de un effect NO lo es → sospecha de NG0203 en cada apertura.
+      console.warn('[ItemDetail][DEBUG] effect disparado; tabAreaHeight reset a null.');
+      try {
+        afterNextRender(() => this.lockTabAreaHeight());
+      } catch (err) {
+        console.warn('[ItemDetail][DEBUG] afterNextRender dentro de effect lanzó NG0203:', err);
+      }
     });
   }
 
@@ -116,6 +123,7 @@ export class ItemDetail {
     const el = this.tabBody()?.nativeElement;
     if (!el) return;
     const natural = el.offsetHeight;
+    console.warn('[ItemDetail][DEBUG] lockTabAreaHeight: natural=', natural, 'prev=', this.tabAreaHeight());
     if (natural > 0) {
       // +1 px evita un scrollbar fantasma por redondeo de subpíxeles.
       this.tabAreaHeight.set(Math.max(natural + 1, this.minTabAreaHeight));
