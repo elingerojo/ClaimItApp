@@ -26,6 +26,38 @@
 
   @if (adminTokenService.authenticated()) {
 
+    <!-- Filtro por estatus de evento (toggles combinables, mínimo 1 activo) -->
+    <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-4 mb-4">
+      <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
+        <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">{{ 'Filtro por evento' | stripAccents }}:</span>
+        <button
+          (click)="resetToLive()"
+          title="Activa los estatus en curso (Borrador, Próximo, Activo, En recolección) y apaga Cerrado"
+          class="text-[10px] px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors"
+        >
+          ↺ Estatus en curso
+        </button>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-1.5">
+        @for (status of statusOptions; track status) {
+          <button
+            (click)="toggleStatus(status)"
+            [title]="chipTitle(status)"
+            [class]="'text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm border ' + chipClass(status)"
+          >
+            {{ eventStatusLabel(status) }} <span class="opacity-80">({{ countFor(status) }})</span>
+          </button>
+        }
+      </div>
+
+      <p class="text-[10px] text-gray-400 mt-2">
+        Cada chip es un toggle y puedes combinar estatus (OR). Mínimo un estatus activo: al intentar apagar el último,
+        se enciende automáticamente el siguiente. Cerrado queda oculto por defecto para no arrastrar el histórico de
+        eventos cerrados; actívalo si necesitas verlos.
+      </p>
+    </div>
+
     <!-- TABLA DE CONTROL Y LISTAS DE ESPERA -->
     <div class="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
       <div class="overflow-x-auto">
@@ -35,13 +67,13 @@
               <th class="px-6 py-4">{{ 'Objeto' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Categoría' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Estado' | stripAccents }}</th>
-              <th class="px-6 py-4">{{ 'Eventos' | stripAccents }}</th>
+              <th class="px-6 py-4">{{ 'Evento' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Línea de Espera (Click para expulsar)' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Acciones' | stripAccents }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-50 text-xs text-gray-700">
-            @for (item of inventoryService.items(); track item.id) {
+            @for (item of inventoryService.adminItems(); track item.id) {
               <tr class="hover:bg-gray-50/50 transition-colors">
                 <td class="px-6 py-4">
                   <div class="flex items-center space-x-3">
@@ -66,12 +98,17 @@
                 </td>
                 <td class="px-6 py-4">
                   @if (item.eventSummary) {
-                    <a
-                      routerLink="/admin/events"
-                      [queryParams]="{ open: item.eventSummary.id }"
-                      [title]="'Ver detalles del evento: ' + (item.eventSummary.title || 'Evento sin título')"
-                      class="inline-flex items-center gap-1 text-indigo-600 hover:underline font-medium"
-                    >🎯 {{ truncateEventTitle(item.eventSummary.title) }}</a>
+                    <div class="flex flex-col gap-1 items-start">
+                      <a
+                        routerLink="/admin/events"
+                        [queryParams]="{ open: item.eventSummary.id }"
+                        [title]="'Ver detalles del evento: ' + (item.eventSummary.title || 'Evento sin título')"
+                        class="inline-flex items-center gap-1 text-indigo-600 hover:underline font-medium"
+                      >🎯 {{ truncateEventTitle(item.eventSummary.title) }}</a>
+                      <span [class]="'text-[9px] uppercase font-bold px-2 py-0.5 rounded-full ' + eventStatusBadge(item.eventSummary.status)">
+                        {{ eventStatusLabel(item.eventSummary.status) }}
+                      </span>
+                    </div>
                   } @else {
                     <span class="text-gray-300" title="Este objeto no pertenece a ningún evento">—</span>
                   }
@@ -118,6 +155,12 @@
                       🗑️ Eliminar
                     </button>
                   </div>
+                </td>
+              </tr>
+            } @empty {
+              <tr>
+                <td colspan="6" class="px-6 py-10 text-center text-sm text-gray-400 italic">
+                  {{ loading() ? 'Cargando inventario…' : 'No hay objetos en los estatus de evento seleccionados.' }}
                 </td>
               </tr>
             }

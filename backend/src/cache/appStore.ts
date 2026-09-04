@@ -109,6 +109,14 @@ let events: Map<string, any> = new Map();
 let eventMembers: Map<string, StoreEventMember[]> = new Map(); // userUuid -> memberships
 let trustSettings: Map<string, any> = new Map(); // level id -> trust_levels_settings row
 
+// Índice por estatus de evento de los items (lazy). Clave = estatus de evento
+// canónico o NO_EVENT_STATUS_KEY para items sin evento/ huérfanos. Se construye
+// con un solo barrido la primera vez que se lee y se invalida (null) cuando una
+// escritura cambia el "bucket" de un item (link a evento o estatus de evento).
+// Así GET /api/admin/items?statuses=... sirve solo los buckets pedidos sin
+// escanear el catálogo completo en cada petición.
+let itemsByEventStatus: Map<string, StoreItem[]> | null = null;
+
 // Estado de hidratación: evita releer Neon cuando el arranque ya fue exitoso y
 // permite auto-recuperarse (single-flight + cooldown) si el rehidratado inicial
 // falló porque Neon estaba autosuspendido (cold start > connectionTimeout).
@@ -249,6 +257,8 @@ export async function rehydrateAll(): Promise<boolean> {
     console.log(
       `[APPSTORE] Rehydrated: ${items.length} items, ${ledger.length} ledger, ${feedHistory.length} feeds, ${users.size} users, ${events.size} events, ${membersResult.rows.length} memberships`
     );
+    // El store se reemplazó por completo: descartar el índice cacheado.
+    itemsByEventStatus = null;
     hydrated = true;
     return true;
   } catch (err) {
@@ -311,10 +321,12 @@ export function upsertItem(item: StoreItem): void {
   const idx = items.findIndex(i => i.id === item.id);
   if (idx >= 0) items[idx] = item;
   else items.unshift(item);
+  invalidateEventStatusIndex();
 }
 
 export function removeItem(itemId: string): void {
   items = items.filter(i => i.id !== itemId);
+  invalidateEventStatusIndex();
 }
 
 export function addClaimToItem(
@@ -423,10 +435,25 @@ export function renameUserInStore(userUuid: string, newAlias: string): string[] 
 
 export function upsertEvent(evt: any): void {
   events.set(evt.id, evt);
+  invalidateEventStatusIndex();
+}
+
+/**
+ * Write-through del estatus de un evento en RAM (transiciones del scheduler o
+ * del update admin). Cambia el bucket de todos sus items, por lo que invalida
+ * el índice por estatus.
+ */
+export function setEventStatusInStore(eventId: string, status: string): void {
+  const evt = events.get(eventId);
+  if (!evt) return;
+  if (evt.status === status) return;
+  events.set(eventId, { ...evt, status });
+  invalidateEventStatusIndex();
 }
 
 export function removeEvent(eventId: string): void {
   events.delete(eventId);
+  invalidateEventStatusIndex();
   // Also drop memberships pointing to the removed event
   for (const [userUuid, members] of eventMembers) {
     const filtered = members.filter(m => m.eventId !== eventId);
@@ -470,9 +497,81 @@ export function detachItemsFromEvent(eventId: string): void {
     if (i.eventId !== eventId) return i;
     return { ...i, eventId: null, visibleAt: null, availableFrom: null, expiresAt: null };
   });
+  invalidateEventStatusIndex();
 }
 
 /** (Re)assign an item to an event in the store (write-through for batch assign). */
 export function setItemEvent(itemId: string, eventId: string | null): void {
   items = items.map(i => (i.id === itemId ? { ...i, eventId } : i));
+  invalidateEventStatusIndex();
+}
+
+// --- Índice por estatus de evento (cambio 3 del plan) ---
+
+/** Orden canónico de los estatus de evento para listar/contar de forma estable. */
+export const EVENT_STATUS_ORDER = ['draft', 'scheduled', 'active', 'closing', 'closed'] as const;
+
+/** Clave interna del bucket "sin evento / huérfano" (defensivo). */
+export const NO_EVENT_STATUS_KEY = '__no_event__';
+
+/** Estatus de evento efectivo de un item según su eventId (o clave sin evento). */
+function eventStatusOf(item: StoreItem): string {
+  if (!item.eventId) return NO_EVENT_STATUS_KEY;
+  const evt = events.get(item.eventId);
+  return evt?.status ?? NO_EVENT_STATUS_KEY;
+}
+
+/** Invalida el índice cacheado (se reconstruirá en la próxima lectura). */
+export function invalidateEventStatusIndex(): void {
+  itemsByEventStatus = null;
+}
+
+/** Barrido único: agrupa items por estatus de evento. */
+function buildEventStatusIndex(): Map<string, StoreItem[]> {
+  const index = new Map<string, StoreItem[]>();
+  for (const item of items) {
+    const key = eventStatusOf(item);
+    const bucket = index.get(key);
+    if (bucket) bucket.push(item);
+    else index.set(key, [item]);
+  }
+  return index;
+}
+
+function ensureEventStatusIndex(): Map<string, StoreItem[]> {
+  if (!itemsByEventStatus) itemsByEventStatus = buildEventStatusIndex();
+  return itemsByEventStatus;
+}
+
+/**
+ * Items de los buckets pedidos (concatenación, manteniendo el orden de carga:
+ * created_at DESC en rehidratación). Opcionalmente incluye siempre los items sin
+ * evento/huérfanos (defensivo: por regla no deberían existir, pero si llega uno
+ * el admin debe poder verlo aunque el filtro no lo pida).
+ */
+export function getItemsByEventStatus(statuses: string[], includeNoEvent = true): StoreItem[] {
+  const index = ensureEventStatusIndex();
+  const out: StoreItem[] = [];
+  const seen = new Set<string>();
+  for (const status of statuses) {
+    if (seen.has(status)) continue;
+    seen.add(status);
+    const bucket = index.get(status);
+    if (bucket) out.push(...bucket);
+  }
+  if (includeNoEvent) {
+    const noEvent = index.get(NO_EVENT_STATUS_KEY);
+    if (noEvent) out.push(...noEvent);
+  }
+  return out;
+}
+
+/** Conteos por estatus canónico (para chips, incluso estatus no activos). */
+export function getEventStatusCounts(): Record<string, number> {
+  const index = ensureEventStatusIndex();
+  const counts: Record<string, number> = {};
+  for (const status of EVENT_STATUS_ORDER) {
+    counts[status] = index.get(status)?.length ?? 0;
+  }
+  return counts;
 }

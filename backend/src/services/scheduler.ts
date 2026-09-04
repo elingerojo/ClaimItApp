@@ -22,7 +22,15 @@
  */
 import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
-import { getItems, refreshClaimDeadline, removeClaimFromItem } from '../cache/appStore.js';
+import {
+  getItems,
+  getEvent,
+  refreshClaimDeadline,
+  removeClaimFromItem,
+  removeItem,
+  setEventStatusInStore
+} from '../cache/appStore.js';
+import { logAudit } from '../utils/auditLog.js';
 import { advanceQueue } from './queueService.js';
 import { applyExpirationSanction } from './trustSanctions.js';
 
@@ -143,8 +151,12 @@ export async function expireOverdueClaims(): Promise<number> {
  * deadlines. Call this on activity (feed read, claim, pickup, SSE connect).
  */
 export async function runLazyCatchUp(): Promise<number> {
-  if (!hasOverdueDeadlinesInStore()) return 0;
-  return expireOverdueClaims();
+  let total = 0;
+  if (hasOverdueDeadlinesInStore()) total += await expireOverdueClaims();
+  // Purga perezosa: solo toca Neon cuando ya existen items de eventos 'closed'
+  // más allá de la gracia configurada (no gasta compute en el caso común).
+  if (hasPurgeableClosedEvents()) total += await purgeExpiredClosedInventory();
+  return total;
 }
 
 /**
@@ -188,38 +200,125 @@ export async function releaseBatches(): Promise<void> {
 export async function updateEventStatus(): Promise<void> {
   const client = await pool.connect();
   try {
+    // Write-through de cada transición a RAM (setEventStatusInStore) para que
+    // el índice por estatus y el feed reflejen el estatus real del evento.
+
     // draft -> scheduled: the event is about to be published
-    await client.query(
+    const scheduled = await client.query(
       `UPDATE events SET status = 'scheduled', updated_at = NOW()
        WHERE status = 'draft'
          AND published_at IS NOT NULL
-         AND published_at <= NOW() + interval '1 day'`
+         AND published_at <= NOW() + interval '1 day'
+       RETURNING id`
     );
+    for (const r of scheduled.rows) setEventStatusInStore(r.id, 'scheduled');
+
     // scheduled -> active: reservations opened (available_from reached)
-    await client.query(
+    const active = await client.query(
       `UPDATE events SET status = 'active', updated_at = NOW()
        WHERE status IN ('draft','scheduled')
-         AND available_from <= NOW()`
+         AND available_from <= NOW()
+       RETURNING id`
     );
+    for (const r of active.rows) setEventStatusInStore(r.id, 'active');
+
     // active -> closing: no more new claims accepted (claims_close_at reached)
-    await client.query(
+    const closing = await client.query(
       `UPDATE events SET status = 'closing', updated_at = NOW()
        WHERE status = 'active'
          AND claims_close_at IS NOT NULL
-         AND claims_close_at <= NOW()`
+         AND claims_close_at <= NOW()
+       RETURNING id`
     );
+    for (const r of closing.rows) setEventStatusInStore(r.id, 'closing');
+
     // closing -> closed: pickup window over (pickup_deadline reached)
-    await client.query(
+    const closed = await client.query(
       `UPDATE events SET status = 'closed', updated_at = NOW()
        WHERE status IN ('active','closing')
          AND pickup_deadline IS NOT NULL
-         AND pickup_deadline <= NOW()`
+         AND pickup_deadline <= NOW()
+       RETURNING id`
     );
+    for (const r of closed.rows) setEventStatusInStore(r.id, 'closed');
   } catch (err) {
     console.error('[Scheduler] updateEventStatus failed:', err);
   } finally {
     client.release();
   }
+}
+
+/**
+ * Días de gracia (post pickup_deadline) tras los cuales se purgan los items de
+ * un evento 'closed'. Configurable vía PURGE_CLOSED_DAYS (default 30).
+ */
+export function purgeGraceDays(): number {
+  const days = parseInt(process.env.PURGE_CLOSED_DAYS || '30', 10);
+  return Number.isFinite(days) && days > 0 ? days : 30;
+}
+
+/**
+ * Chequeo en memoria (sin tocar Neon): existe al menos un item cuyo evento está
+ * 'closed' y cuya pickup_deadline ya superó la gracia configurada.
+ */
+export function hasPurgeableClosedEvents(): boolean {
+  const cutoff = Date.now() - purgeGraceDays() * 86_400_000;
+  for (const item of getItems()) {
+    if (!item.eventId) continue;
+    const evt = getEvent(item.eventId);
+    if (evt?.status === 'closed' && evt.pickup_deadline && new Date(evt.pickup_deadline).getTime() < cutoff) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Purga los items de eventos 'closed' cuya fecha límite de recogida ya venció
+ * hace al menos PURGE_CLOSED_DAYS días (default 30). Elimina items (+ claims
+ * por ON DELETE CASCADE) en Neon y en RAM, emite item_deleted por SSE y audita.
+ * Previene que el histórico de eventos cerrados se acumule indefinidamente.
+ * Los eventos en sí se conservan como registro.
+ */
+export async function purgeExpiredClosedInventory(): Promise<number> {
+  const graceDays = purgeGraceDays();
+  const cutoff = new Date(Date.now() - graceDays * 86_400_000).toISOString();
+  const client = await pool.connect();
+  let purged = 0;
+  const eventIds = new Set<string>();
+  try {
+    const res = await client.query(
+      `SELECT i.id AS item_id, e.id AS event_id
+       FROM events e
+       JOIN items i ON i.event_id = e.id
+       WHERE e.status = 'closed'
+         AND e.pickup_deadline IS NOT NULL
+         AND e.pickup_deadline < $1::timestamptz`,
+      [cutoff]
+    );
+    if (res.rows.length === 0) return 0;
+
+    for (const r of res.rows) {
+      // claims asociados se eliminan por ON DELETE CASCADE del items
+      await client.query('DELETE FROM items WHERE id = $1', [r.item_id]);
+      removeItem(r.item_id); // write-through RAM (invalida el índice por estatus)
+      broadcastSseEvent('item_deleted', { itemId: r.item_id, reason: 'closed_grace_elapsed' });
+      eventIds.add(r.event_id);
+      purged++;
+    }
+
+    await logAudit({
+      action: 'ITEMS_PURGED',
+      adminCodeSuffix: 'system',
+      details: { count: purged, eventIds: [...eventIds], graceDays, cutoff }
+    });
+    console.log(`[Scheduler] Purged ${purged} items from closed events (grace ${graceDays}d).`);
+  } catch (err) {
+    console.error('[Scheduler] purgeExpiredClosedInventory failed:', err);
+  } finally {
+    client.release();
+  }
+  return purged;
 }
 
 /**
@@ -240,6 +339,7 @@ export function startScheduler(): void {
 
   const releaseSec = Math.max(parseInt(process.env.SCHEDULER_RELEASE_SEC || '300', 10), 60);
   const deadlineMin = Math.max(parseInt(process.env.SCHEDULER_DEADLINE_MIN || '15', 10), 5);
+  const purgeHours = Math.max(parseInt(process.env.SCHEDULER_PURGE_HOURS || '24', 10), 1);
 
   setInterval(() => {
     releaseBatches().catch(() => {});
@@ -250,9 +350,13 @@ export function startScheduler(): void {
   setInterval(() => {
     updateEventStatus().catch(() => {});
   }, deadlineMin * 60 * 1000);
+  setInterval(() => {
+    purgeExpiredClosedInventory().catch(() => {});
+  }, purgeHours * 3600 * 1000);
 
   console.log(
     `[Scheduler] POLL MODE enabled: releaseBatches every ${releaseSec}s, ` +
-      `verifyDeadlines + updateEventStatus every ${deadlineMin} min.`
+      `verifyDeadlines + updateEventStatus every ${deadlineMin} min, ` +
+      `purgeClosedInventory every ${purgeHours}h.`
   );
 }

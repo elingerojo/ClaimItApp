@@ -3,7 +3,17 @@ import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
 import { validateItemInput } from '@claimitapp/shared';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
-import { getItems, upsertItem, removeItem, getTrustSetting } from '../cache/appStore.js';
+import {
+  getItems,
+  upsertItem,
+  removeItem,
+  getTrustSetting,
+  getEvent,
+  getItemsByEventStatus,
+  getEventStatusCounts,
+  ensureHydrated,
+  EVENT_STATUS_ORDER
+} from '../cache/appStore.js';
 
 const DEFAULT_MULTIPLIERS: Record<string, number> = {
   familiares: 0.7,
@@ -439,4 +449,78 @@ export const getItemDetail = async (req: Request, res: Response): Promise<void> 
     createdAt: item.createdAt,
     queue: item.queue
   });
+};
+
+/**
+ * GET /api/admin/items?statuses=active,closing
+ *
+ * Listado admin de objetos FILTRADO por estatus de evento (cambio 1 del plan):
+ * - NO aplica el gatekeeping del feed público (publicación/visibilidad/lifecycle):
+ *   un admin gestiona también objetos de eventos 'draft' o aún no publicados.
+ * - Fuente: índice por estatus en RAM (appStore). Solo se sirven los buckets
+ *   pedidos → payload acotado; el histórico 'closed' no se arrastra si el
+ *   cliente no lo pide.
+ * - `statuses` (obligatorio, ≥1, OR): lista separada por comas.
+ * - Respuesta: { items, counts } donde `counts` da el total por cada estatus
+ *   canónico (para pintar contadores de chips aun de estatus inactivos).
+ */
+export const listAllAdminItems = async (req: Request, res: Response): Promise<void> => {
+  try {
+    await ensureHydrated();
+
+    const raw = String(req.query.statuses ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const requested = raw.filter((s) => (EVENT_STATUS_ORDER as readonly string[]).includes(s));
+    if (requested.length === 0) {
+      res.status(400).json({
+        error: 'Query param "statuses" (comma-separated event statuses) is required with at least one valid value.'
+      });
+      return;
+    }
+
+    const rows = getItemsByEventStatus(requested, true);
+
+    const items = rows.map((item) => {
+      const event = item.eventId ? getEvent(item.eventId) : null;
+      return {
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        category: item.category,
+        infoUrl: item.infoUrl,
+        imageUrl: item.imageUrl,
+        status: item.status,
+        visibilityLevel: item.visibilityLevel ?? 4,
+        eventId: item.eventId ?? null,
+        visibleAt: item.visibleAt ?? null,
+        availableFrom: item.availableFrom ?? null,
+        eventSummary: event
+          ? {
+              id: event.id,
+              title: event.title ?? null,
+              status: event.status ?? 'draft',
+              available_from: event.available_from,
+              claims_close_at: event.claims_close_at ?? null,
+              pickup_deadline: event.pickup_deadline ?? null,
+              pickup_schedule_info: event.pickup_schedule_info ?? null
+            }
+          : null,
+        createdAt: item.createdAt,
+        queue: item.queue.map((q) => ({
+          userUuid: q.userUuid,
+          username: q.username,
+          claimedAt: q.claimedAt,
+          pickupDeadline: q.pickupDeadline ?? null,
+          roleAtAssignment: q.roleAtAssignment ?? null
+        }))
+      };
+    });
+
+    res.status(200).json({ items, counts: getEventStatusCounts() });
+  } catch (error) {
+    console.error('Failed to list admin items:', error);
+    res.status(500).json({ error: 'Database processing error listing admin items.' });
+  }
 };

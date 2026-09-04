@@ -55,6 +55,21 @@ export class InventoryService implements OnDestroy {
   private readonly itemsSignal = signal<ItemWithQueue[]>([]);
   readonly items = this.itemsSignal.asReadonly();
 
+  // ---- Vista admin (Gestionar Inventario): lista filtrada por estatus ----
+  // El servidor devuelve SOLO los buckets pedidos (?statuses=...) + counts de
+  // todos los estatus. Se mantiene separado de `items` (feed público) para no
+  // filtrar objetos draft/no publicados al catálogo de visitantes.
+  private readonly adminItemsSignal = signal<ItemWithQueue[]>([]);
+  readonly adminItems = this.adminItemsSignal.asReadonly();
+  private readonly adminCountsSignal = signal<Record<string, number>>({});
+  readonly adminCounts = this.adminCountsSignal.asReadonly();
+  private readonly adminLoadedSignal = signal<boolean>(false);
+  readonly adminLoaded = this.adminLoadedSignal.asReadonly();
+
+  // Parámetros del último loadAdminItems (para refrescar ante SSE).
+  private adminLoadParams: { statuses: string[]; token: string } | null = null;
+  private adminRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
   // SSE reconnection tracking (exponential backoff)
   private sseRetryCount = 0;
   private readonly MAX_RETRIES = 5;
@@ -94,6 +109,49 @@ export class InventoryService implements OnDestroy {
    */
   async refresh(): Promise<void> {
     await this.fetchInitialInventory();
+  }
+
+  /**
+   * Carga el listado admin filtrado por estatus de evento desde
+   * GET /api/admin/items?statuses=... (admin only). Reemplaza adminItems con
+   * los items de los buckets pedidos y actualiza los conteos por estatus.
+   * Sin gatekeeping del feed público: aquí también aparecen drafts/ocultos.
+   */
+  async loadAdminItems(statuses: string[], adminToken: string): Promise<void> {
+    if (!statuses.length) return;
+    this.adminLoadParams = { statuses, token: adminToken };
+    const url = `${this.apiUrl}/admin/items?statuses=${encodeURIComponent(statuses.join(','))}`;
+    const response = await fetch(url, {
+      headers: { 'X-Admin-Token': adminToken }
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error((body as any).error || 'No autorizado para listar el inventario.');
+    }
+    const data = await response.json();
+    this.adminItemsSignal.set((data.items ?? []) as ItemWithQueue[]);
+    this.adminCountsSignal.set((data.counts ?? {}) as Record<string, number>);
+    this.adminLoadedSignal.set(true);
+  }
+
+  /**
+   * Refresca la vista admin con la última combinación de estatus cargada.
+   * Solo actúa si antes hubo un loadAdminItems (adminLoaded).
+   */
+  async refreshAdminItems(): Promise<void> {
+    const params = this.adminLoadParams;
+    if (!params || !this.adminLoadedSignal()) return;
+    await this.loadAdminItems(params.statuses, params.token);
+  }
+
+  /** Refresco admin con debounce ante mutaciones SSE (evita ráfagas). */
+  private scheduleAdminRefresh(): void {
+    if (!this.adminLoadedSignal() || !this.adminLoadParams) return;
+    if (this.adminRefreshTimer !== null) clearTimeout(this.adminRefreshTimer);
+    this.adminRefreshTimer = setTimeout(() => {
+      this.adminRefreshTimer = null;
+      this.refreshAdminItems().catch(() => {});
+    }, 400);
   }
 
   private initializeSseStream(): void {
@@ -198,6 +256,9 @@ export class InventoryService implements OnDestroy {
           };
         })
       );
+      // La vista admin (adminItems) se mantiene en vivo ante mutaciones del
+      // feed, reutilizando la combinación de estatus activa en ese momento.
+      this.scheduleAdminRefresh();
     });
 
     // Intercept deletion vectors so removed assets disappear from every view
@@ -207,6 +268,7 @@ export class InventoryService implements OnDestroy {
       this.itemsSignal.update(currentItems =>
         currentItems.filter(item => item.id !== deleteData.itemId)
       );
+      this.scheduleAdminRefresh();
     });
 
     // Cambio de vanity name (alias): actualiza el alias mostrado en las colas de
@@ -223,6 +285,7 @@ export class InventoryService implements OnDestroy {
           )
         }))
       );
+      this.scheduleAdminRefresh();
     });
 
     eventSource.onerror = () => {
@@ -354,6 +417,10 @@ export class InventoryService implements OnDestroy {
     }
     if (this.sseRetryTimerId !== null) {
       clearInterval(this.sseRetryTimerId);
+    }
+    if (this.adminRefreshTimer !== null) {
+      clearTimeout(this.adminRefreshTimer);
+      this.adminRefreshTimer = null;
     }
   }
 
