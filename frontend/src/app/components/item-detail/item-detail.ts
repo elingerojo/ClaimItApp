@@ -8,7 +8,9 @@ import {
   ElementRef,
   viewChild,
   effect,
-  afterNextRender
+  afterNextRender,
+  Injector,
+  runInInjectionContext
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
@@ -43,6 +45,8 @@ export class ItemDetail {
   readonly inventoryService = inject(InventoryService);
   readonly userService = inject(UserService);
   readonly toastService = inject(ToastService);
+  /** Inyector del componente para ejecutar afterNextRender desde el effect. */
+  private readonly injector = inject(Injector);
 
   readonly shareLink = signal<string | null>(null);
   readonly shareVisible = signal(false);
@@ -76,14 +80,12 @@ export class ItemDetail {
       this.item();
       this.activeTab.set('datos');
       this.tabAreaHeight.set(null);
-      // [DEBUG] Validación: afterNextRender requiere un contexto de inyección;
-      // el callback de un effect NO lo es → sospecha de NG0203 en cada apertura.
-      console.warn('[ItemDetail][DEBUG] effect disparado; tabAreaHeight reset a null.');
-      try {
+      // afterNextRender exige un contexto de inyección, pero el callback de un
+      // effect NO lo es (lanza NG0203 y aborta el primer render del card).
+      // Se envuelve con runInInjectionContext para medir tras el primer paint.
+      runInInjectionContext(this.injector, () => {
         afterNextRender(() => this.lockTabAreaHeight());
-      } catch (err) {
-        console.warn('[ItemDetail][DEBUG] afterNextRender dentro de effect lanzó NG0203:', err);
-      }
+      });
     });
   }
 
@@ -123,7 +125,6 @@ export class ItemDetail {
     const el = this.tabBody()?.nativeElement;
     if (!el) return;
     const natural = el.offsetHeight;
-    console.warn('[ItemDetail][DEBUG] lockTabAreaHeight: natural=', natural, 'prev=', this.tabAreaHeight());
     if (natural > 0) {
       // +1 px evita un scrollbar fantasma por redondeo de subpíxeles.
       this.tabAreaHeight.set(Math.max(natural + 1, this.minTabAreaHeight));
