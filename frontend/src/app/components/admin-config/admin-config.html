@@ -1,0 +1,134 @@
+<div class="max-w-6xl mx-auto px-4 py-8 font-sans">
+
+  <!-- Encabezado Principal -->
+  <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-100 pb-6 mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900 tracking-tight">Configuración</h1>
+      <p class="text-xs text-gray-500 mt-1">Ventajas por rol y agenda que alimentan la creación de nuevos eventos.</p>
+    </div>
+    <div class="mt-4 md:mt-0">
+      <app-admin-auth />
+    </div>
+  </div>
+
+  <!-- Navegación entre páginas -->
+  <nav class="flex gap-1 bg-gray-100 p-1 rounded-lg mb-6">
+    <a routerLink="/admin/ingest" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">📥 Subir Objeto</a>
+    <a routerLink="/admin/manage" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">📋 Gestionar Inventario</a>
+    <a routerLink="/admin/events" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">🎯 Eventos</a>
+    <a routerLink="/admin/config" class="px-4 py-2 text-xs font-medium rounded-md bg-white shadow-sm transition-colors">⚙️ Configuración</a>
+  </nav>
+
+  @if (adminTokenService.authenticated()) {
+
+    @if (loading()) {
+      <div class="text-xs text-gray-400 italic">Cargando configuración...</div>
+    } @else {
+
+      <!-- ==================================================================
+           Ventajas por rol (matriz de confianza, editable)
+           ================================================================== -->
+      <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-5 mb-6">
+        <div class="flex items-center justify-between mb-1">
+          <h2 class="text-sm font-bold text-gray-900">Ventajas por rol</h2>
+          <button (click)="saveRoles()" [disabled]="savingRoles()"
+                  class="text-xs px-4 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
+            {{ savingRoles() ? 'Guardando...' : 'Guardar ventajas' }}
+          </button>
+        </div>
+        <p class="text-[10px] text-gray-400 mb-4">
+          Cada rol conoce solo su propia ventaja. Se aplican al <b>crear</b> un evento y quedan
+          congeladas en él (editar la matriz no cambia eventos ya existentes). Precios y apartados
+          simultáneos se muestran como referencia (no editables aquí).
+        </p>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-left text-[10px] text-gray-400 uppercase tracking-wider border-b border-gray-100">
+                <th class="py-2 pr-3 font-medium">Rol</th>
+                <th class="py-2 pr-3 font-medium" title="Horas antes de available_from en que el rol puede apartar">Anticipación (h)</th>
+                <th class="py-2 pr-3 font-medium" title="Horas extra por cada referido que acepta">Bonus referido (h)</th>
+                <th class="py-2 pr-3 font-medium" title="Horas que tiene el primero en fila para recoger">Ventana recogida (h)</th>
+                <th class="py-2 pr-3 font-medium text-gray-300">Precio (ref.)</th>
+                <th class="py-2 pr-3 font-medium text-gray-300">Apartados (ref.)</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of roles(); track row.id) {
+                <tr class="border-b border-gray-50">
+                  <td class="py-2 pr-3 font-semibold text-gray-800">{{ roleLabels[row.id] ?? row.id }}</td>
+                  <td class="py-2 pr-3">
+                    <input [(ngModel)]="row.advance" type="number" min="0" max="360"
+                           [disabled]="row.id === 'publico'"
+                           class="w-20 text-xs px-2 py-1.5 border border-gray-200 rounded-lg disabled:bg-gray-50 disabled:text-gray-400" />
+                  </td>
+                  <td class="py-2 pr-3">
+                    <input [(ngModel)]="row.bonus" type="number" min="0" max="500"
+                           [disabled]="row.id === 'publico'"
+                           class="w-20 text-xs px-2 py-1.5 border border-gray-200 rounded-lg disabled:bg-gray-50 disabled:text-gray-400" />
+                  </td>
+                  <td class="py-2 pr-3">
+                    <input [(ngModel)]="row.pickup" type="number" min="1" max="720"
+                           class="w-20 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" />
+                  </td>
+                  <td class="py-2 pr-3 text-gray-500">{{ row.multiplier != null ? row.multiplier : '—' }}</td>
+                  <td class="py-2 pr-3 text-gray-500">{{ row.maxApartados ?? '—' }}</td>
+                </tr>
+              } @empty {
+                <tr><td class="py-3 text-gray-400 italic" colspan="6">Sin filas de rol.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ==================================================================
+           Agenda del evento (deriva las 4 fechas desde la publicación)
+           ================================================================== -->
+      @if (agenda(); as a) {
+        <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-5 mb-6">
+          <div class="flex items-center justify-between mb-1">
+            <h2 class="text-sm font-bold text-gray-900">Agenda del evento</h2>
+            <button (click)="saveAgenda()" [disabled]="savingAgenda()"
+                    class="text-xs px-4 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
+              {{ savingAgenda() ? 'Guardando...' : 'Guardar agenda' }}
+            </button>
+          </div>
+          <p class="text-[10px] text-gray-400 mb-4">
+            Al crear un evento solo eliges la <b>fecha de publicación</b>; las demás fechas se
+            calculan con estos huecos y se muestran como información (no editables).
+          </p>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <label class="text-[10px] text-gray-500">
+              Apertura tras publicar (h)
+              <span class="block text-[9px] text-gray-400 mb-1">Apertura = publicación + este valor</span>
+              <input [(ngModel)]="a.open_after_publish_hours" type="number" min="0"
+                     class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" />
+            </label>
+            <label class="text-[10px] text-gray-500">
+              Ventana de apartados (h)
+              <span class="block text-[9px] text-gray-400 mb-1">Corte = apertura + este valor</span>
+              <input [(ngModel)]="a.claims_window_hours" type="number" min="0"
+                     class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" />
+            </label>
+            <label class="text-[10px] text-gray-500">
+              Recogida tras el corte (h)
+              <span class="block text-[9px] text-gray-400 mb-1">Límite recogida = corte + este valor</span>
+              <input [(ngModel)]="a.closing_window_hours" type="number" min="0"
+                     class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" />
+            </label>
+          </div>
+
+          <label class="block text-[10px] text-gray-500 mt-3">
+            Nota de recogida (opcional)
+            <textarea [(ngModel)]="a.pickup_schedule_info" rows="2"
+                      placeholder="Ej.: Entrega a domicilio coordinada con el administrador."
+                      class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg"></textarea>
+          </label>
+        </div>
+      }
+    }
+  }
+</div>

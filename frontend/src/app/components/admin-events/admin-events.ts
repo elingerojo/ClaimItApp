@@ -15,6 +15,7 @@ import {
   tryNativeShare,
   buildWhatsAppInviteUrl
 } from '../../utils/invite-share';
+import { deriveEventSchedule } from '@claimitapp/shared';
 
 export interface EventSummary {
   id: string;
@@ -39,6 +40,20 @@ export interface EventDetail {
   members: any[];
   invitations: EventInvitation[];
 }
+
+/** Huecos de agenda para derivar las fechas públicas desde la publicación. */
+export interface AgendaInput {
+  open_after_publish_hours: number;
+  claims_window_hours: number;
+  closing_window_hours: number;
+}
+
+/** Agenda por defecto si la configuración (migración 012) aún no existe. */
+const DEFAULT_AGENDA: AgendaInput = {
+  open_after_publish_hours: 24,
+  claims_window_hours: 72,
+  closing_window_hours: 48
+};
 
 @Component({
   selector: 'app-admin-events',
@@ -72,16 +87,10 @@ export class AdminEvents implements OnInit, OnDestroy {
   readonly pickupDeadline = signal('');
   readonly claimsCloseAt = signal('');
   readonly publishedAt = signal('');
-  readonly familiaresAdvance = signal<number>(72);
-  readonly amigosAdvance = signal<number>(24);
-  readonly conocidosAdvance = signal<number>(0);
-  readonly familiaresShare = signal<number>(6);
-  readonly amigosShare = signal<number>(4);
-  readonly conocidosShare = signal<number>(2);
-  readonly familiaresPickup = signal<number | null>(48);
-  readonly amigosPickup = signal<number | null>(36);
-  readonly conocidosPickup = signal<number | null>(24);
-  readonly publicoPickup = signal<number | null>(12);
+
+  /** Agenda global (event_config) para derivar fechas desde la publicación. */
+  readonly agenda = signal<AgendaInput>(DEFAULT_AGENDA);
+  private agendaLoaded = false;
 
   readonly roleLabels: Record<string, string> = {
     familiares: '👨‍👩‍👧‍👦 Familiares',
@@ -134,36 +143,30 @@ export class AdminEvents implements OnInit, OnDestroy {
     }
   }
 
-  toggleForm(): void {
+  async toggleForm(): Promise<void> {
     if (this.formVisible()) {
       // Cerrar el form (create o edit)
       this.formVisible.set(false);
       this.editingEventId.set(null);
       return;
     }
+    // Modo crear: cargar la agenda de la configuración (una sola vez) y
+    // precargar el form derivado desde la fecha de publicación.
+    await this.loadAgendaIfNeeded();
     this.resetForm();
     this.formVisible.set(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  /** Limpia el form para crear (por defecto, los eventos son del admin). */
+  /** Limpia el form para crear: la fecha de publicación es la única editable. */
   private resetForm(): void {
     this.title.set('');
     this.description.set('');
-    this.availableFrom.set('');
-    this.pickupDeadline.set('');
-    this.claimsCloseAt.set('');
-    this.publishedAt.set('');
-    this.familiaresAdvance.set(72);
-    this.amigosAdvance.set(24);
-    this.conocidosAdvance.set(0);
-    this.familiaresShare.set(6);
-    this.amigosShare.set(4);
-    this.conocidosShare.set(2);
-    this.familiaresPickup.set(48);
-    this.amigosPickup.set(36);
-    this.conocidosPickup.set(24);
-    this.publicoPickup.set(12);
     this.editingEventId.set(null);
+    // Ancla por defecto = mañana a la misma hora; deriva el resto.
+    const pub = this.toLocalInputValue(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
+    this.publishedAt.set(pub);
+    this.recomputeDerivedFromPublish();
   }
 
   /** ISO (UTC) → valor para un <input type="datetime-local"> (local). */
@@ -182,6 +185,58 @@ export class AdminEvents implements OnInit, OnDestroy {
     return Number.isNaN(d.getTime()) ? null : d.toISOString();
   }
 
+  /** Carga la agenda global (GET /api/admin/event-config) una sola vez. */
+  private async loadAgendaIfNeeded(): Promise<void> {
+    if (this.agendaLoaded) return;
+    this.agendaLoaded = true;
+    try {
+      const res = await fetch(`${this.apiUrl}/admin/event-config`, {
+        headers: { 'X-Admin-Token': this.adminTokenService.token() }
+      });
+      if (!res.ok) return; // migración 012 sin aplicar → se usan los defaults
+      const data = await res.json();
+      const c = data.config ?? {};
+      this.agenda.set({
+        open_after_publish_hours: Number(c.open_after_publish_hours),
+        claims_window_hours: Number(c.claims_window_hours),
+        closing_window_hours: Number(c.closing_window_hours)
+      });
+    } catch {
+      // Error de red: usar defaults.
+    }
+  }
+
+  /** Recalcula las 3 fechas derivadas desde la fecha de publicación. */
+  private recomputeDerivedFromPublish(): void {
+    const pub = this.publishedAt();
+    if (!pub) {
+      this.availableFrom.set('');
+      this.claimsCloseAt.set('');
+      this.pickupDeadline.set('');
+      return;
+    }
+    const d = new Date(pub);
+    if (Number.isNaN(d.getTime())) return;
+    const agenda = this.agenda();
+    const sched = deriveEventSchedule(
+      {
+        open_after_publish_hours: agenda.open_after_publish_hours,
+        claims_window_hours: agenda.claims_window_hours,
+        closing_window_hours: agenda.closing_window_hours
+      },
+      d
+    );
+    this.availableFrom.set(this.toLocalInputValue(sched.available_from.toISOString()));
+    this.claimsCloseAt.set(this.toLocalInputValue(sched.claims_close_at.toISOString()));
+    this.pickupDeadline.set(this.toLocalInputValue(sched.pickup_deadline.toISOString()));
+  }
+
+  /** Al cambiar la fecha de publicación (modo crear) se re-derivan las fechas. */
+  onPublishedChange(): void {
+    if (this.editingEventId()) return; // al editar un evento no se re-deriva
+    this.recomputeDerivedFromPublish();
+  }
+
   /** Abre el formulario precargado con los datos del evento para editarlo. */
   async editEvent(id: string): Promise<void> {
     try {
@@ -198,16 +253,6 @@ export class AdminEvents implements OnInit, OnDestroy {
       this.pickupDeadline.set(this.toLocalInputValue(ev.pickup_deadline));
       this.claimsCloseAt.set(this.toLocalInputValue(ev.claims_close_at));
       this.publishedAt.set(this.toLocalInputValue(ev.published_at));
-      this.familiaresAdvance.set(ev.familiares_advance_hours ?? 72);
-      this.amigosAdvance.set(ev.amigos_advance_hours ?? 24);
-      this.conocidosAdvance.set(ev.conocidos_advance_hours ?? 0);
-      this.familiaresShare.set(ev.familiares_share_bonus ?? 6);
-      this.amigosShare.set(ev.amigos_share_bonus ?? 4);
-      this.conocidosShare.set(ev.conocidos_share_bonus ?? 2);
-      this.familiaresPickup.set(ev.familiares_pickup_hours ?? null);
-      this.amigosPickup.set(ev.amigos_pickup_hours ?? null);
-      this.conocidosPickup.set(ev.conocidos_pickup_hours ?? null);
-      this.publicoPickup.set(ev.publico_pickup_hours ?? null);
 
       this.editingEventId.set(id);
       this.formVisible.set(true);
@@ -218,32 +263,36 @@ export class AdminEvents implements OnInit, OnDestroy {
   }
 
   private buildPayload(): Record<string, any> {
+    // Las ventajas por rol (advance/bonus/pickup) NO se envían: el backend las
+    // congela desde la matriz de confianza al crear y el PATCH las conserva.
     return {
       title: this.title(),
       description: this.description() || null,
       available_from: this.toUtcIsoOrNull(this.availableFrom()),
       pickup_deadline: this.toUtcIsoOrNull(this.pickupDeadline()),
       claims_close_at: this.toUtcIsoOrNull(this.claimsCloseAt()),
-      published_at: this.toUtcIsoOrNull(this.publishedAt()),
-      familiares_advance_hours: this.familiaresAdvance(),
-      amigos_advance_hours: this.amigosAdvance(),
-      conocidos_advance_hours: this.conocidosAdvance(),
-      familiares_share_bonus: this.familiaresShare(),
-      amigos_share_bonus: this.amigosShare(),
-      conocidos_share_bonus: this.conocidosShare(),
-      familiares_pickup_hours: this.familiaresPickup(),
-      amigos_pickup_hours: this.amigosPickup(),
-      conocidos_pickup_hours: this.conocidosPickup(),
-      publico_pickup_hours: this.publicoPickup()
+      published_at: this.toUtcIsoOrNull(this.publishedAt())
     };
   }
 
   /** Crea (POST) o actualiza (PATCH) un evento según `editingEventId`. */
   async submit(): Promise<void> {
     const editingId = this.editingEventId();
-    if (!this.title() || !this.availableFrom() || !this.pickupDeadline()) {
-      this.toastService.error('Título, fecha disponible y fecha límite son requeridos.');
+    if (!this.title()) {
+      this.toastService.error('El título del evento es requerido.');
       return;
+    }
+    if (editingId) {
+      if (!this.availableFrom() || !this.pickupDeadline()) {
+        this.toastService.error('Fecha disponible y fecha límite de recogida son requeridas.');
+        return;
+      }
+    } else {
+      // Modo crear: la fecha de publicación es la ancla; el resto se calcula.
+      if (!this.publishedAt() || !this.availableFrom() || !this.pickupDeadline()) {
+        this.toastService.error('Elige la fecha de publicación (las demás se calculan).');
+        return;
+      }
     }
     this.saving.set(true);
     try {

@@ -16,6 +16,7 @@
     <a routerLink="/admin/ingest" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">📥 Subir Objeto</a>
     <a routerLink="/admin/manage" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">📋 Gestionar Inventario</a>
     <a routerLink="/admin/events" class="px-4 py-2 text-xs font-medium rounded-md bg-white shadow-sm transition-colors">🎯 Eventos</a>
+    <a routerLink="/admin/config" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">⚙️ Configuración</a>
   </nav>
 
   @if (adminTokenService.authenticated()) {
@@ -33,28 +34,42 @@
       <div class="bg-gray-50 border border-gray-100 rounded-xl p-5 mb-6 space-y-3">
         <h2 class="text-sm font-bold text-gray-900">{{ editingEventId() ? 'Editar Evento' : 'Nuevo Evento' }}</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <input [(ngModel)]="title" type="text" placeholder="Título del evento *" class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
-          <input [(ngModel)]="availableFrom" type="datetime-local" placeholder="Disponible desde *" class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
-          <input [(ngModel)]="claimsCloseAt" type="datetime-local" placeholder="Corte de claims (inicia closing)" title="Fecha a la que dejan de aceptarse nuevas separaciones e inicia la fase closing." class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
-          <input [(ngModel)]="pickupDeadline" type="datetime-local" placeholder="Fecha límite de recogida *" title="Fin del closing: último momento para recoger." class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
-          <input [(ngModel)]="publishedAt" type="datetime-local" placeholder="Publicado en (opcional)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg" />
-          <textarea [(ngModel)]="description" placeholder="Descripción (opcional)" class="text-xs px-3 py-2 border border-gray-200 rounded-lg"></textarea>
+          <label class="block">
+            <span class="text-[10px] font-medium text-gray-400">Título del evento *</span>
+            <input [(ngModel)]="title" type="text" placeholder="Título del evento *" class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg" />
+          </label>
+          <label class="block">
+            <span class="text-[10px] font-medium text-gray-400">📢 Fecha de publicación *</span>
+            <input [(ngModel)]="publishedAt" (ngModelChange)="onPublishedChange()" type="datetime-local"
+                   title="Única fecha editable; las demás se calculan con la agenda de Configuración."
+                   class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg" />
+          </label>
+          <label class="block">
+            <span class="text-[10px] font-medium text-gray-400">🟢 Apertura de apartados (calculada)</span>
+            <input [(ngModel)]="availableFrom" type="datetime-local" [disabled]="!editingEventId()"
+                   class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg disabled:bg-gray-100 disabled:text-gray-400" />
+          </label>
+          <label class="block">
+            <span class="text-[10px] font-medium text-gray-400">🟠 Corte de separaciones (calculada)</span>
+            <input [(ngModel)]="claimsCloseAt" type="datetime-local" [disabled]="!editingEventId()"
+                   title="Dejan de aceptarse nuevas separaciones e inicia la fase closing."
+                   class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg disabled:bg-gray-100 disabled:text-gray-400" />
+          </label>
+          <label class="block">
+            <span class="text-[10px] font-medium text-gray-400">🔴 Fecha límite de recogida (calculada)</span>
+            <input [(ngModel)]="pickupDeadline" type="datetime-local" [disabled]="!editingEventId()"
+                   title="Fin del closing: último momento para recoger."
+                   class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg disabled:bg-gray-100 disabled:text-gray-400" />
+          </label>
+          <label class="block">
+            <span class="text-[10px] font-medium text-gray-400">Descripción (opcional)</span>
+            <textarea [(ngModel)]="description" rows="2" placeholder="Descripción (opcional)" class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg"></textarea>
+          </label>
         </div>
-        <div class="grid grid-cols-3 gap-3">
-          <label class="text-[10px] text-gray-500">Fam. anticipación (h)<input [(ngModel)]="familiaresAdvance" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
-          <label class="text-[10px] text-gray-500">Amig. anticipación (h)<input [(ngModel)]="amigosAdvance" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
-          <label class="text-[10px] text-gray-500">Conc. anticipación (h)<input [(ngModel)]="conocidosAdvance" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
-          <label class="text-[10px] text-gray-500">Fam. bonus (h)<input [(ngModel)]="familiaresShare" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
-          <label class="text-[10px] text-gray-500">Amig. bonus (h)<input [(ngModel)]="amigosShare" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
-          <label class="text-[10px] text-gray-500">Conc. bonus (h)<input [(ngModel)]="conocidosShare" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
-        </div>
-        <div class="grid grid-cols-4 gap-3">
-          <label class="text-[10px] text-gray-500">Fam. recogida (h)<input [(ngModel)]="familiaresPickup" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
-          <label class="text-[10px] text-gray-500">Amig. recogida (h)<input [(ngModel)]="amigosPickup" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
-          <label class="text-[10px] text-gray-500">Conc. recogida (h)<input [(ngModel)]="conocidosPickup" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
-          <label class="text-[10px] text-gray-500">Púb. recogida (h)<input [(ngModel)]="publicoPickup" type="number" class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" /></label>
-        </div>
-        <p class="text-[10px] text-gray-400">💡 Los campos de recogida por rol son sugerencias editables (ventana para el primero en fila); el deadline se clampa entre la apertura del evento y su fecha límite de recogida.</p>
+        <p class="text-[10px] text-gray-400">
+          Al crear, eliges solo la fecha de publicación; las demás se calculan desde la agenda
+          (⚙️ Configuración). Las ventajas por rol se aplican automáticamente y quedan fijas en el evento.
+        </p>
         <button (click)="submit()" [disabled]="saving()" class="text-xs px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
           {{ saving() ? 'Guardando...' : (editingEventId() ? 'Guardar Cambios' : 'Crear Evento') }}
         </button>

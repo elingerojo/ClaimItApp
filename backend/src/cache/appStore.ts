@@ -316,6 +316,16 @@ export const getEventMembership = (
   (eventMembers.get(userUuid) || []).find(m => m.eventId === eventId);
 export const getTrustSetting = (level: string): any => trustSettings.get(level);
 
+/**
+ * Write-through: aplica un parche a una fila de la matriz de confianza en RAM
+ * (después del UPDATE en Neon). Hace merge conservando las columnas no tocadas
+ * (precios / apartados simultáneos), que solo se rehidratan al arranque.
+ */
+export function upsertTrustSetting(levelId: string, patch: Record<string, any>): void {
+  const prev = trustSettings.get(levelId) ?? {};
+  trustSettings.set(levelId, { ...prev, ...patch, id: levelId });
+}
+
 // --- Escrituras (write-through, llamadas por los controladores) ---
 export function upsertItem(item: StoreItem): void {
   const idx = items.findIndex(i => i.id === item.id);

@@ -34,6 +34,12 @@ import {
   validateInvitation,
   getShareLink
 } from './controllers/eventsController.js';
+import {
+  getEventConfig,
+  updateEventConfig,
+  getRoleConfig,
+  updateRoleConfig
+} from './controllers/configController.js';
 
 // Edit comment to triger redoploy in Railway 
 
@@ -105,6 +111,12 @@ app.patch('/api/admin/events/:id', requireAdminSession, updateEvent);
 app.delete('/api/admin/events/:id', requireAdminSession, deleteEvent);
 app.post('/api/admin/events/:id/items', requireAdminSession, assignItems);
 app.post('/api/admin/evict', requireAdminSession, evictClaimant);
+// Configuración global de eventos: plantilla de agenda + ventajas por rol
+// (matriz). Solo admin.
+app.get('/api/admin/event-config', requireAdminSession, getEventConfig);
+app.put('/api/admin/event-config', requireAdminSession, updateEventConfig);
+app.get('/api/admin/role-config', requireAdminSession, getRoleConfig);
+app.put('/api/admin/role-config', requireAdminSession, updateRoleConfig);
 // Listado admin filtrado por estatus de evento. Se declara ANTES que
 // /api/admin/items/:id para que el path fijo no quede oculto por el parámetro.
 app.get('/api/admin/items', requireAdminSession, listAllAdminItems);

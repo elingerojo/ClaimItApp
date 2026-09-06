@@ -26,7 +26,8 @@ import {
   calculateEffectiveAvailability,
   determineRoleAfterInvitation,
   generateInvitationCode,
-  validateEventDates
+  validateEventDates,
+  deriveEventSchedule
 } from '@claimitapp/shared';
 
 /** Which link a user receives to invite one level down the cascade. */
@@ -36,6 +37,33 @@ const NEXT_ROLE: Record<string, string | null> = {
   conocidos: 'publico',
   publico: null
 };
+
+/**
+ * Lee la plantilla de agenda global (event_config id=1) para derivar fechas
+ * desde la ancla única. Si la fila no existe (migración 012 sin aplicar) usa
+ * los huecos por defecto actuales del form de eventos.
+ */
+async function readEventConfig(): Promise<{
+  open_after_publish_hours: number;
+  claims_window_hours: number;
+  closing_window_hours: number;
+}> {
+  const defaults = { open_after_publish_hours: 24, claims_window_hours: 72, closing_window_hours: 48 };
+  try {
+    const res = await pool.query(
+      `SELECT open_after_publish_hours, claims_window_hours, closing_window_hours
+       FROM event_config WHERE id = 1`
+    );
+    if (res.rows.length === 0) return defaults;
+    return {
+      open_after_publish_hours: Number(res.rows[0].open_after_publish_hours),
+      claims_window_hours: Number(res.rows[0].claims_window_hours),
+      closing_window_hours: Number(res.rows[0].closing_window_hours)
+    };
+  } catch {
+    return defaults;
+  }
+}
 
 /**
  * Create a new event with invitation links
@@ -63,8 +91,57 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
   } = req.body;
   const adminCode = (req as any).adminCode || 'system'; // If called via admin endpoint
 
+  // --- 1. Fechas: ancla única (published_at) → derivar el resto desde la agenda ---
+  // Cuando el body trae solo la fecha de publicación y faltan las fechas
+  // derivadas, se calculan con deriveEventSchedule usando la plantilla
+  // event_config (huecos). El evento queda con snapshot de fechas fijas.
+  let availableFrom = available_from;
+  let pickupDeadline = pickup_deadline;
+  let claimsCloseAt = claims_close_at;
+  let publishedAt = published_at;
+
+  const pubParsed = publishedAt ? new Date(publishedAt) : null;
+  const pubValid = pubParsed !== null && !Number.isNaN(pubParsed.getTime());
+
+  if ((!availableFrom || !pickupDeadline) && pubValid) {
+    const agenda = await readEventConfig();
+    const sched = deriveEventSchedule(
+      {
+        open_after_publish_hours: agenda.open_after_publish_hours,
+        claims_window_hours: agenda.claims_window_hours,
+        closing_window_hours: agenda.closing_window_hours
+      },
+      pubParsed!
+    );
+    availableFrom = availableFrom ?? sched.available_from.toISOString();
+    claimsCloseAt = claimsCloseAt ?? sched.claims_close_at.toISOString();
+    pickupDeadline = pickupDeadline ?? sched.pickup_deadline.toISOString();
+    publishedAt = publishedAt ?? sched.published_at.toISOString();
+  }
+
+  // Payload efectivo para validar (con fechas derivadas + valores por rol).
+  const effectiveBody = {
+    title,
+    description,
+    available_from: availableFrom,
+    pickup_deadline: pickupDeadline,
+    claims_close_at: claimsCloseAt,
+    published_at: publishedAt,
+    familiares_advance_hours,
+    amigos_advance_hours,
+    conocidos_advance_hours,
+    familiares_share_bonus,
+    amigos_share_bonus,
+    conocidos_share_bonus,
+    familiares_pickup_hours,
+    amigos_pickup_hours,
+    conocidos_pickup_hours,
+    publico_pickup_hours,
+    pickup_schedule_info
+  };
+
   // Validate input
-  const validation = validateEventInput(req.body);
+  const validation = validateEventInput(effectiveBody);
   if (!validation.valid) {
     res.status(400).json({
       error: 'Validation failed',
@@ -75,7 +152,7 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
   }
 
   // Validate dates
-  const dateValidation = validateEventDates(new Date(available_from), new Date(pickup_deadline));
+  const dateValidation = validateEventDates(new Date(availableFrom), new Date(pickupDeadline));
   if (!dateValidation.valid) {
     res.status(400).json({
       error: 'Date validation failed',
@@ -85,7 +162,7 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     return;
   }
 
-  if (claims_close_at && new Date(claims_close_at) <= new Date(available_from)) {
+  if (claimsCloseAt && new Date(claimsCloseAt) <= new Date(availableFrom)) {
     res.status(400).json({
       error: 'Date validation failed',
       details: ['claims_close_at must be after available_from'],
@@ -93,7 +170,7 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     });
     return;
   }
-  if (claims_close_at && new Date(claims_close_at) >= new Date(pickup_deadline)) {
+  if (claimsCloseAt && new Date(claimsCloseAt) >= new Date(pickupDeadline)) {
     res.status(400).json({
       error: 'Date validation failed',
       details: ['claims_close_at must be before pickup_deadline'],
@@ -102,21 +179,34 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     return;
   }
 
+  // --- 2. Ventajas por rol: congelar desde la matriz cuando no vienen explícitas ---
+  // Fuente única: trust_levels_settings (advance_hours_default /
+  // share_bonus_default / intervalo_recoleccion_horas_default). Se lee desde
+  // el store en RAM (getTrustSetting) y se congela en las columnas del evento.
+  const matrix: Record<string, any> = {};
+  for (const role of VALID_ROLES) matrix[role] = getTrustSetting(role) || {};
+  const matrixNumber = (role: string, column: string, fallback: number): number => {
+    const v = matrix[role]?.[column];
+    return v != null ? Number(v) : fallback;
+  };
+
+  const familiaresAdvance = familiares_advance_hours ?? matrixNumber('familiares', 'advance_hours_default', 72);
+  const amigosAdvance = amigos_advance_hours ?? matrixNumber('amigos', 'advance_hours_default', 24);
+  const conocidosAdvance = conocidos_advance_hours ?? matrixNumber('conocidos', 'advance_hours_default', 0);
+  const familiaresBonus = familiares_share_bonus ?? matrixNumber('familiares', 'share_bonus_default', 6);
+  const amigosBonus = amigos_share_bonus ?? matrixNumber('amigos', 'share_bonus_default', 4);
+  const conocidosBonus = conocidos_share_bonus ?? matrixNumber('conocidos', 'share_bonus_default', 2);
+  const familiaresPickup = familiares_pickup_hours ?? matrixNumber('familiares', 'intervalo_recoleccion_horas_default', 48);
+  const amigosPickup = amigos_pickup_hours ?? matrixNumber('amigos', 'intervalo_recoleccion_horas_default', 36);
+  const conocidosPickup = conocidos_pickup_hours ?? matrixNumber('conocidos', 'intervalo_recoleccion_horas_default', 24);
+  const publicoPickup = publico_pickup_hours ?? matrixNumber('publico', 'intervalo_recoleccion_horas_default', 12);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Seed per-role pickup hours from the trust matrix (suggestion), unless the
-    // admin provided explicit values.
-    const matrixPickup = (role: string): number | null => {
-      const s = getTrustSetting(role);
-      return s?.intervalo_recoleccion_horas_default != null
-        ? Number(s.intervalo_recoleccion_horas_default)
-        : null;
-    };
-
-    // Create event (persist role advance/share-bonus configuration; fall back to
-    // the DB defaults when not provided)
+    // Create event: las ventajas por rol (advance/share/pickup) se congelan
+    // desde la matriz de confianza cuando el admin no las sobrescribe.
     const eventResult = await client.query(
       `INSERT INTO events
        (title, description, available_from, pickup_deadline, claims_close_at,
@@ -130,20 +220,20 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
       [
         title,
         description || null,
-        available_from,
-        pickup_deadline,
-        claims_close_at || null,
-        published_at || null,
-        familiares_advance_hours ?? 72,
-        amigos_advance_hours ?? 24,
-        conocidos_advance_hours ?? 0,
-        familiares_share_bonus ?? 6,
-        amigos_share_bonus ?? 4,
-        conocidos_share_bonus ?? 2,
-        familiares_pickup_hours ?? matrixPickup('familiares'),
-        amigos_pickup_hours ?? matrixPickup('amigos'),
-        conocidos_pickup_hours ?? matrixPickup('conocidos'),
-        publico_pickup_hours ?? matrixPickup('publico'),
+        availableFrom,
+        pickupDeadline,
+        claimsCloseAt || null,
+        publishedAt || null,
+        familiaresAdvance,
+        amigosAdvance,
+        conocidosAdvance,
+        familiaresBonus,
+        amigosBonus,
+        conocidosBonus,
+        familiaresPickup,
+        amigosPickup,
+        conocidosPickup,
+        publicoPickup,
         pickup_schedule_info || null
       ]
     );
@@ -192,8 +282,8 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
       adminCodeSuffix: maskAdminCode(adminCode),
       details: {
         title: title,
-        available_from: available_from,
-        pickup_deadline: pickup_deadline,
+        available_from: availableFrom,
+        pickup_deadline: pickupDeadline,
         timestamp: new Date().toISOString()
       }
     });

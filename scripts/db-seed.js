@@ -109,6 +109,40 @@ async function main() {
   try {
     await client.query('BEGIN');
 
+    // Configuración global (migración 012): event_config + columnas de la
+    // matriz. Guardado: solo aplica si la migración ya existe en la BD.
+    const hasEventConfig = await client.query(
+      `SELECT COUNT(*)::int AS n FROM information_schema.tables
+       WHERE table_name = 'event_config'`
+    );
+    if (hasEventConfig.rows[0].n > 0) {
+      await client.query(
+        `INSERT INTO event_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING`
+      );
+    }
+    const hasRoleDefaults = await client.query(
+      `SELECT COUNT(*)::int AS n FROM information_schema.columns
+       WHERE table_name = 'trust_levels_settings' AND column_name = 'advance_hours_default'`
+    );
+    if (hasRoleDefaults.rows[0].n > 0) {
+      await client.query(
+        `UPDATE trust_levels_settings SET advance_hours_default = 72, share_bonus_default = 6 WHERE id = 'familiares'
+           AND (advance_hours_default = 0 AND share_bonus_default = 0)`
+      );
+      await client.query(
+        `UPDATE trust_levels_settings SET advance_hours_default = 24, share_bonus_default = 4 WHERE id = 'amigos'
+           AND (advance_hours_default = 0 AND share_bonus_default = 0)`
+      );
+      await client.query(
+        `UPDATE trust_levels_settings SET advance_hours_default = 0, share_bonus_default = 2 WHERE id = 'conocidos'
+           AND (advance_hours_default = 0 AND share_bonus_default = 0)`
+      );
+      await client.query(
+        `UPDATE trust_levels_settings SET advance_hours_default = 0, share_bonus_default = 0 WHERE id = 'publico'
+           AND (advance_hours_default = 0 AND share_bonus_default = 0)`
+      );
+    }
+
     const evCount = await client.query('SELECT COUNT(*)::int AS n FROM events');
     if (evCount.rows[0].n > 0) {
       console.log('[SEED] Events already exist — skipping seed.');

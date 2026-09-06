@@ -197,3 +197,57 @@ export function validateEventInput(data: any): ValidationResult {
 
   return { valid: errors.length === 0, errors };
 }
+
+/**
+ * Validate the event_config agenda: the three hour gaps used to expand a
+ * single publication date into the 4 public event dates.
+ */
+export function validateEventConfig(data: any): ValidationResult {
+  const errors: string[] = [];
+  const keys: Array<keyof Pick<any, 'open_after_publish_hours' | 'claims_window_hours' | 'closing_window_hours'>> = [
+    'open_after_publish_hours',
+    'claims_window_hours',
+    'closing_window_hours'
+  ];
+  for (const key of keys) {
+    const v = data?.[key];
+    if (!Number.isInteger(v) || (v as number) < 0) {
+      errors.push(`${key}: must be a non-negative integer`);
+    }
+  }
+  if (data?.pickup_schedule_info !== undefined && data.pickup_schedule_info !== null) {
+    if (typeof data.pickup_schedule_info !== 'string') {
+      errors.push('pickup_schedule_info: must be a string or null');
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate a role-config update payload:
+ * { roles: { familiares: {advance_hours_default, share_bonus_default,
+ * intervalo_recoleccion_horas_default}, ... } }.
+ */
+export function validateRoleDefaultsUpdate(data: any): ValidationResult {
+  const errors: string[] = [];
+  const roles = data?.roles;
+  if (!roles || typeof roles !== 'object') {
+    errors.push('roles: required object keyed by role id');
+    return { valid: false, errors };
+  }
+
+  for (const role of ['familiares', 'amigos', 'conocidos', 'publico']) {
+    const r = roles[role];
+    if (r === undefined || r === null) continue;
+    if (!validateAdvanceHours(Number(r.advance_hours_default))) {
+      errors.push(`${role}.advance_hours_default: must be 0-360`);
+    }
+    if (!validateBonusHours(Number(r.share_bonus_default))) {
+      errors.push(`${role}.share_bonus_default: must be 0-500`);
+    }
+    if (!validatePickupHours(Number(r.intervalo_recoleccion_horas_default))) {
+      errors.push(`${role}.intervalo_recoleccion_horas_default: must be 1-720`);
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}

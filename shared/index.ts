@@ -17,10 +17,24 @@ export {
   validateBonusHours,
   validatePickupHours,
   validateInvitationCode,
-  validateEventInput
+  validateEventInput,
+  validateEventConfig,
+  validateRoleDefaultsUpdate
 } from './validators.js';
 
 export type { ValidationResult } from './validators.js';
+
+// Event agenda configuration (single anchor -> public dates)
+export {
+  HOUR_MS,
+  deriveEventSchedule
+} from './eventConfig.js';
+
+export type {
+  EventConfig,
+  DerivedEventSchedule,
+  RoleConfigRow
+} from './eventConfig.js';
 
 // Event Helpers & Types
 export {
