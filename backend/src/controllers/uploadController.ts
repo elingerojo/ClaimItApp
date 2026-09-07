@@ -35,14 +35,6 @@ export const getUploadToken = async (req: Request, res: Response): Promise<void>
           tokenPayload: JSON.stringify({ pathname }), // Optional custom client contextual tracking metadata
         };
       },
-      onUploadCompleted: async ({ blob }) => {
-        // Runs asynchronously in the background once Vercel successfully finishes storing the file
-        try {
-          console.log(`Blob asset upload completed successfully: ${blob.url}`);
-        } catch (err) {
-          console.error('Upload completion callback failed:', err);
-        }
-      },
     });
 
     res.status(200).json(jsonResponse);
