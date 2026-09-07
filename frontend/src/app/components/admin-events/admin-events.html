@@ -125,45 +125,67 @@
                   </div>
                 </div>
 
-                <!-- Links de invitación -->
+                <!-- Compartir invitación por rol (composer único, sin texto del enlace) -->
                 <div>
-                  <div class="text-xs font-bold text-gray-500 mb-1.5">Links de invitación (1 por rol)</div>
-                  <div class="space-y-1.5">
+                  <div class="text-xs font-bold text-gray-500 mb-2">Compartir invitación</div>
+
+                  <!-- Select de rol sin pre-selección -->
+                  <select
+                    [value]="selectedRole()"
+                    (change)="onRoleChange($event)"
+                    aria-label="Rol de la invitación a compartir"
+                    class="w-full text-sm px-3 py-3 border border-gray-200 rounded-xl bg-white focus:outline-none focus:border-gray-400">
+                    <option value="" disabled>Seleccionar rol</option>
                     @for (inv of d.invitations; track inv.role) {
-                      <div class="rounded-lg border border-gray-100 bg-gray-50 px-2 py-1.5">
-                        <div class="flex items-center justify-between gap-2">
-                          <span class="text-[10px] font-semibold text-gray-700">{{ roleLabels[inv.role] ?? inv.role }}</span>
-                          <span [class.bg-emerald-100]="inv.is_active" [class.text-emerald-700]="inv.is_active"
-                                [class.bg-red-100]="!inv.is_active" [class.text-red-600]="!inv.is_active"
-                                class="shrink-0 text-[9px] font-medium px-1.5 py-0.5 rounded-full">
-                            {{ inv.is_active ? 'Activo' : 'Inactivo' }} · {{ inv.use_count ?? 0 }} uso(s)
-                          </span>
-                        </div>
-                        <div class="mt-1.5 flex items-center gap-1.5">
-                          <label class="flex items-center gap-1 min-w-0">
-                            <span class="text-[9px] text-gray-400 whitespace-nowrap">Apodo sugerido:</span>
-                            <input #apodoInput
-                                   [value]="suggestedApodo(inv.role)"
-                                   (input)="setSuggestedApodo(inv.role, apodoInput.value)"
-                                   type="text"
-                                   placeholder="(opcional)"
-                                   title="Si lo llenas, el invitado llega con el apodo pre-llenado en el popup y solo confirma."
-                                   class="w-32 text-[9px] font-mono px-1.5 py-1 bg-white border border-gray-200 rounded-md" />
-                          </label>
-                        </div>
-                        <div class="mt-1 flex items-center gap-1.5">
-                          <input [value]="inviteUrl(inv.code, suggestedApodo(inv.role))" readonly
-                                 class="flex-1 min-w-0 text-[9px] font-mono px-1.5 py-1 bg-white border border-gray-200 rounded-md" />
-                          <button (click)="copyInviteLink(inv.code, suggestedApodo(inv.role))" title="Copiar enlace completo"
-                                  class="shrink-0 text-md text-gray-500 hover:text-gray-800 px-1">📋</button>
-                          <button (click)="shareInviteLink(inv.code, suggestedApodo(inv.role))" title="Compartir enlace"
-                                  class="shrink-0 text-md text-gray-500 hover:text-gray-800 px-1">📤</button>
-                          <a [href]="whatsAppInviteUrl(inv.code, suggestedApodo(inv.role))" target="_blank" rel="noopener"
-                             title="Enviar por WhatsApp"
-                             class="shrink-0 text-md text-gray-500 hover:text-gray-800 px-1">💬</a>
-                        </div>
-                      </div>
+                      <option [value]="inv.role" [disabled]="!inv.is_active">
+                        {{ roleLabels[inv.role] ?? inv.role }}{{ inv.is_active ? '' : ' (inactiva)' }}
+                      </option>
                     }
+                  </select>
+
+                  <!-- Campo único de apodo sugerido (opcional) -->
+                  <input
+                    [value]="suggestedApodo(selectedRole())"
+                    (input)="setSelectedRoleApodo($any($event.target).value)"
+                    [disabled]="!selectedRole()"
+                    type="text"
+                    placeholder="Apodo sugerido (opcional)"
+                    title="Si lo llenas, el invitado llega con el apodo pre-llenado en el popup y solo confirma."
+                    class="mt-3 w-full text-sm px-3 py-3 border border-gray-200 rounded-xl bg-white disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed" />
+
+                  <!-- Estado del rol elegido -->
+                  @if (selectedInvitation(); as inv) {
+                    <p class="mt-2 text-[10px] text-gray-400">
+                      {{ roleLabels[inv.role] ?? inv.role }} ·
+                      <span [class.text-emerald-600]="inv.is_active" [class.text-red-500]="!inv.is_active">
+                        {{ inv.is_active ? 'Activa' : 'Inactiva' }}
+                      </span>
+                      · {{ inv.use_count ?? 0 }} uso(s)
+                    </p>
+                  }
+
+                  <!-- Grupo único de 3 botones para compartir el enlace -->
+                  <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button (click)="copyInviteLink(selectedRole(), suggestedApodo(selectedRole()))"
+                            [disabled]="!canShareSelected()"
+                            title="Copiar el enlace de invitación al portapapeles"
+                            class="flex items-center justify-center gap-1.5 text-sm px-4 py-3 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                      📋 Copiar
+                    </button>
+                    <button (click)="shareInviteLink(selectedRole(), suggestedApodo(selectedRole()))"
+                            [disabled]="!canShareSelected()"
+                            title="Compartir el enlace de invitación (WhatsApp, etc.)"
+                            class="flex items-center justify-center gap-1.5 text-sm px-4 py-3 rounded-xl bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                      📤 Compartir
+                    </button>
+                    <a [href]="whatsAppInviteUrl(selectedRole(), suggestedApodo(selectedRole()))"
+                       target="_blank" rel="noopener"
+                       [class.pointer-events-none]="!canShareSelected()"
+                       [class.opacity-40]="!canShareSelected()"
+                       title="Abrir WhatsApp con el mensaje de invitación listo"
+                       class="flex items-center justify-center gap-1.5 text-sm px-4 py-3 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
+                      💬 WhatsApp
+                    </a>
                   </div>
                 </div>
 

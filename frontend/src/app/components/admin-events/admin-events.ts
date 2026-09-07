@@ -80,6 +80,8 @@ export class AdminEvents implements OnInit, OnDestroy {
 
   /** Apodos sugeridos por rol (campo opcional en cada link de invitación). */
   private readonly suggestedApodos = signal<Record<string, string>>({});
+  /** Rol elegido en el composer de compartir ('' = sin selección previa). */
+  readonly selectedRole = signal<string>('');
 
   // Form fields (create / edit)
   readonly title = signal('');
@@ -133,6 +135,7 @@ export class AdminEvents implements OnInit, OnDestroy {
 
   async openDetail(id: string): Promise<void> {
     this.detail.set(null);
+    this.selectedRole.set(''); // evita compartir el rol de otro evento
     try {
       const res = await fetch(`${this.apiUrl}/admin/events/${id}`, {
         headers: { 'X-Admin-Token': this.adminTokenService.token() }
@@ -355,9 +358,30 @@ export class AdminEvents implements OnInit, OnDestroy {
     this.suggestedApodos.update(map => ({ ...map, [role]: value.trim() }));
   }
 
-  /** Enlace completo compartible: HOME + token + apodo sugerido opcional. */
-  inviteUrl(code: string, apodo?: string): string {
-    return buildInviteUrl(code, apodo);
+  /** Invitación del rol seleccionado (para el composer de compartir). */
+  selectedInvitation(): EventInvitation | null {
+    const d = this.detail();
+    const role = this.selectedRole();
+    if (!d || !role) return null;
+    return d.invitations.find(i => i.role === role) ?? null;
+  }
+
+  /** Habilita compartir solo cuando hay rol elegido con invitación activa. */
+  canShareSelected(): boolean {
+    const inv = this.selectedInvitation();
+    return !!inv?.is_active;
+  }
+
+  /** Al cambiar el select se guarda el rol elegido. */
+  onRoleChange(event: Event): void {
+    this.selectedRole.set((event.target as HTMLSelectElement).value);
+  }
+
+  /** Escribe el apodo sugerido del rol actualmente seleccionado (campo único). */
+  setSelectedRoleApodo(value: string): void {
+    const role = this.selectedRole();
+    if (!role) return;
+    this.setSuggestedApodo(role, value);
   }
 
   async copyInviteLink(code: string, apodo?: string): Promise<void> {
