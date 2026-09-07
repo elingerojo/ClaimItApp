@@ -512,12 +512,6 @@ export function detachItemsFromEvent(eventId: string): void {
   invalidateEventStatusIndex();
 }
 
-/** (Re)assign an item to an event in the store (write-through for batch assign). */
-export function setItemEvent(itemId: string, eventId: string | null): void {
-  items = items.map(i => (i.id === itemId ? { ...i, eventId } : i));
-  invalidateEventStatusIndex();
-}
-
 // --- Índice por estatus de evento (cambio 3 del plan) ---
 
 /** Orden canónico de los estatus de evento para listar/contar de forma estable. */

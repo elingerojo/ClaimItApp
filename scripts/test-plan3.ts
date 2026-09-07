@@ -15,14 +15,13 @@ import { Pool } from 'pg';
 import pool from '../backend/src/config/db.js';
 import {
   createEvent,
-  assignItems,
   updateEvent,
   getEventDetail,
   deleteEvent,
   validateInvitation,
   getShareLink
 } from '../backend/src/controllers/eventsController.js';
-import { createItem } from '../backend/src/controllers/itemsController.js';
+import { createItem, updateItem } from '../backend/src/controllers/itemsController.js';
 import { getInventoryFeed } from '../backend/src/controllers/feedsController.js';
 import {
   getEvent,
@@ -147,11 +146,12 @@ async function main(): Promise<void> {
     upsertEventMember(owner, { eventId: eventId!, role: 'familiares', bonusHours: 0, invitedBy: null });
     check('familiares guest membership', getEventMembership(owner, eventId!)?.role === 'familiares');
 
-    // --- 2. assignItems batch ---
-    console.log('Test 2: assignItems');
+    // --- 2. Assign the item to the event via the individual item PATCH
+    // (the per-item strategy that replaces the removed bulk assignItems). ---
+    console.log('Test 2: updateItem assigns event individually');
     const assignRes = mockRes();
-    await assignItems(mockReq({ params: { id: eventId }, body: { itemIds: [itemId] } }), assignRes);
-    check('assignItems -> 200', assignRes._status === 200, assignRes._json);
+    await updateItem(mockReq({ params: { id: itemId }, body: { event_id: eventId } }), assignRes);
+    check('updateItem -> 200', assignRes._status === 200, assignRes._json);
     const itemRow = await pool.query('SELECT event_id FROM items WHERE id = $1', [itemId]);
     check('item.event_id set in DB', itemRow.rows[0]?.event_id === eventId);
     check('item.eventId set in store', getItems().find(i => i.id === itemId)?.eventId === eventId);
@@ -241,7 +241,8 @@ async function main(): Promise<void> {
     await pool
       .query(
         `DELETE FROM audit_log WHERE created_at >= $1
-         AND (action LIKE 'EVENT%' OR action = 'INVITATION_ACCEPTED' OR action = 'ITEM_CREATED')`,
+         AND (action LIKE 'EVENT%' OR action = 'INVITATION_ACCEPTED'
+              OR action IN ('ITEM_CREATED', 'ITEM_UPDATED'))`,
         [t0]
       )
       .catch(() => {});

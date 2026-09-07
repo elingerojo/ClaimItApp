@@ -27,7 +27,6 @@ import {
   updateEvent,
   deleteEvent,
   getEventDetail,
-  assignItems,
   acceptInvitation,
   getEvent,
   listEvents,
@@ -109,7 +108,6 @@ app.post('/api/admin/events', requireAdminSession, createEvent);
 app.get('/api/admin/events/:id', requireAdminSession, getEventDetail);
 app.patch('/api/admin/events/:id', requireAdminSession, updateEvent);
 app.delete('/api/admin/events/:id', requireAdminSession, deleteEvent);
-app.post('/api/admin/events/:id/items', requireAdminSession, assignItems);
 app.post('/api/admin/evict', requireAdminSession, evictClaimant);
 // Configuración global de eventos: plantilla de agenda + ventajas por rol
 // (matriz). Solo admin.

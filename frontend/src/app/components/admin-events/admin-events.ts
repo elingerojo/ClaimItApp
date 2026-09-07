@@ -5,7 +5,6 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AdminTokenService } from '../../services/admin-token';
 import { ToastService } from '../../services/toast';
-import { InventoryService } from '../../services/inventory';
 import { railwayApiUrl } from '../../app.config';
 import { AdminAuth } from '../admin-auth/admin-auth';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
@@ -64,7 +63,6 @@ const DEFAULT_AGENDA: AgendaInput = {
 export class AdminEvents implements OnInit, OnDestroy {
   readonly adminTokenService = inject(AdminTokenService);
   readonly toastService = inject(ToastService);
-  readonly inventoryService = inject(InventoryService);
   private readonly route = inject(ActivatedRoute);
   private querySub?: Subscription;
 
@@ -77,8 +75,6 @@ export class AdminEvents implements OnInit, OnDestroy {
   readonly formVisible = signal(false);
   /** Evento en edición (null = modo crear). */
   readonly editingEventId = signal<string | null>(null);
-  readonly assignPanelId = signal<string | null>(null);
-  readonly selectedItemIds = signal<string[]>([]);
 
   // Form fields (create / edit)
   readonly title = signal('');
@@ -340,41 +336,6 @@ export class AdminEvents implements OnInit, OnDestroy {
       this.toastService.success('Evento eliminado.');
       this.detail.set(null);
       await this.loadEvents();
-    } catch (err: any) {
-      this.toastService.error(`Error: ${err.message}`);
-    }
-  }
-
-  toggleAssign(id: string): void {
-    this.assignPanelId.update(v => (v === id ? null : id));
-    this.selectedItemIds.set([]);
-  }
-
-  toggleItemSelection(itemId: string): void {
-    this.selectedItemIds.update(list =>
-      list.includes(itemId) ? list.filter(x => x !== itemId) : [...list, itemId]
-    );
-  }
-
-  async submitAssign(id: string): Promise<void> {
-    if (this.selectedItemIds().length === 0) {
-      this.toastService.error('Selecciona al menos un item.');
-      return;
-    }
-    try {
-      const res = await fetch(`${this.apiUrl}/admin/events/${id}/items`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Admin-Token': this.adminTokenService.token()
-        },
-        body: JSON.stringify({ itemIds: this.selectedItemIds() })
-      });
-      if (!res.ok) throw new Error((await res.json()).error || 'Error al asignar');
-      this.toastService.success(`${this.selectedItemIds().length} item(s) asignados.`);
-      this.assignPanelId.set(null);
-      this.inventoryService.refresh().catch(() => {});
-      await this.openDetail(id);
     } catch (err: any) {
       this.toastService.error(`Error: ${err.message}`);
     }

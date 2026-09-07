@@ -3,7 +3,8 @@
  *
  * Handlers for event creation, member management, and invitation processing.
  * Implements role cascading, availability calculations, admin CRUD with date
- * propagation, batch item assignment and share links.
+ * propagation and share links. Item↔event assignments happen individually via
+ * the item PATCH endpoint.
  */
 
 import { Request, Response } from 'express';
@@ -16,7 +17,6 @@ import {
   upsertEvent,
   removeEvent,
   upsertEventMember,
-  setItemEvent,
   propagateEventDates,
   detachItemsFromEvent,
   getTrustSetting
@@ -666,58 +666,6 @@ export const getEventDetail = async (req: Request, res: Response): Promise<void>
   } catch (error) {
     console.error('Failed to fetch event detail:', error);
     res.status(500).json({ error: 'Failed to fetch event detail' });
-  }
-};
-
-/**
- * POST /api/admin/events/:id/items
- * Batch-assign items to an event (array of itemId).
- */
-export const assignItems = async (req: Request, res: Response): Promise<void> => {
-  const { id } = req.params;
-  const { itemIds } = req.body;
-  const adminCode = (req as any).adminCode || 'system';
-
-  if (!Array.isArray(itemIds) || itemIds.length === 0) {
-    res.status(400).json({ error: 'itemIds must be a non-empty array' });
-    return;
-  }
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const ev = await client.query('SELECT id FROM events WHERE id = $1 FOR UPDATE', [id]);
-    if (ev.rows.length === 0) {
-      await client.query('ROLLBACK');
-      res.status(404).json({ error: 'Event not found' });
-      return;
-    }
-
-    for (const itemId of itemIds) {
-      await client.query('UPDATE items SET event_id = $1 WHERE id = $2', [id, itemId]);
-    }
-
-    await client.query('COMMIT');
-
-    // Write-through
-    for (const itemId of itemIds) {
-      setItemEvent(itemId, id);
-    }
-
-    await logAudit({
-      action: 'EVENT_ITEMS_ASSIGNED',
-      adminCodeSuffix: maskAdminCode(adminCode),
-      details: { assignedCount: itemIds.length, timestamp: new Date().toISOString() }
-    });
-
-    res.json({ success: true, assigned: itemIds.length });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Assign items failed:', error);
-    res.status(500).json({ error: 'Failed to assign items to event' });
-  } finally {
-    client.release();
   }
 };
 
