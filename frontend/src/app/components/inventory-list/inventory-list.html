@@ -212,9 +212,6 @@
                    class="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5 shrink-0 ml-1">Ver Info Externa ↗</a>
               }
             </div>
-            @if (item.eventSummary) {
-              <span class="inline-flex text-[10px] font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full mb-1">📅 {{ item.eventSummary.title }}</span>
-            }
             <h2 class="text-sm font-bold text-gray-900 line-clamp-1">{{ item.title }}</h2>
             @if (item.precioVisible != null) {
               <div class="text-sm font-extrabold text-gray-900 mt-0.5">${{ item.precioVisible }}</div>
