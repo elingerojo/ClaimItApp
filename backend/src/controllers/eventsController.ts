@@ -314,7 +314,6 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
  */
 export const acceptInvitation = async (req: Request, res: Response): Promise<void> => {
   const { invitationCode, userUuid } = req.body;
-  console.log(`[InviteAccept] ENTRY code=${invitationCode} userUuid=${userUuid}`);
 
   if (!invitationCode || !userUuid) {
     res.status(400).json({ error: 'Missing invitationCode or userUuid' });
@@ -347,7 +346,6 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     }
 
     const { role: invitationRole, event_id: eventId, title: eventTitle } = invResult.rows[0];
-    console.log(`[InviteAccept] CODE_ROLE=${invitationRole} eventId=${eventId} eventTitle=${eventTitle}`);
 
     // 2. Get or create user, get current role
     let userResult = await client.query('SELECT uuid, global_role FROM users WHERE uuid = $1', [
@@ -365,12 +363,9 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     } else {
       currentRole = userResult.rows[0].global_role;
     }
-    console.log(`[InviteAccept] userRow=${userResult.rows.length > 0} currentRole=${currentRole}`);
-
     // 3. Determine if role should cascade
     const newRole = determineRoleAfterInvitation(currentRole, invitationRole);
     const roleCascaded = newRole !== currentRole;
-    console.log(`[InviteAccept] newRole=${newRole} cascaded=${roleCascaded}`);
 
     // 4. Register user in event_members. La membresía ya no guarda rol (rol
     //    GLOBAL = única fuente de verdad): la invitación solo puede elevar
@@ -394,7 +389,6 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     ]);
 
     await client.query('COMMIT');
-    console.log(`[InviteAccept] COMMITTED userUuid=${userUuid} newRole=${newRole} cascaded=${roleCascaded}`);
 
     // Write-through: actualizar el rol del usuario en el store (preservando el alias)
     const existingUser = getUser(userUuid);
@@ -433,7 +427,7 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error(`[InviteAccept] FAILED code=${invitationCode} userUuid=${userUuid}`, error);
+    console.error('Invitation acceptance failed:', error);
     res.status(500).json({
       error: 'Failed to accept invitation',
       timestamp: new Date().toISOString()
