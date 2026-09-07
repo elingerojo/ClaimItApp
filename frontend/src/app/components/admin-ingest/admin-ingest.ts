@@ -87,6 +87,28 @@ export class AdminIngest implements OnInit {
   /** true si el editor se abrió desde Gestionar Inventario (?edit=ITEM_ID). */
   readonly isPreloadedEdit = signal(false);
 
+  // ---- Última captura guardada (solo memoria): habilita "Editar última captura" ----
+  /** Id del último Item capturado y guardado en esta sesión (null hasta el 1er guardado). */
+  readonly lastCapturedItemId = signal<string | null>(null);
+
+  /** true si el form de captura tiene contenido sin guardar (fotos o campos con valor). */
+  readonly captureInProgress = computed<boolean>(() =>
+    this.captureImages().length > 0 ||
+    this.formTitle().trim() !== '' ||
+    this.formDescription().trim() !== '' ||
+    this.formInfoUrl().trim() !== '' ||
+    this.formPrecioBase() != null
+  );
+
+  /** Texto de ayuda del botón "Editar última captura" según su estado. */
+  readonly editLastButtonHint = computed<string>(() => {
+    if (!this.lastCapturedItemId()) return 'Guarda una captura primero para poder editarla después.';
+    if (this.captureInProgress()) return 'Guarda o descarta la captura en curso antes de editar la última captura.';
+    if (this.isUploading()) return 'Espera a que termine la subida de fotos.';
+    if (this.isAiProcessing()) return 'Espera a que termine el análisis IA.';
+    return 'Abrir el editor de la última captura (agregar el precio o corregir campos).';
+  });
+
   /** Eventos no cerrados: candidatos para asignar un item (captura y edición). */
   readonly availableEvents = computed<EventOption[]>(() =>
     this.events().filter(ev => ev.status !== 'closed')
@@ -141,12 +163,19 @@ export class AdminIngest implements OnInit {
 
     const editId = this.route.snapshot.queryParamMap.get('edit');
     if (editId) {
-      await this.preloadItemForEdit(editId);
+      await this.openEditorForItem(editId, true);
     }
   }
 
-  /** Carga un objeto existente (GET admin) y abre el editor vertical precargado. */
-  private async preloadItemForEdit(itemId: string): Promise<void> {
+  /**
+   * Carga un objeto existente (GET admin) y abre el editor vertical precargado.
+   * - `fromManage=true`  → vino de Gestionar Inventario (?edit=ITEM_ID); al
+   *   guardar regresa a esa vista.
+   * - `fromManage=false` → se abrió desde la captura ("Editar última captura");
+   *   al guardar/cancelar regresa al panel de captura.
+   * Devuelve true si el item se cargó correctamente; false en caso de error.
+   */
+  private async openEditorForItem(itemId: string, fromManage: boolean): Promise<boolean> {
     try {
       const res = await fetch(`${this.apiUrl}/admin/items/${itemId}`, {
         headers: { 'X-Admin-Token': this.adminTokenService.token() }
@@ -173,11 +202,24 @@ export class AdminIngest implements OnInit {
       this.editEventId.set(item.eventId ?? '');
       this.editPriceBase.set(item.precioBaseCosto != null ? Number(item.precioBaseCosto) : null);
       this.editVisibilityLevel.set(item.visibilityLevel ?? 4);
-      this.isPreloadedEdit.set(true);
+      this.isPreloadedEdit.set(fromManage);
 
       this.scrollToEditor();
+      return true;
     } catch (err: any) {
       this.toastService.error(`Error al cargar el objeto para editar: ${err.message}`);
+      return false;
+    }
+  }
+
+  /** Botón "Editar última captura": abre el editor con la última captura guardada. */
+  async openEditorForLastCaptured(): Promise<void> {
+    const itemId = this.lastCapturedItemId();
+    if (!itemId) return;
+    const opened = await this.openEditorForItem(itemId, false);
+    if (!opened) {
+      // El item ya no existe en el servidor: olvidar la referencia.
+      this.lastCapturedItemId.set(null);
     }
   }
 
@@ -407,8 +449,10 @@ export class AdminIngest implements OnInit {
   // ==========================================================================
 
   /**
-   * Saves the item (with its full ordered photo array) to the database, then
-   * auto-opens the vertical editor for the last-added item.
+   * Saves the item (with its full ordered photo array) to the database and
+   * remembers it as the last captured item (so the "Editar última captura"
+   * button can reopen it later, e.g. to add the price after the first save).
+   * It no longer auto-opens the vertical editor after saving.
    */
   async onSaveItemToInventory(): Promise<void> {
     const images = this.captureImages();
@@ -445,28 +489,11 @@ export class AdminIngest implements OnInit {
       this.toastService.success('¡Objeto publicado con éxito en el inventario!');
       this.persistSelectedEvent();
 
-      // Auto-open vertical editor for the newly created item
+      // Recordar la última captura (solo memoria): habilita el botón
+      // "Editar última captura" para editar/precio después del primer guardado.
+      // El editor ya NO se abre automáticamente.
       const newItem = result.item;
-      const newImages: string[] = Array.isArray(newItem.imageUrls) ? newItem.imageUrls : images;
-      this.editingItem.set({
-        id: newItem.id,
-        title: newItem.title,
-        description: newItem.description,
-        category: newItem.category,
-        infoUrl: newItem.infoUrl,
-        imageUrls: newImages,
-        status: newItem.status,
-        createdAt: newItem.createdAt,
-        queue: []
-      });
-      this.editImages.set(newImages);
-      this.editTitle.set(newItem.title);
-      this.editDescription.set(newItem.description || '');
-      this.editInfoUrl.set(newItem.infoUrl || '');
-      this.editEventId.set(this.selectedEventId());
-      this.editPriceBase.set(this.formPrecioBase());
-      this.editVisibilityLevel.set(4);
-      this.isPreloadedEdit.set(false);
+      this.lastCapturedItemId.set(newItem?.id ?? null);
 
       // Clear the ingest form for the next item
       this.captureImages.set([]);
