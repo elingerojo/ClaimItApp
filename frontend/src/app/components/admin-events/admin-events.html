@@ -91,7 +91,17 @@
             <div class="flex items-center gap-2 shrink-0">
               <button (click)="openDetail(ev.id)" class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">👁 Detalle</button>
               <button (click)="editEvent(ev.id)" class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">✏️ Editar</button>
-              <button (click)="removeEvent(ev.id, ev.title)" class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">🗑️</button>
+              <!-- Solo se puede borrar un evento sin items (regla event-first). -->
+              @if ((ev.item_count ?? 0) === 0) {
+                <button (click)="removeEvent(ev.id, ev.title)"
+                        [title]="'Borrar evento'"
+                        class="text-xs px-3 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors">🗑️</button>
+              } @else {
+                <span class="inline-flex items-center text-[10px] px-2 py-1 rounded-lg bg-gray-100 text-gray-400"
+                      [title]="'Mueve o elimina sus items antes de poder borrarlo (' + ev.item_count + ' item(s)).'">
+                  🔒 {{ ev.item_count }} item(s)
+                </span>
+              }
             </div>
           </div>
 

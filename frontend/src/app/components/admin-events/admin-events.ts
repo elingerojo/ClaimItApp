@@ -23,6 +23,8 @@ export interface EventSummary {
   available_from: string;
   pickup_deadline: string;
   created_at: string;
+  /** Nº de items asignados al evento (0 = se puede borrar). */
+  item_count?: number;
 }
 
 export interface EventInvitation {
@@ -326,7 +328,7 @@ export class AdminEvents implements OnInit, OnDestroy {
   }
 
   async removeEvent(id: string, title: string): Promise<void> {
-    if (!confirm(`¿Eliminar el evento "${title}"? Los items quedan sin evento.`)) return;
+    if (!confirm(`¿Eliminar el evento "${title}"?`)) return;
     try {
       const res = await fetch(`${this.apiUrl}/admin/events/${id}`, {
         method: 'DELETE',

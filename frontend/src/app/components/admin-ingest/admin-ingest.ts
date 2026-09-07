@@ -202,13 +202,22 @@ export class AdminIngest implements OnInit {
       }));
       this.events.set(events);
 
-      // Solo se restaura como destino de captura un evento que no esté cerrado.
+      // Regla event-first: todo item debe pertenecer a un evento.
+      // 1) Restaurar el evento guardado si sigue existiendo y no está cerrado.
       const storedId = this.readStoredEventId();
       if (storedId && events.some(ev => ev.id === storedId && ev.status !== 'closed')) {
         this.selectedEventId.set(storedId);
-      } else if (storedId) {
-        // El evento guardado ya no existe o quedó 'closed' (Cerrado): limpiar la clave
-        this.clearStoredEventId();
+        return;
+      }
+      // 2) Sin selección válida: preseleccionar el primer evento disponible
+      //    (regla event-first: no se permite crear un item sin evento).
+      this.clearStoredEventId();
+      const firstAvailable = events.find(ev => ev.status !== 'closed');
+      if (firstAvailable) {
+        this.selectedEventId.set(firstAvailable.id);
+        this.writeStoredEventId(firstAvailable.id);
+      } else {
+        this.selectedEventId.set('');
       }
     } catch (err: any) {
       this.toastService.error(`No se pudieron cargar los eventos: ${err.message}`);
@@ -407,6 +416,11 @@ export class AdminIngest implements OnInit {
       this.toastService.error('Agrega al menos una foto antes de guardar.');
       return;
     }
+    // Regla event-first: no se puede guardar un item sin evento.
+    if (!this.selectedEventId()) {
+      this.toastService.error('Crea primero un evento: todo objeto debe pertenecer a un evento.');
+      return;
+    }
     try {
       const res = await fetch(`${this.apiUrl}/admin/items`, {
         method: 'POST',
@@ -479,6 +493,11 @@ export class AdminIngest implements OnInit {
     }
     if (this.editImages().length === 0) {
       this.toastService.error('El objeto debe conservar al menos una foto.');
+      return;
+    }
+    // Regla event-first: el objeto no puede quedar sin evento.
+    if (!this.editEventId()) {
+      this.toastService.error('Selecciona un evento: todo objeto debe pertenecer a un evento.');
       return;
     }
 

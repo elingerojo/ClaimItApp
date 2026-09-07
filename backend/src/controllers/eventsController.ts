@@ -18,7 +18,6 @@ import {
   removeEvent,
   upsertEventMember,
   propagateEventDates,
-  detachItemsFromEvent,
   getTrustSetting
 } from '../cache/appStore.js';
 import {
@@ -582,8 +581,8 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
 
 /**
  * DELETE /api/admin/events/:id
- * Deletes an event; its items keep event_id = NULL (ON DELETE SET NULL) and
- * continue working with their existing behavior.
+ * Deletes an event. Solo se permite cuando el evento no tiene items (regla
+ * event-first: todo item pertenece a un evento, la FK es ON DELETE RESTRICT).
  */
 export const deleteEvent = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
@@ -593,6 +592,19 @@ export const deleteEvent = async (req: Request, res: Response): Promise<void> =>
   try {
     await client.query('BEGIN');
 
+    // Pre-check: no se puede borrar un evento que aún tiene items.
+    const itemsCount = await client.query(
+      'SELECT COUNT(*)::int AS n FROM items WHERE event_id = $1',
+      [id]
+    );
+    if (itemsCount.rows[0].n > 0) {
+      await client.query('ROLLBACK');
+      res.status(409).json({
+        error: 'Cannot delete an event that still has items. Move or delete its items first.'
+      });
+      return;
+    }
+
     const del = await client.query('DELETE FROM events WHERE id = $1 RETURNING id', [id]);
     if (del.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -600,14 +612,10 @@ export const deleteEvent = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Defensive: detach items explicitly (FK also ON DELETE SET NULL)
-    await client.query('UPDATE items SET event_id = NULL WHERE event_id = $1', [id]);
-
     await client.query('COMMIT');
 
     // Write-through
     removeEvent(id);
-    detachItemsFromEvent(id);
 
     await logAudit({
       action: 'EVENT_DELETED',
@@ -615,7 +623,7 @@ export const deleteEvent = async (req: Request, res: Response): Promise<void> =>
       details: { timestamp: new Date().toISOString() }
     });
 
-    res.json({ success: true, message: 'Event deleted. Items detached.' });
+    res.json({ success: true, message: 'Event deleted.' });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Event deletion failed:', error);
@@ -808,9 +816,11 @@ export const listEvents = async (req: Request, res: Response): Promise<void> => 
     const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
 
     const result = await pool.query(
-      `SELECT id, title, description, available_from, pickup_deadline, status, created_at
-       FROM events
-       ORDER BY created_at DESC
+      `SELECT e.id, e.title, e.description, e.available_from, e.pickup_deadline,
+              e.status, e.created_at,
+              (SELECT COUNT(*)::int FROM items i WHERE i.event_id = e.id) AS item_count
+       FROM events e
+       ORDER BY e.created_at DESC
        LIMIT $1 OFFSET $2`,
       [limit, offset]
     );

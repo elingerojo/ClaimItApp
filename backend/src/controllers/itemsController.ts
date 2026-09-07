@@ -102,10 +102,29 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
+  // Regla event-first: todo item debe pertenecer a un evento.
+  if (!event_id || typeof event_id !== 'string') {
+    res.status(400).json({
+      error: 'event_id is required: every item must belong to an event.',
+      timestamp: new Date().toISOString()
+    });
+    return;
+  }
+
   // Congelar el snapshot de precios por rol (multiplicadores del catálogo)
   const snapshot = computePriceSnapshot(precio_base_costo != null ? Number(precio_base_costo) : null);
 
   try {
+    // Verificar que el evento destino exista (400 amigable en vez de FK violation).
+    const evCheck = await pool.query('SELECT id FROM events WHERE id = $1', [event_id]);
+    if (evCheck.rows.length === 0) {
+      res.status(400).json({
+        error: 'Invalid event_id: the referenced event does not exist.',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+
     const insertQuery = `
       INSERT INTO items
         (title, description, category, info_url, image_urls,
@@ -127,7 +146,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
       // JSONB: se envía serializado como JSON
       JSON.stringify(imageUrls),
       visibility_level ?? 4,
-      event_id ?? null,
+      event_id,
       available_from ?? null,
       visible_at ?? null,
       expires_at ?? null,
@@ -263,7 +282,17 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
   // JSONB: el arreglo ordenado viaja como JSON serializado
   if (imageUrls !== undefined) set('image_urls', JSON.stringify(imageUrls), 'imageUrls');
   if (visibility_level !== undefined) set('visibility_level', visibility_level, 'visibility_level');
-  if (event_id !== undefined) set('event_id', event_id, 'event_id');
+  if (event_id !== undefined) {
+    // Regla event-first: el item no puede quedar sin evento.
+    if (!event_id || typeof event_id !== 'string') {
+      res.status(400).json({
+        error: 'Invalid event_id: every item must belong to an event.',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+    set('event_id', event_id, 'event_id');
+  }
   if (available_from !== undefined) set('available_from', available_from, 'available_from');
   if (visible_at !== undefined) set('visible_at', visible_at, 'visible_at');
   if (precio_base_costo !== undefined) {
@@ -284,6 +313,17 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
   }
 
   try {
+    // Regla event-first: si se asigna un evento, debe existir.
+    if (event_id !== undefined) {
+      const evCheck = await pool.query('SELECT id FROM events WHERE id = $1', [event_id]);
+      if (evCheck.rows.length === 0) {
+        res.status(400).json({
+          error: 'Invalid event_id: the referenced event does not exist.',
+          timestamp: new Date().toISOString()
+        });
+        return;
+      }
+    }
     params.push(id);
     const updateQuery = `
       UPDATE items
