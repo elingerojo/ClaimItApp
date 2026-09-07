@@ -179,12 +179,32 @@
                 </div>
               }
 
+              <!-- Paso 2c: tu ventaja por rol extiende el cierre (timing strategy) -->
+              @if (hasExtendedWindow()) {
+                <div class="flex items-start gap-2 text-xs rounded-lg bg-purple-50 border border-purple-100 px-2.5 py-2">
+                  <span class="mt-0.5 shrink-0">🎁</span>
+                  <div>
+                    <b>Tu rol ({{ roleDisplayName(item().myRoleInEvent) | stripAccents }}) extiende tu ventana:</b>
+                    @if (item().effectiveClaimsCloseAt) {
+                      <div class="mt-0.5">Puedes apartar hasta el <b>{{ item().effectiveClaimsCloseAt | dateEs }}</b>.</div>
+                    }
+                    @if (item().effectivePickupDeadline) {
+                      <div class="mt-0.5">Última recogida para ti el <b>{{ item().effectivePickupDeadline | dateEs }}</b>.</div>
+                    }
+                  </div>
+                </div>
+              }
+
               <!-- Paso 3: fin global del evento -->
               @if (item().eventSummary?.pickup_deadline; as evEnd) {
                 <div class="flex items-start gap-2 text-xs text-gray-600">
                   <span class="mt-0.5 shrink-0">🏁</span>
                   <div>
-                    El evento cierra la recolección el <b>{{ evEnd | dateEs }}</b>.
+                    @if (hasExtendedWindow()) {
+                      Para el público, la recolección cierra el <b>{{ evEnd | dateEs }}</b>.
+                    } @else {
+                      El evento cierra la recolección el <b>{{ evEnd | dateEs }}</b>.
+                    }
                     @if (item().claimsClosed) {
                       Ya no se aceptan nuevas separaciones.
                     }

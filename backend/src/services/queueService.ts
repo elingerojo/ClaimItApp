@@ -50,10 +50,12 @@ const HOUR_MS = 60 * 60 * 1000;
  */
 async function getItemPickupContext(itemId: string, client: any) {
   const res = await client.query(
-    `SELECT i.event_id,
-            e.available_from, e.pickup_deadline, e.claims_close_at,
+    `SELECT i.event_id, i.available_from AS item_available_from,
+            e.published_at, e.available_from, e.claims_close_at, e.pickup_deadline,
             e.familiares_pickup_hours, e.amigos_pickup_hours,
             e.conocidos_pickup_hours, e.publico_pickup_hours,
+            e.familiares_advance_hours, e.amigos_advance_hours,
+            e.conocidos_advance_hours, e.publico_advance_hours,
             e.pickup_window_hours
      FROM items i
      LEFT JOIN events e ON i.event_id = e.id
@@ -123,24 +125,29 @@ export async function resolvePickupWindow(
 /**
  * Compute the collection deadline for the first-in-line:
  *   meta = reference + window
- *   deadline = clamp(meta, [available_from, pickup_deadline])
+ *   deadline = clamp(meta, [effective available_from, effective pickup_deadline])
  *
- * Floor: events.available_from (no delivery before the event opens).
- * Ceiling: events.pickup_deadline (end of closing). The per-item expires_at
- * was removed in migration 015, so the event deadline is the only ceiling.
+ * Per-role symmetric window (timing strategy): the role's total advantage
+ * (advance + membership bonus) widens the clamp bounds — the floor moves
+ * EARLIER (available_from − A) and the ceiling LATER (pickup_deadline + A).
+ * A = 0 (publico / no advantage) keeps the public base bounds.
  */
 function computePickupDeadline(
   reference: Date,
   windowHours: number,
-  ctx: any
+  ctx: any,
+  totalAdvanceHours = 0
 ): Date {
   const metaMs = reference.getTime() + windowHours * HOUR_MS;
   let floorMs = -Infinity;
   let ceilingMs = Infinity;
+  const A = Math.max(0, totalAdvanceHours || 0);
+  const widenMs = A * HOUR_MS;
 
   if (ctx?.event_id) {
-    if (ctx.available_from) floorMs = new Date(ctx.available_from).getTime();
-    if (ctx.pickup_deadline) ceilingMs = new Date(ctx.pickup_deadline).getTime();
+    const floorBase = ctx.item_available_from ?? ctx.available_from;
+    if (floorBase) floorMs = new Date(floorBase).getTime() - widenMs;
+    if (ctx.pickup_deadline) ceilingMs = new Date(ctx.pickup_deadline).getTime() + widenMs;
   }
 
   return new Date(Math.min(Math.max(metaMs, floorMs), ceilingMs));
@@ -172,11 +179,26 @@ async function freezeDeadlineOnFirst(itemId: string, client: any): Promise<First
   const role = await resolveRoleForEvent(ctx?.event_id ?? null, first.user_uuid, client);
   const windowHours = await resolvePickupWindow(itemId, role, client);
 
+  // Per-role symmetric window: the role's total advantage A = the event's frozen
+  // <rol>_advance_hours for the resolved role + the member's referral bonus
+  // (0 when not a member), matching what the feed/claims use for the same user.
+  let bonusHours = 0;
+  if (ctx?.event_id) {
+    const memRes = await client.query(
+      `SELECT COALESCE(bonus_hours, 0)::int AS bonus FROM event_members
+       WHERE event_id = $1 AND user_uuid = $2`,
+      [ctx.event_id, first.user_uuid]
+    );
+    bonusHours = memRes.rows[0]?.bonus ?? 0;
+  }
+  const advanceHours = Number(ctx?.[`${role}_advance_hours`] ?? 0) || 0;
+  const totalAdvance = advanceHours + bonusHours;
+
   // F1: the reference instant is when the user BECOMES first in line — for a
   // brand-new claim that is its claimed_at (~now); for a promoted waiter it is
   // the moment the queue advances (now), never a stale claimed_at in the past.
   const reference = new Date(Math.max(new Date(first.claimed_at).getTime(), Date.now()));
-  const deadline = computePickupDeadline(reference, windowHours, ctx);
+  const deadline = computePickupDeadline(reference, windowHours, ctx, totalAdvance);
 
   await client.query(
     `UPDATE claims

@@ -29,6 +29,9 @@ export interface ItemWithQueue extends Item {
   visibleAt?: string | null;
   availableFrom?: string | null;
   effectiveAvailableFrom?: string | null;
+  /** Per-role effective end of the window (base + advantage), from the feed. */
+  effectiveClaimsCloseAt?: string | null;
+  effectivePickupDeadline?: string | null;
   canClaim?: boolean;
   claimsClosed?: boolean;
   myRoleInEvent?: string;

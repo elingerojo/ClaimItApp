@@ -48,12 +48,15 @@ export {
   VALID_ROLES,
   EVENT_STATUSES,
   resolvePickupHoursField,
-  resolveEffectiveRole
+  resolveEffectiveRole,
+  buildRoleTimeline
 } from './eventHelpers.js';
 
 export type {
   EffectiveAvailability,
-  RoleHierarchy
+  RoleHierarchy,
+  RoleTimeline,
+  EventBaseDates
 } from './eventHelpers.js';
 
 // Shared Types

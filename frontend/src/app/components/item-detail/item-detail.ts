@@ -216,6 +216,22 @@ export class ItemDetail {
     return this.item().claimsClosed === true;
   }
 
+  /**
+   * La ventana efectiva del usuario (por rol) se extiende más allá del cierre
+   * público base (timing strategy): true cuando el rol tiene ventaja real
+   * (sus fechas efectivas difieren de las del resumen público del evento).
+   */
+  hasExtendedWindow(): boolean {
+    const it = this.item();
+    if (!it.myRoleInEvent) return false;
+    const baseClose = it.eventSummary?.claims_close_at ?? null;
+    const basePickup = it.eventSummary?.pickup_deadline ?? null;
+    return (
+      (it.effectiveClaimsCloseAt != null && it.effectiveClaimsCloseAt !== baseClose) ||
+      (it.effectivePickupDeadline != null && it.effectivePickupDeadline !== basePickup)
+    );
+  }
+
   async onShare(): Promise<void> {
     const eventId = this.item().eventId;
     const userUuid = this.userService.currentUuid();

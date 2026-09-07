@@ -88,7 +88,7 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
 
     // 2. Fetch the parent item and apply an exclusive pessimistic row lock
     const itemCheckQuery = `
-      SELECT id, status, title, category, event_id
+      SELECT id, status, title, category, event_id, available_from
       FROM items
       WHERE id = $1
       FOR UPDATE
@@ -109,29 +109,66 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // 2a. Ciclo de vida del evento: en closing (claims_close_at) o closed
-    //     (pickup_deadline) ya no se aceptan claims nuevos.
+    // 2a. Ventana por rol (timing strategy — symmetric widening). El rol puede
+    //     reclamar desde su available efectivo (available − A) hasta su cierre
+    //     efectivo (claims_close + A / pickup_deadline + A). El estatus GLOBAL
+    //     del evento es solo etiqueta: los cortes se evalúan con las fechas
+    //     efectivas del rol, así que familiares puede seguir apartando tras el
+    //     cierre público. A = evento.<rol>_advance_hours + bonus por referido.
     if (item.event_id) {
       const evRes = await client.query(
-        `SELECT status, claims_close_at, pickup_deadline
+        `SELECT status, published_at, available_from, claims_close_at, pickup_deadline,
+                familiares_advance_hours, amigos_advance_hours,
+                conocidos_advance_hours, publico_advance_hours
          FROM events WHERE id = $1`,
         [item.event_id]
       );
       const ev = evRes.rows[0];
       if (ev) {
         const nowMs = Date.now();
-        const closeAt = ev.claims_close_at ? new Date(ev.claims_close_at).getTime() : null;
-        const pickupAt = ev.pickup_deadline ? new Date(ev.pickup_deadline).getTime() : null;
-        const claimsClosed =
-          ev.status === 'closed' ||
-          ev.status === 'closing' ||
-          (closeAt !== null && closeAt <= nowMs) ||
-          (pickupAt !== null && pickupAt <= nowMs);
-        if (claimsClosed) {
+        const roleRes = await client.query('SELECT global_role FROM users WHERE uuid = $1', [
+          userUuid
+        ]);
+        const role = roleRes.rows[0]?.global_role || 'publico';
+        const memRes = await client.query(
+          `SELECT COALESCE(bonus_hours, 0)::int AS bonus FROM event_members
+           WHERE event_id = $1 AND user_uuid = $2`,
+          [item.event_id, userUuid]
+        );
+        const bonus = memRes.rows[0]?.bonus ?? 0;
+        const advance = Number(ev[`${role}_advance_hours`] ?? 0) || 0;
+        const A = advance + bonus;
+        const widenMs = A * 60 * 60 * 1000;
+
+        // Base available del objeto: override del item, si no el del evento.
+        const baseAvailable = item.available_from ?? ev.available_from ?? null;
+
+        const effAvailableMs = baseAvailable ? new Date(baseAvailable).getTime() - widenMs : null;
+        const effClaimsCloseMs = ev.claims_close_at
+          ? new Date(ev.claims_close_at).getTime() + widenMs
+          : null;
+        const effPickupMs = ev.pickup_deadline
+          ? new Date(ev.pickup_deadline).getTime() + widenMs
+          : null;
+        const hardClosed =
+          ev.status === 'closed' && effClaimsCloseMs === null && effPickupMs === null;
+
+        // Aún no abre para este rol (sin fechas no hay gate de "todavía no").
+        if (effAvailableMs !== null && nowMs < effAvailableMs) {
           await client.query('ROLLBACK');
           res.status(409).json({
-            error:
-              'El evento ya no acepta nuevas separaciones (fase de recolección o cerrado).'
+            error: 'Este objeto aún no está disponible para tu rol (tu ventana abre más tarde).'
+          });
+          return;
+        }
+        if (
+          hardClosed ||
+          (effClaimsCloseMs !== null && effClaimsCloseMs <= nowMs) ||
+          (effPickupMs !== null && effPickupMs <= nowMs)
+        ) {
+          await client.query('ROLLBACK');
+          res.status(409).json({
+            error: 'El evento ya no acepta nuevas separaciones para tu rol (cierre alcanzado).'
           });
           return;
         }

@@ -1,5 +1,10 @@
 import { Request, Response } from 'express';
-import { ROLE_HIERARCHY, resolveEffectiveRole, resolvePickupHoursField } from '@claimitapp/shared';
+import {
+  ROLE_HIERARCHY,
+  resolveEffectiveRole,
+  resolvePickupHoursField,
+  buildRoleTimeline
+} from '@claimitapp/shared';
 import {
   getItems,
   getLedger,
@@ -40,27 +45,20 @@ function resolveItemRole(
 /**
  * Effective availability of an item for a given (already resolved) role:
  *  - Base available_from = item override, else inherited from its event.
- *  - effective = base - (role advance_hours + membership bonus_hours).
+ *  - effective = base - A, where A = role advance_hours + membership bonus.
+ * Start dates shift EARLIER (−A); end dates shift LATER (+A) elsewhere.
  * Returns { effectiveAvailableFrom, canClaim }.
  */
 function computeAvailability(
-  item: {
-    availableFrom: string | null;
-    eventId: string | null;
-  },
-  role: string,
-  bonusHours: number
+  baseAvailable: string | null,
+  totalAdvanceHours: number
 ): { effectiveAvailableFrom: string | null; canClaim: boolean } {
-  const event = item.eventId ? getEvent(item.eventId) : null;
-  const base = item.availableFrom ?? event?.available_from ?? null;
-
-  if (!base) {
+  if (!baseAvailable) {
     // No scheduling configured -> always claimable (legacy behavior)
     return { effectiveAvailableFrom: null, canClaim: true };
   }
 
-  const advanceHours = event?.[`${role}_advance_hours`] ?? 0;
-  const effective = new Date(new Date(base).getTime() - (advanceHours + bonusHours) * HOUR_MS);
+  const effective = new Date(new Date(baseAvailable).getTime() - totalAdvanceHours * HOUR_MS);
 
   return {
     effectiveAvailableFrom: effective.toISOString(),
@@ -145,21 +143,45 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
         // 2. Visibility by RESOLVED role (membership > global fallback).
         if (item.visibilityLevel !== null && item.visibilityLevel < roleLevel) return null;
 
-        // 3. Scheduled publication: invisible until visible_at (item override or event)
         const event = item.eventId ? getEvent(item.eventId) : null;
-        const visibleAt = item.visibleAt ?? event?.published_at ?? null;
-        if (visibleAt && new Date(visibleAt).getTime() > now) return null;
 
-        // 4. Lifecycle gating: after claims_close_at (closing) no new claims;
-        //    after pickup_deadline (closed) the item is done.
-        const claimsCloseAt = event?.claims_close_at ?? null;
-        const pickupDeadlineEvent = event?.pickup_deadline ?? null;
+        // Per-role symmetric advantage: A = event <rol>_advance_hours + membership bonus.
+        const advanceHours = event ? Number(event?.[`${role}_advance_hours`] ?? 0) || 0 : 0;
+        const A = advanceHours + (bonusHours || 0);
+        const widenMs = A * HOUR_MS;
+        // Single-source helper for the event's 4 dates (start −A, end +A).
+        const timeline = event
+          ? buildRoleTimeline(
+              {
+                publishedAt: event.published_at ?? null,
+                availableFrom: event.available_from ?? null,
+                claimsCloseAt: event.claims_close_at ?? null,
+                pickupDeadline: event.pickup_deadline ?? null
+              },
+              A
+            )
+          : null;
+
+        // 3. Role-aware publication: the item becomes visible to this role when its
+        //    effective visible time (item.visible_at, else event.published_at, shifted
+        //    EARLIER by A) has arrived. Higher roles therefore see the catalog before
+        //    the public base publication.
+        const visibleBase = item.visibleAt ?? event?.published_at ?? null;
+        const effVisibleMs = visibleBase ? new Date(visibleBase).getTime() - widenMs : null;
+        if (effVisibleMs !== null && effVisibleMs > now) return null;
+
+        // 4. Role-aware lifecycle (timing strategy): end dates shift LATER (+A), so a
+        //    higher role may keep claiming/picking up past the public base close.
+        //    Event status is only a global label; per-role cutoffs use role dates.
+        const baseAvailable = item.availableFrom ?? event?.available_from ?? null;
+        const effClaimsCloseMs = timeline?.claimsCloseAt?.getTime() ?? null;
+        const effPickupMs = timeline?.pickupDeadline?.getTime() ?? null;
         const lifecycleLocked =
-          (claimsCloseAt && new Date(claimsCloseAt).getTime() <= now) ||
-          (pickupDeadlineEvent && new Date(pickupDeadlineEvent).getTime() <= now) ||
-          event?.status === 'closed';
+          (effClaimsCloseMs !== null && effClaimsCloseMs <= now) ||
+          (effPickupMs !== null && effPickupMs <= now) ||
+          (event?.status === 'closed' && effClaimsCloseMs === null && effPickupMs === null);
 
-        const { effectiveAvailableFrom, canClaim } = computeAvailability(item, role, bonusHours);
+        const { effectiveAvailableFrom, canClaim } = computeAvailability(baseAvailable, A);
 
         // Deadline of the requesting user's own claim (for the pickup indicator)
         const myClaim = userUuid ? item.queue.find(q => q.userUuid === userUuid) : undefined;
@@ -180,6 +202,11 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
           visibleAt: item.visibleAt,
           availableFrom: item.availableFrom,
           effectiveAvailableFrom,
+          // Effective end of this role's window (base + A), for the UI.
+          effectiveClaimsCloseAt:
+            effClaimsCloseMs !== null ? new Date(effClaimsCloseMs).toISOString() : null,
+          effectivePickupDeadline:
+            effPickupMs !== null ? new Date(effPickupMs).toISOString() : null,
           // Consistent role/context for the UI (claimant side)
           myRoleInEvent: role,
           canClaim: canClaim && !lifecycleLocked,

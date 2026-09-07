@@ -10,6 +10,8 @@ export interface EffectiveAvailability {
   hoursOfAdvance: number;
   bonusHours: number;
   totalAdvanceHours: number;
+  /** Per-role symmetric timeline (timing strategy): the 4 effective dates. */
+  timeline: RoleTimeline;
 }
 
 export interface RoleHierarchy {
@@ -65,6 +67,51 @@ export function resolveEffectiveRole(
 }
 
 /**
+ * Per-role symmetric time window (timing strategy).
+ *
+ * An "advantage" (totalAdvanceHours = A) means different things depending on
+ * the side of the event's close, so the SIGN depends on the date:
+ *   - start dates (published_at, available_from) shift EARLIER  -> base − A
+ *   - end dates (claims_close_at, pickup_deadline) shift LATER  -> base + A
+ *
+ * publico has A = 0, so it experiences the exact public base timeline.
+ */
+export interface EventBaseDates {
+  publishedAt?: Date | string | null;
+  availableFrom?: Date | string | null;
+  claimsCloseAt?: Date | string | null;
+  pickupDeadline?: Date | string | null;
+}
+
+export interface RoleTimeline {
+  totalAdvanceHours: number;
+  publishedAt: Date | null;
+  availableFrom: Date | null;
+  claimsCloseAt: Date | null;
+  pickupDeadline: Date | null;
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+
+function shiftDate(value: Date | string | null | undefined, deltaMs: number): Date | null {
+  if (value == null || value === '') return null;
+  return new Date(new Date(value).getTime() + deltaMs);
+}
+
+/** Apply the role's symmetric advantage to the 4 base (public) event dates. */
+export function buildRoleTimeline(base: EventBaseDates, totalAdvanceHours: number): RoleTimeline {
+  const A = Math.max(0, totalAdvanceHours || 0);
+  const deltaMs = A * HOUR_MS;
+  return {
+    totalAdvanceHours: A,
+    publishedAt: shiftDate(base.publishedAt, -deltaMs),
+    availableFrom: shiftDate(base.availableFrom, -deltaMs),
+    claimsCloseAt: shiftDate(base.claimsCloseAt, deltaMs),
+    pickupDeadline: shiftDate(base.pickupDeadline, deltaMs)
+  };
+}
+
+/**
  * Calculate effective availability for a user in an event
  * considering their role's advance_hours + bonus_hours from referrals
  */
@@ -77,7 +124,10 @@ export async function calculateEffectiveAvailability(
   // la membresía solo aporta bonus_hours.
   const result = await dbPool.query(
     `SELECT
+       e.published_at,
        e.available_from,
+       e.claims_close_at,
+       e.pickup_deadline,
        COALESCE(u.global_role, 'publico') as user_role,
        COALESCE(em.bonus_hours, 0) as bonus_hours,
        CASE
@@ -98,7 +148,10 @@ export async function calculateEffectiveAvailability(
   }
 
   const {
+    published_at: publishedAt,
     available_from: availableFrom,
+    claims_close_at: claimsCloseAt,
+    pickup_deadline: pickupDeadline,
     role_advance_hours: roleAdvanceHours,
     bonus_hours: bonusHours
   } = result.rows[0];
@@ -112,7 +165,11 @@ export async function calculateEffectiveAvailability(
     effectiveAvailableFrom,
     hoursOfAdvance: roleAdvanceHours || 0,
     bonusHours: bonusHours || 0,
-    totalAdvanceHours: totalHoursAdvance
+    totalAdvanceHours: totalHoursAdvance,
+    timeline: buildRoleTimeline(
+      { publishedAt, availableFrom, claimsCloseAt, pickupDeadline },
+      totalHoursAdvance
+    )
   };
 }
 
