@@ -138,7 +138,7 @@
 
   <!-- Barra de paginación superior -->
   @if (filteredItems().length > pageSize()) {
-    <div class="flex items-center justify-between pt-2 border-t border-gray-100">
+    <div class="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-gray-100">
       <button
         (click)="goToPage(currentPage() - 1)"
         [disabled]="currentPage() <= 1"
@@ -149,11 +149,25 @@
         ← Anterior
       </button>
 
-      <span class="text-xs text-gray-500">
-        Página {{ currentPage() }} de {{ totalPages() }}
-        <span class="text-gray-300 mx-1">·</span>
-        {{ filteredItems().length }} objetos
-      </span>
+      <div class="flex flex-col items-center gap-1.5">
+        <span class="text-xs text-gray-500">
+          Página {{ currentPage() }} de {{ totalPages() }}
+          <span class="text-gray-300 mx-1">·</span>
+          {{ filteredItems().length }} objetos
+        </span>
+        <div class="flex items-center gap-1">
+          @for (opt of pageSizeOptions(); track opt) {
+            <button
+              (click)="setPageSize(opt)"
+              [title]="'Mostrar ' + opt + ' objetos por página'"
+              [class]="pageSize() === opt ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'"
+              class="text-xs px-2.5 py-1 rounded-full font-medium transition-colors shadow-sm"
+            >
+              {{ opt }}
+            </button>
+          }
+        </div>
+      </div>
 
       <button
         (click)="goToPage(currentPage() + 1)"
@@ -255,7 +269,7 @@
 
     <!-- Barra de paginación -->
     @if (filteredItems().length > pageSize()) {
-      <div class="flex items-center justify-between pt-4 border-t border-gray-100">
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-2 pt-4 border-t border-gray-100">
         <button
           (click)="goToPage(currentPage() - 1)"
           [disabled]="currentPage() <= 1"
@@ -266,11 +280,25 @@
           ← Anterior
         </button>
 
-        <span class="text-xs text-gray-500">
-          Página {{ currentPage() }} de {{ totalPages() }}
-          <span class="text-gray-300 mx-1">·</span>
-          {{ filteredItems().length }} objetos
-        </span>
+        <div class="flex flex-col items-center gap-1.5">
+          <span class="text-xs text-gray-500">
+            Página {{ currentPage() }} de {{ totalPages() }}
+            <span class="text-gray-300 mx-1">·</span>
+            {{ filteredItems().length }} objetos
+          </span>
+          <div class="flex items-center gap-1">
+            @for (opt of pageSizeOptions(); track opt) {
+              <button
+                (click)="setPageSize(opt)"
+                [title]="'Mostrar ' + opt + ' objetos por página'"
+                [class]="pageSize() === opt ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'"
+                class="text-xs px-2.5 py-1 rounded-full font-medium transition-colors shadow-sm"
+              >
+                {{ opt }}
+              </button>
+            }
+          </div>
+        </div>
 
         <button
           (click)="goToPage(currentPage() + 1)"

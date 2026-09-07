@@ -32,7 +32,15 @@ export class InventoryList implements OnInit {
 
   // Paginación
   readonly currentPage = signal(1);
-  readonly pageSize = computed(() => this.isLargeScreen() ? 20 : 10);
+
+  // Opciones de pageSize según tamaño de pantalla (isLargeScreen = ≥1024px).
+  // Chica (<1024px): 12/25/50 · Grande (≥1024px): 25/50/100
+  readonly pageSizeOptions = computed(() =>
+    this.isLargeScreen() ? [25, 50, 100] : [12, 25, 50]
+  );
+
+  // Tamaño de página elegido por el usuario (default: el menor de la pantalla actual)
+  readonly pageSize = signal<number>(this.pageSizeOptions()[0]);
   readonly totalPages = computed(() =>
     Math.max(1, Math.ceil(this.filteredItems().length / this.pageSize()))
   );
@@ -226,6 +234,12 @@ export class InventoryList implements OnInit {
   goToPage(page: number): void {
     const clamped = Math.max(1, Math.min(page, this.totalPages()));
     this.currentPage.set(clamped);
+  }
+
+  /** Cambia cuántos objetos se muestran por página y regresa a la página 1. */
+  setPageSize(size: number): void {
+    this.pageSize.set(size);
+    this.currentPage.set(1);
   }
 
   closeDetail(): void {
