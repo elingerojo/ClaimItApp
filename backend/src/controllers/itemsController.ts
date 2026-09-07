@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
+import type { PoolClient } from 'pg';
 import { broadcastSseEvent } from '../config/sse.js';
 import { validateItemInput, validateImageUrls } from '@claimitapp/shared';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
@@ -424,29 +425,63 @@ export const deleteItem = async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
+  let client: PoolClient | undefined;
   try {
-    // Delete the item row; related claims are removed automatically via ON DELETE CASCADE
-    const result = await pool.query('DELETE FROM items WHERE id = $1 RETURNING id, title', [id]);
+    // Single transaction: the ITEM_DELETED audit row is inserted BEFORE the item is
+    // removed (while the FK to items(id) still resolves) and the DELETE then runs in
+    // the same transaction. This fixes the audit_log_item_id_fkey (23503) violation,
+    // which fired because the audit insert referenced an item that had already been
+    // deleted and autocommitted by the previous standalone DELETE.
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // Resolve the title inside the tx so the audit entry can record it, and confirm
+    // the item exists before doing any further work.
+    const pre = await client.query('SELECT title FROM items WHERE id = $1', [id]);
+    if (pre.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Item not found.' });
+      return;
+    }
+    const title: string = pre.rows[0].title;
+
+    // Audit BEFORE delete while the item is still present (FK satisfied). Wrapped in
+    // a SAVEPOINT so a failed audit (logAudit returns false) only rolls back that one
+    // statement and never blocks the deletion: the audit stays non-blocking by design.
+    await client.query('SAVEPOINT audit_sp');
+    const auditOk = await logAudit(
+      {
+        action: 'ITEM_DELETED',
+        adminCodeSuffix: maskAdminCode(String(adminSession?.id ?? '')),
+        itemId: id,
+        details: {
+          title,
+          timestamp: new Date().toISOString()
+        }
+      },
+      client
+    );
+    if (auditOk) {
+      await client.query('RELEASE SAVEPOINT audit_sp');
+    } else {
+      await client.query('ROLLBACK TO SAVEPOINT audit_sp');
+    }
+
+    // Delete the item row inside the same transaction. Related claims are removed via
+    // ON DELETE CASCADE; ON DELETE SET NULL clears item_id on the just-written audit row.
+    const result = await client.query('DELETE FROM items WHERE id = $1 RETURNING id, title', [id]);
 
     if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
       res.status(404).json({ error: 'Item not found.' });
       return;
     }
 
     const deletedItem = result.rows[0];
 
-    removeItem(deletedItem.id); // Write-through: quitar del store en RAM
+    await client.query('COMMIT');
 
-    // Log audit entry
-    await logAudit({
-      action: 'ITEM_DELETED',
-      adminCodeSuffix: maskAdminCode(String(adminSession?.id ?? '')),
-      itemId: deletedItem.id,
-      details: {
-        title: deletedItem.title,
-        timestamp: new Date().toISOString()
-      }
-    });
+    removeItem(deletedItem.id); // Write-through: quitar del store en RAM
 
     // Broadcast the deletion via SSE
     broadcastSseEvent('item_deleted', {
@@ -459,8 +494,15 @@ export const deleteItem = async (req: Request, res: Response): Promise<void> => 
       message: `Item "${deletedItem.title}" deleted successfully`
     });
   } catch (error) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {
+        /* connection may already be released or the transaction aborted */
+      });
+    }
     console.error('Failed to delete item:', error);
     res.status(500).json({ error: 'Database execution error deleting item record.' });
+  } finally {
+    if (client) client.release();
   }
 };
 

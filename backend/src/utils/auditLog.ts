@@ -6,6 +6,7 @@
  */
 
 import pool from '../config/db.js';
+import type { PoolClient } from 'pg';
 
 export interface AuditEntry {
   action: string;
@@ -16,12 +17,17 @@ export interface AuditEntry {
 }
 
 /**
- * Log an admin action asynchronously to audit_log table
- * Failures are logged but don't throw (non-blocking)
+ * Log an admin action to the audit_log table.
+ * - Without a client: runs standalone via the pool; failures are logged but do
+ *   not throw (non-blocking audit for main operations).
+ * - With a client: runs inside a caller-managed transaction and returns false on
+ *   failure so the caller can recover via SAVEPOINT without aborting the tx.
+ * @returns true when the audit row was inserted, false otherwise.
  */
-export async function logAudit(entry: AuditEntry): Promise<void> {
+export async function logAudit(entry: AuditEntry, client?: PoolClient): Promise<boolean> {
   try {
-    await pool.query(
+    const db = client ?? pool;
+    await db.query(
       `INSERT INTO audit_log (action, admin_code_suffix, item_id, user_id, details)
        VALUES ($1, $2, $3, $4, $5::jsonb)`,
       [
@@ -37,9 +43,11 @@ export async function logAudit(entry: AuditEntry): Promise<void> {
       `[AUDIT] ${entry.action} | Admin: ...${entry.adminCodeSuffix} | ` +
       `Item: ${entry.itemId || 'N/A'} | User: ${entry.userId || 'N/A'}`
     );
+    return true;
   } catch (error) {
     console.error('[AUDIT] Failed to log action:', error);
     // Don't throw - auditing failure should not break main operations
+    return false;
   }
 }
 
