@@ -27,17 +27,9 @@ export interface StoreItem {
   eventId: string | null;
   visibleAt: string | null;
   availableFrom: string | null;
-  expiresAt: string | null;
-  // Trust-matrix price snapshot (frozen at creation)
+  // Precio base del item (fuente); el precio por rol se calcula en tiempo de
+  // lectura (ver backend/src/utils/pricing.ts). Migración 015.
   precioBaseCosto: number | null;
-  precioFamiliar: number | null;
-  precioAmigo: number | null;
-  precioConocido: number | null;
-  precioPublico: number | null;
-  horasRecoleccionFamiliar: number | null;
-  horasRecoleccionAmigo: number | null;
-  horasRecoleccionConocido: number | null;
-  horasRecoleccionPublico: number | null;
   nivelAccesoMinimo: string | null;
   createdAt: string;
   queue: Array<{
@@ -174,16 +166,7 @@ export async function rehydrateAll(): Promise<boolean> {
       eventId: item.event_id,
       visibleAt: item.visible_at,
       availableFrom: item.available_from,
-      expiresAt: item.expires_at,
       precioBaseCosto: item.precio_base_costo,
-      precioFamiliar: item.precio_familiar,
-      precioAmigo: item.precio_amigo,
-      precioConocido: item.precio_conocido,
-      precioPublico: item.precio_publico,
-      horasRecoleccionFamiliar: item.horas_recoleccion_familiar,
-      horasRecoleccionAmigo: item.horas_recoleccion_amigo,
-      horasRecoleccionConocido: item.horas_recoleccion_conocido,
-      horasRecoleccionPublico: item.horas_recoleccion_publico,
       nivelAccesoMinimo: item.nivel_acceso_minimo,
       createdAt: item.created_at,
       queue: claimsMap[item.id] || []
@@ -507,7 +490,7 @@ export function propagateEventDates(
 export function detachItemsFromEvent(eventId: string): void {
   items = items.map(i => {
     if (i.eventId !== eventId) return i;
-    return { ...i, eventId: null, visibleAt: null, availableFrom: null, expiresAt: null };
+    return { ...i, eventId: null, visibleAt: null, availableFrom: null };
   });
   invalidateEventStatusIndex();
 }

@@ -8,73 +8,12 @@ import {
   getItems,
   upsertItem,
   removeItem,
-  getTrustSetting,
   getEvent,
   getItemsByEventStatus,
   getEventStatusCounts,
   ensureHydrated,
   EVENT_STATUS_ORDER
 } from '../cache/appStore.js';
-
-const DEFAULT_MULTIPLIERS: Record<string, number> = {
-  familiares: 0.7,
-  amigos: 0.85,
-  conocidos: 0.95,
-  publico: 1.0
-};
-
-/** Redondear a 2 decimales */
-const round2 = (v: number): number => Math.round(v * 100) / 100;
-
-/**
- * Calcula y "congela" el snapshot de 4 precios + horas de recolección por nivel
- * a partir de un único precio base y los multiplicadores del catálogo global.
- */
-function computePriceSnapshot(
-  base: number | null
-): {
-  precio_familiar: number | null;
-  precio_amigo: number | null;
-  precio_conocido: number | null;
-  precio_publico: number | null;
-  horas_recoleccion_familiar: number | null;
-  horas_recoleccion_amigo: number | null;
-  horas_recoleccion_conocido: number | null;
-  horas_recoleccion_publico: number | null;
-} {
-  if (base == null) {
-    return {
-      precio_familiar: null,
-      precio_amigo: null,
-      precio_conocido: null,
-      precio_publico: null,
-      horas_recoleccion_familiar: null,
-      horas_recoleccion_amigo: null,
-      horas_recoleccion_conocido: null,
-      horas_recoleccion_publico: null
-    };
-  }
-
-  const multiplier = (level: string): number => {
-    const setting = getTrustSetting(level);
-    const m = setting?.multiplicador_precio_default;
-    return m != null ? Number(m) : DEFAULT_MULTIPLIERS[level];
-  };
-  return {
-    precio_familiar: round2(base * multiplier('familiares')),
-    precio_amigo: round2(base * multiplier('amigos')),
-    precio_conocido: round2(base * multiplier('conocidos')),
-    precio_publico: round2(base * multiplier('publico')),
-    // NOTE: horas_recoleccion_* per item are DEPRECATED as the authority for
-    // the pickup window. The window is resolved per role from the EVENT
-    // (events.<rol>_pickup_hours) with the trust matrix as fallback
-    // (see queueService.resolvePickupWindow). Items no longer freeze a snapshot.
-    horas_recoleccion_familiar: null,
-    horas_recoleccion_amigo: null,
-    horas_recoleccion_conocido: null,
-    horas_recoleccion_publico: null
-  };
-}
 
 export const createItem = async (req: Request, res: Response): Promise<void> => {
   const {
@@ -87,7 +26,6 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     event_id,
     available_from,
     visible_at,
-    expires_at,
     precio_base_costo
   } = req.body;
   const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
@@ -112,9 +50,6 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
-  // Congelar el snapshot de precios por rol (multiplicadores del catálogo)
-  const snapshot = computePriceSnapshot(precio_base_costo != null ? Number(precio_base_costo) : null);
-
   try {
     // Verificar que el evento destino exista (400 amigable en vez de FK violation).
     const evCheck = await pool.query('SELECT id FROM events WHERE id = $1', [event_id]);
@@ -129,15 +64,11 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     const insertQuery = `
       INSERT INTO items
         (title, description, category, info_url, image_urls,
-         visibility_level, event_id, available_from, visible_at, expires_at,
-         precio_base_costo, precio_familiar, precio_amigo, precio_conocido, precio_publico,
-         horas_recoleccion_familiar, horas_recoleccion_amigo, horas_recoleccion_conocido, horas_recoleccion_publico)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+         visibility_level, event_id, available_from, visible_at, precio_base_costo)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING id, title, description, category, info_url, image_urls, status,
-                visibility_level, event_id, available_from, visible_at, expires_at,
-                precio_base_costo, precio_familiar, precio_amigo, precio_conocido, precio_publico,
-                horas_recoleccion_familiar, horas_recoleccion_amigo, horas_recoleccion_conocido,
-                horas_recoleccion_publico, nivel_acceso_minimo, created_at
+                visibility_level, event_id, available_from, visible_at,
+                precio_base_costo, nivel_acceso_minimo, created_at
     `;
     const result = await pool.query(insertQuery, [
       title,
@@ -150,16 +81,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
       event_id,
       available_from ?? null,
       visible_at ?? null,
-      expires_at ?? null,
-      precio_base_costo ?? null,
-      snapshot.precio_familiar,
-      snapshot.precio_amigo,
-      snapshot.precio_conocido,
-      snapshot.precio_publico,
-      snapshot.horas_recoleccion_familiar,
-      snapshot.horas_recoleccion_amigo,
-      snapshot.horas_recoleccion_conocido,
-      snapshot.horas_recoleccion_publico
+      precio_base_costo ?? null
     ]);
 
     const item = result.rows[0];
@@ -177,16 +99,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
       eventId: item.event_id,
       visibleAt: item.visible_at,
       availableFrom: item.available_from,
-      expiresAt: item.expires_at,
       precioBaseCosto: item.precio_base_costo,
-      precioFamiliar: item.precio_familiar,
-      precioAmigo: item.precio_amigo,
-      precioConocido: item.precio_conocido,
-      precioPublico: item.precio_publico,
-      horasRecoleccionFamiliar: item.horas_recoleccion_familiar,
-      horasRecoleccionAmigo: item.horas_recoleccion_amigo,
-      horasRecoleccionConocido: item.horas_recoleccion_conocido,
-      horasRecoleccionPublico: item.horas_recoleccion_publico,
       nivelAccesoMinimo: item.nivel_acceso_minimo,
       createdAt: item.created_at,
       queue: []
@@ -297,13 +210,9 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
   if (available_from !== undefined) set('available_from', available_from, 'available_from');
   if (visible_at !== undefined) set('visible_at', visible_at, 'visible_at');
   if (precio_base_costo !== undefined) {
-    // Si cambia el precio base, re-congelar el snapshot (null → sin precios)
-    const snapshot = computePriceSnapshot(precio_base_costo != null ? Number(precio_base_costo) : null);
+    // El precio por rol se calcula en tiempo de lectura (base × multiplicador);
+    // aquí solo se persiste el precio base del item.
     set('precio_base_costo', precio_base_costo, 'precio_base_costo');
-    set('precio_familiar', snapshot.precio_familiar, 'precio_familiar');
-    set('precio_amigo', snapshot.precio_amigo, 'precio_amigo');
-    set('precio_conocido', snapshot.precio_conocido, 'precio_conocido');
-    set('precio_publico', snapshot.precio_publico, 'precio_publico');
   }
 
   if (assignments.length === 0) {
@@ -332,10 +241,8 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
           updated_at = NOW()
       WHERE id = $${params.length}
       RETURNING id, title, description, category, info_url, image_urls, status,
-                visibility_level, event_id, available_from, visible_at, expires_at,
-                precio_base_costo, precio_familiar, precio_amigo, precio_conocido, precio_publico,
-                horas_recoleccion_familiar, horas_recoleccion_amigo, horas_recoleccion_conocido,
-                horas_recoleccion_publico, nivel_acceso_minimo, created_at
+                visibility_level, event_id, available_from, visible_at,
+                precio_base_costo, nivel_acceso_minimo, created_at
     `;
     const result = await pool.query(updateQuery, params);
 
@@ -360,16 +267,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       eventId: updatedItem.event_id,
       visibleAt: updatedItem.visible_at,
       availableFrom: updatedItem.available_from,
-      expiresAt: updatedItem.expires_at,
       precioBaseCosto: updatedItem.precio_base_costo,
-      precioFamiliar: updatedItem.precio_familiar,
-      precioAmigo: updatedItem.precio_amigo,
-      precioConocido: updatedItem.precio_conocido,
-      precioPublico: updatedItem.precio_publico,
-      horasRecoleccionFamiliar: updatedItem.horas_recoleccion_familiar,
-      horasRecoleccionAmigo: updatedItem.horas_recoleccion_amigo,
-      horasRecoleccionConocido: updatedItem.horas_recoleccion_conocido,
-      horasRecoleccionPublico: updatedItem.horas_recoleccion_publico,
       nivelAccesoMinimo: updatedItem.nivel_acceso_minimo,
       createdAt: updatedItem.created_at,
       queue: existing?.queue ?? []
@@ -538,12 +436,7 @@ export const getItemDetail = async (req: Request, res: Response): Promise<void> 
     eventId: item.eventId,
     visibleAt: item.visibleAt,
     availableFrom: item.availableFrom,
-    expiresAt: item.expiresAt,
     precioBaseCosto: item.precioBaseCosto,
-    precioFamiliar: item.precioFamiliar,
-    precioAmigo: item.precioAmigo,
-    precioConocido: item.precioConocido,
-    precioPublico: item.precioPublico,
     createdAt: item.createdAt,
     queue: item.queue
   });

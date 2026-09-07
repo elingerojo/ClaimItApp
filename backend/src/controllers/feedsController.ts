@@ -10,6 +10,7 @@ import {
   ensureHydrated
 } from '../cache/appStore.js';
 import { runLazyCatchUp } from '../services/scheduler.js';
+import { rolePrice } from '../utils/pricing.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -163,12 +164,6 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
         // Deadline of the requesting user's own claim (for the pickup indicator)
         const myClaim = userUuid ? item.queue.find(q => q.userUuid === userUuid) : undefined;
 
-        // Solo el precio del nivel del usuario (el resto permanece oculto)
-        const precioKey =
-          ({ familiares: 'precioFamiliar', amigos: 'precioAmigo', conocidos: 'precioConocido', publico: 'precioPublico' } as const)[
-            role
-          ] ?? 'precioPublico';
-
         const myPickupWindowHours = resolveUserPickupWindowHours(item, role);
 
         return {
@@ -206,9 +201,10 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
           activeApartadosInEvent:
             item.eventId && userUuid ? (activeApartadosByEvent.get(item.eventId) ?? 0) : 0,
           simultaneousLimit,
-          // NUMERIC viene como string de pg; normalizar a número para la UI
-          precioVisible:
-            (item as any)[precioKey] != null ? Number((item as any)[precioKey]) : null,
+          // Precio del nivel del usuario calculado en tiempo de lectura
+          // (precio_base_costo × multiplicador del rol resuelto, utils/pricing).
+          // El resto de niveles permanece oculto.
+          precioVisible: rolePrice(item.precioBaseCosto, role),
           createdAt: item.createdAt,
           queue: item.queue
         };

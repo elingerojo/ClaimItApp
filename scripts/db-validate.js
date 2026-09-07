@@ -44,12 +44,12 @@ async function main() {
 
   const items = await pool.query(
     `SELECT i.title, i.category, i.visibility_level, i.event_id IS NOT NULL AS has_event,
-            i.precio_familiar, i.precio_publico
+            i.precio_base_costo
      FROM items i ORDER BY i.created_at`
   );
   console.log(`items: ${items.rows.length}`);
   for (const i of items.rows) {
-    console.log(`  ${i.title} | ${i.category} | vis=${i.visibility_level} | in_event=${i.has_event} | precioFam=${i.precio_familiar} precioPub=${i.precio_publico}`);
+    console.log(`  ${i.title} | ${i.category} | vis=${i.visibility_level} | in_event=${i.has_event} | precioBase=${i.precio_base_costo}`);
   }
 
   const members = await pool.query(

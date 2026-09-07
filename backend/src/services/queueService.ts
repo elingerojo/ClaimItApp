@@ -13,7 +13,8 @@
  *    events.pickup_window_hours authority.
  *  - computePickupDeadline(): meta = assignment + window, then clamped between
  *    the collection availability floor (events.available_from) and the ceiling
- *    (min(events.pickup_deadline, items.expires_at)).
+ *    (events.pickup_deadline). The per-item items.expires_at was removed in
+ *    migration 015; the event deadline is the only ceiling.
  *  - assignPickupDeadlineToFirst(): freeze role + window + deadline on the
  *    claim (F1) when it becomes first in line.
  *  - advanceQueue(): recompute status and assign a FRESH frozen deadline to the
@@ -49,7 +50,7 @@ const HOUR_MS = 60 * 60 * 1000;
  */
 async function getItemPickupContext(itemId: string, client: any) {
   const res = await client.query(
-    `SELECT i.event_id, i.expires_at AS item_expires_at,
+    `SELECT i.event_id,
             e.available_from, e.pickup_deadline, e.claims_close_at,
             e.familiares_pickup_hours, e.amigos_pickup_hours,
             e.conocidos_pickup_hours, e.publico_pickup_hours,
@@ -122,11 +123,11 @@ export async function resolvePickupWindow(
 /**
  * Compute the collection deadline for the first-in-line:
  *   meta = reference + window
- *   deadline = clamp(meta, [available_from, min(pickup_deadline, item.expires_at)])
+ *   deadline = clamp(meta, [available_from, pickup_deadline])
  *
  * Floor: events.available_from (no delivery before the event opens).
- * Ceiling: events.pickup_deadline (end of closing), also capped by the item's
- * own expires_at when present.
+ * Ceiling: events.pickup_deadline (end of closing). The per-item expires_at
+ * was removed in migration 015, so the event deadline is the only ceiling.
  */
 function computePickupDeadline(
   reference: Date,
@@ -140,10 +141,6 @@ function computePickupDeadline(
   if (ctx?.event_id) {
     if (ctx.available_from) floorMs = new Date(ctx.available_from).getTime();
     if (ctx.pickup_deadline) ceilingMs = new Date(ctx.pickup_deadline).getTime();
-  }
-  if (ctx?.item_expires_at) {
-    const exp = new Date(ctx.item_expires_at).getTime();
-    if (exp < ceilingMs) ceilingMs = exp;
   }
 
   return new Date(Math.min(Math.max(metaMs, floorMs), ceilingMs));

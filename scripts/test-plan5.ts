@@ -57,8 +57,8 @@ async function main(): Promise<void> {
   let item2: string | null = null;
 
   try {
-    // --- 1. createItem freezes the price snapshot ---
-    console.log('Test 1: createItem price snapshot');
+    // --- 1. createItem stores the base cost (role prices are computed on read) ---
+    console.log('Test 1: createItem stores precio_base_costo');
     upsertUser({ uuid: famUuid, alias: `plan5_fam_${stamp}`, global_role: 'familiares' });
     upsertUser({ uuid: pubUuid, alias: `plan5_pub_${stamp}`, global_role: 'publico' });
 
@@ -80,14 +80,10 @@ async function main(): Promise<void> {
     pricedItemId = createRes._json?.item?.id;
 
     const row = await pool.query(
-      `SELECT precio_familiar, precio_amigo, precio_conocido, precio_publico
-       FROM items WHERE id = $1`,
+      `SELECT precio_base_costo FROM items WHERE id = $1`,
       [pricedItemId]
     );
-    check('precio_familiar = 70 (0.70)', Number(row.rows[0]?.precio_familiar) === 70, row.rows[0]);
-    check('precio_amigo = 85 (0.85)', Number(row.rows[0]?.precio_amigo) === 85, row.rows[0]);
-    check('precio_conocido = 95 (0.95)', Number(row.rows[0]?.precio_conocido) === 95, row.rows[0]);
-    check('precio_publico = 100 (1.00)', Number(row.rows[0]?.precio_publico) === 100, row.rows[0]);
+    check('precio_base_costo = 100 persisted', Number(row.rows[0]?.precio_base_costo) === 100, row.rows[0]);
 
     // --- 2. Feed returns only the price of the user's role ---
     console.log('Test 2: feed precioVisible per role');
