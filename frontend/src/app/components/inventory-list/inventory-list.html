@@ -178,7 +178,7 @@
 
         <!-- Thumbnail (left side) -->
         <div class="relative w-32 sm:w-36 sm:h-36 shrink-0 bg-gray-50">
-          <img [src]="item.imageUrl" [alt]="item.title" class="w-full object-cover" />
+          <img [src]="item.imageUrls?.[0] || ''" [alt]="item.title" class="w-full object-cover" />
           <span [ngClass]="{
             'text-green-600 bg-green-50 border-green-100': item.status === 'available',
             'text-amber-600 bg-amber-50 border-amber-100': item.status === 'waitlist_open',

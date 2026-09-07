@@ -57,8 +57,8 @@ async function main(): Promise<void> {
     // --- Fixtures ---
     await pool.query('INSERT INTO users (uuid, alias) VALUES ($1, $2)', [u1, alias]);
     const itemRes = await pool.query(
-      `INSERT INTO items (title, description, category, image_url, status)
-       VALUES ($1, $2, 'Misc.', '', 'available') RETURNING id`,
+      `INSERT INTO items (title, description, category, image_urls, status)
+       VALUES ($1, $2, 'Misc.', '[]'::jsonb, 'available') RETURNING id`,
       [`TEST-PLAN2-LIVE-${stamp}`, 'temporary live-test item']
     );
     itemId = itemRes.rows[0].id;

@@ -99,8 +99,8 @@ async function main(): Promise<void> {
        VALUES ($1, $2, 'familiares', $2, 5)`, [eventId, famUuid]);
 
     const it = await client.query(
-      `INSERT INTO items (title, description, category, image_url, status, event_id)
-       VALUES ($1, $2, 'Misc.', '', 'available', $3) RETURNING id`,
+      `INSERT INTO items (title, description, category, image_urls, status, event_id)
+       VALUES ($1, $2, 'Misc.', '[]'::jsonb, 'available', $3) RETURNING id`,
       [`TEST-PLAN6-${stamp}`, 'temp plan6 item', eventId]
     );
     itemId = it.rows[0].id;

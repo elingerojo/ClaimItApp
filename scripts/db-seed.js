@@ -215,7 +215,7 @@ async function main() {
       );
     }
 
-    // 5. Items: copy the 5 real seed items, reuse image_url, snap prices by role.
+    // 5. Items: copy the 5 real seed items, reuse image_urls (JSONB array), snap prices by role.
     for (const it of SEED_ITEMS) {
       const fam = round2(it.baseCost * MULTIPLIERS.familiares);
       const ami = round2(it.baseCost * MULTIPLIERS.amigos);
@@ -223,17 +223,18 @@ async function main() {
       const pub = round2(it.baseCost * MULTIPLIERS.publico);
       await client.query(
         `INSERT INTO items
-          (title, description, category, info_url, image_url, status, visibility_level,
+          (title, description, category, info_url, image_urls, status, visibility_level,
            event_id, visible_at, available_from, expires_at,
            precio_base_costo, precio_familiar, precio_amigo, precio_conocido, precio_publico,
            horas_recoleccion_familiar, horas_recoleccion_amigo, horas_recoleccion_conocido, horas_recoleccion_publico,
            nivel_acceso_minimo)
-         VALUES ($1, $2, $3, $4, $5, 'available', $6, $7,
+         VALUES ($1, $2, $3, $4, $5::jsonb, 'available', $6, $7,
                  NULL, NULL, NULL,
                  $8, $9, $10, $11, $12,
                  NULL, NULL, NULL, NULL,
                  'publico')`,
-        [it.title, it.description, it.category, it.infoUrl || null, it.imageUrl,
+        [it.title, it.description, it.category, it.infoUrl || null,
+         JSON.stringify([it.imageUrl]),
          it.visibilityLevel, eventId,
          it.baseCost, fam, ami, con, pub]
       );

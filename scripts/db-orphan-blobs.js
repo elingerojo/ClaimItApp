@@ -33,9 +33,10 @@ function main() {
   const snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
   const keep = new Set(KEEP_IMAGE_URLS);
 
+  // image_urls es un arreglo JSONB por item; se aplana antes de filtrar.
   // Only real Vercel Blob URLs (exclude placeholders like example.com/x.jpg).
   const allUrls = (snapshot.items || [])
-    .map((i) => i.image_url)
+    .flatMap((i) => (Array.isArray(i.image_urls) ? i.image_urls : []))
     .filter((u) => u && u.includes('.public.blob.vercel-storage.com/'));
 
   const orphans = [...new Set(allUrls)].filter((u) => !keep.has(u));

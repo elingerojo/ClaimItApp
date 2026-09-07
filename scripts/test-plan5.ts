@@ -70,7 +70,7 @@ async function main(): Promise<void> {
           description: 'temporary priced item for plan5 test',
           category: 'Misc.',
           infoUrl: null,
-          imageUrl: 'https://example.com/x.jpg',
+          imageUrls: ['https://example.com/x.jpg'],
           precio_base_costo: 100
         }
       }),
@@ -122,14 +122,14 @@ async function main(): Promise<void> {
     eventId = evRes.rows[0].id;
 
     const i1 = await pool.query(
-      `INSERT INTO items (title, description, category, image_url, status, event_id)
-       VALUES ($1, $2, 'Misc.', '', 'available', $3) RETURNING id`,
+      `INSERT INTO items (title, description, category, image_urls, status, event_id)
+       VALUES ($1, $2, 'Misc.', '[]'::jsonb, 'available', $3) RETURNING id`,
       [`TEST-PLAN5-1-${stamp}`, 'temp item 1', eventId]
     );
     item1 = i1.rows[0].id;
     const i2 = await pool.query(
-      `INSERT INTO items (title, description, category, image_url, status, event_id)
-       VALUES ($1, $2, 'Misc.', '', 'available', $3) RETURNING id`,
+      `INSERT INTO items (title, description, category, image_urls, status, event_id)
+       VALUES ($1, $2, 'Misc.', '[]'::jsonb, 'available', $3) RETURNING id`,
       [`TEST-PLAN5-2-${stamp}`, 'temp item 2', eventId]
     );
     item2 = i2.rows[0].id;

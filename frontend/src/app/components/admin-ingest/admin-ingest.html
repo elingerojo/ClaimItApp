@@ -32,28 +32,63 @@
     <!-- FORMULARIO DE INGESTIÓN CON CÁMARA E IA -->
     <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-6 mb-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
 
-      <!-- Lado Izquierdo: Disparador de la Cámara -->
-      <div class="flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-xl p-4 aspect-video md:aspect-square bg-gray-50 relative group">
-        @if (previewUrl()) {
-          <img [src]="previewUrl()" class="w-full h-full object-cover rounded-lg" />
-          <div class="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <span class="text-xs text-white font-medium">Cambiar Foto</span>
+      <!-- Lado Izquierdo: gestor de fotos de la captura (1 o más, ordenadas) -->
+      <div class="space-y-3">
+        @if (captureImages().length === 0) {
+          <div class="relative flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-xl p-6 aspect-video md:aspect-square bg-gray-50 text-center">
+            <span class="text-2xl">📸</span>
+            <div class="text-xs font-bold text-gray-700 mt-2">Agregar Foto(s) del Objeto</div>
+            <div class="text-[10px] text-gray-400 mt-1">Puedes agregar 1 o más fotos.<br/>La primera será la portada.</div>
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              (change)="onCapturePhotos($event)"
+              [disabled]="isUploading() || isAiProcessing()"
+              title="Elige fotos de la galería (en tu teléfono puedes tomar con cámara)"
+              class="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
+            />
           </div>
         } @else {
-          <div class="text-center space-y-2">
-            <span class="text-2xl">📸</span>
-            <div class="text-xs font-bold text-gray-700">Tomar Foto del Objeto</div>
-            <div class="text-[10px] text-gray-400">Abre la cámara de tu celular directo</div>
+          <div class="grid grid-cols-3 gap-2">
+            @for (url of captureImages(); track $index) {
+              <div class="relative aspect-square rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
+                <img [src]="url" [alt]="'Foto ' + ($index + 1)" class="w-full h-full object-cover" />
+                <span class="absolute bottom-1 left-1 text-[9px] bg-black/50 text-white font-mono px-1 py-0.5 rounded">
+                  {{ $index === 0 ? '⭐ ' : '' }}{{ $index + 1 }}
+                </span>
+                <div class="absolute inset-x-0 top-0 flex items-center justify-between p-1 bg-gradient-to-b from-black/40 to-transparent">
+                  <button type="button" (click)="moveCapturePhoto($index, -1)" [disabled]="$index === 0"
+                          title="Mover a la izquierda (más cerca de la portada)"
+                          class="w-6 h-6 rounded-full bg-white/90 text-gray-700 text-xs font-bold disabled:opacity-30">◀</button>
+                  <button type="button" (click)="removeCapturePhoto($index)" title="Quitar foto"
+                          class="w-6 h-6 rounded-full bg-red-500/90 text-white text-xs font-bold">✕</button>
+                  <button type="button" (click)="moveCapturePhoto($index, 1)" [disabled]="$index === captureImages().length - 1"
+                          title="Mover a la derecha"
+                          class="w-6 h-6 rounded-full bg-white/90 text-gray-700 text-xs font-bold disabled:opacity-30">▶</button>
+                </div>
+              </div>
+            }
           </div>
+
+          <div class="flex gap-2">
+            <!-- Galería múltiple -->
+            <label class="relative flex-1 flex items-center justify-center gap-1 border border-dashed border-gray-300 rounded-lg px-2 py-2 text-[11px] text-gray-500 hover:bg-gray-50 cursor-pointer">
+              🖼️ Agregar más
+              <input type="file" accept="image/*" multiple (change)="onCapturePhotos($event)"
+                     [disabled]="isUploading() || isAiProcessing()"
+                     class="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed" />
+            </label>
+          </div>
+
+          <p class="text-[10px] text-gray-400">
+            La primera foto es la portada en la lista. "Analizar con IA" usa las primeras 3.
+          </p>
         }
-        <input
-          type="file"
-          accept="image/*"
-          capture="environment"
-          (change)="onCameraCapture($event)"
-          [disabled]="isAiProcessing()"
-          class="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
-        />
+
+        @if (isUploading()) {
+          <div class="text-[11px] text-blue-600 animate-pulse">⬆️ Subiendo foto(s)...</div>
+        }
       </div>
 
       <!-- Lado Derecho: Campos del Formulario -->
@@ -62,8 +97,8 @@
           <div class="bg-blue-50/50 border border-blue-100 text-blue-700 rounded-xl p-4 text-xs flex items-center gap-3 animate-pulse">
             <span class="text-sm">⏳</span>
             <div>
-              <div class="font-bold">Subiendo imagen y consultando con IA Vision...</div>
-              <div class="text-[10px] text-blue-500 mt-0.5">Esto tomará unos 3-5 segundos. Extrayendo textos y metadatos...</div>
+              <div class="font-bold">Consultando IA Vision con las primeras fotos...</div>
+              <div class="text-[10px] text-blue-500 mt-0.5">Esto tomará unos segundos. Extrayendo datos del conjunto de imágenes...</div>
             </div>
           </div>
         }
@@ -85,6 +120,18 @@
           <p class="text-[10px] text-gray-400 mt-1">
             La captura se agregará a este evento. Se mantiene para las siguientes capturas hasta que lo cambies manualmente.
           </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            (click)="analyzeCapture()"
+            [disabled]="captureImages().length === 0 || isAiProcessing() || isUploading()"
+            class="bg-violet-600 hover:bg-violet-700 text-white font-medium text-xs px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            🤖 Analizar con IA ({{ captureImages().length > 3 ? '3' : captureImages().length }} foto{{ captureImages().length === 1 ? '' : 's' }})
+          </button>
+          <span class="text-[10px] text-gray-400">Sube las fotos, luego pulsa el botón cuando quieras extraer título/categoría/descripción.</span>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -119,10 +166,10 @@
         <div class="flex justify-end pt-2">
           <button
             (click)="onSaveItemToInventory()"
-            [disabled]="isAiProcessing() || !formTitle() || !uploadedBlobUrl()"
+            [disabled]="isAiProcessing() || isUploading() || !formTitle() || captureImages().length === 0"
             class="bg-green-600 hover:bg-green-700 text-white font-medium text-xs px-6 py-2.5 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
           >
-            💾 Guardar en Inventario Activo
+            💾 Guardar en Inventario Activo ({{ captureImages().length }} foto{{ captureImages().length === 1 ? '' : 's' }})
           </button>
         </div>
       </div>
@@ -144,10 +191,67 @@
           </span>
         </div>
 
-        <div class="flex flex-col sm:flex-row gap-6">
-          <!-- Imagen del objeto -->
-          <div class="w-full sm:w-40 h-40 rounded-xl overflow-hidden bg-gray-50 border border-gray-100 shrink-0">
-            <img [src]="item.imageUrl" [alt]="item.title" class="w-full h-full object-cover" />
+        <div class="flex flex-col md:flex-row gap-6">
+          <!-- Gestor de fotos del editor (orden + eliminar + agregar + IA) -->
+          <div class="w-full md:w-72 shrink-0 space-y-2">
+            <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">{{ 'Fotos del Objeto' | stripAccents }}</label>
+
+            @if (editImages().length === 0) {
+              <div class="relative flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-xl p-4 bg-gray-50 text-center aspect-video">
+                <span class="text-xl">🖼️</span>
+                <div class="text-[11px] font-bold text-gray-600 mt-1">Agregar foto(s)</div>
+                <input type="file" accept="image/*" multiple (change)="onEditPhotos($event)"
+                       [disabled]="isUploading() || isEditAiProcessing()"
+                       class="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed" />
+              </div>
+            } @else {
+              <div class="grid grid-cols-3 gap-2">
+                @for (url of editImages(); track $index) {
+                  <div class="relative aspect-square rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
+                    <img [src]="url" [alt]="'Foto ' + ($index + 1)" class="w-full h-full object-cover" />
+                    <span class="absolute bottom-1 left-1 text-[9px] bg-black/50 text-white font-mono px-1 py-0.5 rounded">
+                      {{ $index === 0 ? '⭐ ' : '' }}{{ $index + 1 }}
+                    </span>
+                    <div class="absolute inset-x-0 top-0 flex items-center justify-between p-1 bg-gradient-to-b from-black/40 to-transparent">
+                      <button type="button" (click)="moveEditPhoto($index, -1)" [disabled]="$index === 0"
+                              title="Mover a la izquierda (será la portada si es la primera)"
+                              class="w-6 h-6 rounded-full bg-white/90 text-gray-700 text-xs font-bold disabled:opacity-30">◀</button>
+                      <button type="button" (click)="removeEditPhoto($index)"
+                              [disabled]="editImages().length <= 1"
+                              title="Quitar foto (debe quedar al menos 1)"
+                              class="w-6 h-6 rounded-full bg-red-500/90 text-white text-xs font-bold disabled:opacity-30">✕</button>
+                      <button type="button" (click)="moveEditPhoto($index, 1)" [disabled]="$index === editImages().length - 1"
+                              title="Mover a la derecha"
+                              class="w-6 h-6 rounded-full bg-white/90 text-gray-700 text-xs font-bold disabled:opacity-30">▶</button>
+                    </div>
+                  </div>
+                }
+              </div>
+
+              <label class="relative flex items-center justify-center gap-1 border border-dashed border-gray-300 rounded-lg px-2 py-2 text-[11px] text-gray-500 hover:bg-gray-50 cursor-pointer">
+                🖼️ Agregar más
+                <input type="file" accept="image/*" multiple (change)="onEditPhotos($event)"
+                       [disabled]="isUploading() || isEditAiProcessing()"
+                       class="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed" />
+              </label>
+              <p class="text-[10px] text-gray-400">La primera foto es la portada en la lista.</p>
+            }
+
+            @if (isUploading()) {
+              <div class="text-[11px] text-blue-600 animate-pulse">⬆️ Subiendo foto(s)...</div>
+            }
+
+            <button
+              type="button"
+              (click)="analyzeEdit()"
+              [disabled]="editImages().length === 0 || isEditAiProcessing() || isUploading()"
+              class="w-full bg-violet-600 hover:bg-violet-700 text-white font-medium text-xs px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              🤖 {{ isEditAiProcessing() ? 'Analizando...' : 'Analizar con IA' }}
+            </button>
+            @if (isEditAiProcessing()) {
+              <div class="text-[10px] text-blue-600 animate-pulse">Re-llenando campos con las primeras fotos...</div>
+            }
           </div>
 
           <!-- Campos de edición -->
@@ -201,7 +305,9 @@
 
             <div class="flex justify-end pt-2 gap-2">
               <button (click)="cancelEdit()" class="text-xs px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">Cancelar</button>
-              <button (click)="onSaveEdit()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-5 py-2 rounded-lg font-medium transition-colors shadow-sm">
+              <button (click)="onSaveEdit()"
+                      [disabled]="editImages().length === 0 || isEditAiProcessing() || isUploading()"
+                      class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-5 py-2 rounded-lg font-medium transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
                 💾 Guardar Cambios
               </button>
             </div>

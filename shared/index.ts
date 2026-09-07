@@ -11,6 +11,7 @@ export {
   validateEmailFormat,
   validatePhoneFormat,
   isValidUrl,
+  validateImageUrls,
   validateVisibilityLevel,
   validateRoleLevel,
   validateAdvanceHours,

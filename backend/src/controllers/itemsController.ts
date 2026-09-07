@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
-import { validateItemInput } from '@claimitapp/shared';
+import { validateItemInput, validateImageUrls } from '@claimitapp/shared';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 import {
   getItems,
@@ -81,7 +81,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     description,
     category,
     infoUrl,
-    imageUrl,
+    imageUrls,
     visibility_level,
     event_id,
     available_from,
@@ -91,8 +91,8 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
   } = req.body;
   const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
 
-  // Validate input
-  const validation = validateItemInput({ title, description, category, infoUrl, imageUrl });
+  // Validate input (imageUrls = arreglo ordenado de fotos, mínimo 1)
+  const validation = validateItemInput({ title, description, category, infoUrl, imageUrls });
   if (!validation.valid) {
     res.status(400).json({
       error: 'Validation failed',
@@ -108,12 +108,12 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
   try {
     const insertQuery = `
       INSERT INTO items
-        (title, description, category, info_url, image_url,
+        (title, description, category, info_url, image_urls,
          visibility_level, event_id, available_from, visible_at, expires_at,
          precio_base_costo, precio_familiar, precio_amigo, precio_conocido, precio_publico,
          horas_recoleccion_familiar, horas_recoleccion_amigo, horas_recoleccion_conocido, horas_recoleccion_publico)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-      RETURNING id, title, description, category, info_url, image_url, status,
+      RETURNING id, title, description, category, info_url, image_urls, status,
                 visibility_level, event_id, available_from, visible_at, expires_at,
                 precio_base_costo, precio_familiar, precio_amigo, precio_conocido, precio_publico,
                 horas_recoleccion_familiar, horas_recoleccion_amigo, horas_recoleccion_conocido,
@@ -124,7 +124,8 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
       description || null,
       category,
       infoUrl || null,
-      imageUrl,
+      // JSONB: se envía serializado como JSON
+      JSON.stringify(imageUrls),
       visibility_level ?? 4,
       event_id ?? null,
       available_from ?? null,
@@ -150,7 +151,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
       description: item.description,
       category: item.category,
       infoUrl: item.info_url,
-      imageUrl: item.image_url,
+      imageUrls: item.image_urls ?? [],
       status: item.status,
       visibilityLevel: item.visibility_level,
       eventId: item.event_id,
@@ -191,7 +192,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
         description: item.description,
         category: item.category,
         infoUrl: item.info_url,
-        imageUrl: item.image_url,
+        imageUrls: item.image_urls ?? [],
         status: item.status,
         createdAt: item.created_at
       }
@@ -212,6 +213,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     title,
     description,
     infoUrl,
+    imageUrls,
     visibility_level,
     event_id,
     available_from,
@@ -232,6 +234,16 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     }
   }
 
+  // imageUrls es un arreglo ordenado de fotos; se exige al menos 1 y URLs válidas
+  if (imageUrls !== undefined) {
+    const photoErrors: string[] = [];
+    validateImageUrls(imageUrls, photoErrors);
+    if (photoErrors.length > 0) {
+      res.status(400).json({ error: 'Validation failed', details: photoErrors });
+      return;
+    }
+  }
+
   // Construir el SET dinámicamente SOLO con las llaves presentes en el body.
   // Así se puede asignar NULL explícito para limpiar un campo opcional
   // (por ejemplo desasignar el evento o borrar available_from/visible_at),
@@ -248,6 +260,8 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
   if (title !== undefined) set('title', title, 'title');
   if (description !== undefined) set('description', description, 'description');
   if (infoUrl !== undefined) set('info_url', infoUrl, 'infoUrl');
+  // JSONB: el arreglo ordenado viaja como JSON serializado
+  if (imageUrls !== undefined) set('image_urls', JSON.stringify(imageUrls), 'imageUrls');
   if (visibility_level !== undefined) set('visibility_level', visibility_level, 'visibility_level');
   if (event_id !== undefined) set('event_id', event_id, 'event_id');
   if (available_from !== undefined) set('available_from', available_from, 'available_from');
@@ -276,7 +290,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       SET ${assignments.join(', ')},
           updated_at = NOW()
       WHERE id = $${params.length}
-      RETURNING id, title, description, category, info_url, image_url, status,
+      RETURNING id, title, description, category, info_url, image_urls, status,
                 visibility_level, event_id, available_from, visible_at, expires_at,
                 precio_base_costo, precio_familiar, precio_amigo, precio_conocido, precio_publico,
                 horas_recoleccion_familiar, horas_recoleccion_amigo, horas_recoleccion_conocido,
@@ -299,7 +313,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       description: updatedItem.description,
       category: updatedItem.category,
       infoUrl: updatedItem.info_url,
-      imageUrl: updatedItem.image_url,
+      imageUrls: updatedItem.image_urls ?? [],
       status: updatedItem.status,
       visibilityLevel: updatedItem.visibility_level,
       eventId: updatedItem.event_id,
@@ -331,13 +345,15 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       }
     });
 
-    // Broadcast the update via SSE
+    // Broadcast the update via SSE (incluye el arreglo de fotos para que la
+    // portada/galeía de otros clientes se actualice en vivo).
     broadcastSseEvent('item_updated', {
       itemId: updatedItem.id,
       status: updatedItem.status,
       title: updatedItem.title,
       description: updatedItem.description,
-      infoUrl: updatedItem.info_url
+      infoUrl: updatedItem.info_url,
+      imageUrls: updatedItem.image_urls ?? []
     });
 
     res.status(200).json({
@@ -348,7 +364,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
         description: updatedItem.description,
         category: updatedItem.category,
         infoUrl: updatedItem.info_url,
-        imageUrl: updatedItem.image_url,
+        imageUrls: updatedItem.image_urls ?? [],
         status: updatedItem.status,
         createdAt: updatedItem.created_at
       }
@@ -434,7 +450,7 @@ export const getItemDetail = async (req: Request, res: Response): Promise<void> 
     description: item.description,
     category: item.category,
     infoUrl: item.infoUrl,
-    imageUrl: item.imageUrl,
+    imageUrls: item.imageUrls,
     status: item.status,
     visibilityLevel: item.visibilityLevel,
     eventId: item.eventId,
@@ -490,7 +506,7 @@ export const listAllAdminItems = async (req: Request, res: Response): Promise<vo
         description: item.description,
         category: item.category,
         infoUrl: item.infoUrl,
-        imageUrl: item.imageUrl,
+        imageUrls: item.imageUrls,
         status: item.status,
         visibilityLevel: item.visibilityLevel ?? 4,
         eventId: item.eventId ?? null,

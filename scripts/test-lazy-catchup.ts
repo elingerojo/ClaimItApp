@@ -46,8 +46,8 @@ async function main(): Promise<void> {
       'publico'
     ]);
     const it = await pool.query(
-      `INSERT INTO items (title, description, category, image_url, status)
-       VALUES ($1, $2, 'Misc.', '', 'waitlist_open') RETURNING id`,
+      `INSERT INTO items (title, description, category, image_urls, status)
+       VALUES ($1, $2, 'Misc.', '[]'::jsonb, 'waitlist_open') RETURNING id`,
       [`TEST-LAZY-${stamp}`, 'temp lazy item']
     );
     const dbItemId = it.rows[0].id;
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
       description: null,
       category: 'Misc.',
       infoUrl: null,
-      imageUrl: '',
+      imageUrls: [],
       status: 'waitlist_open',
       visibilityLevel: 4,
       eventId: null,

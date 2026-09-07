@@ -92,7 +92,7 @@ async function main(): Promise<void> {
           description: 'temporary plan3 test item body',
           category: 'Misc.',
           infoUrl: null,
-          imageUrl: 'https://example.com/x.jpg'
+          imageUrls: ['https://example.com/x.jpg']
         }
       }),
       itemRes

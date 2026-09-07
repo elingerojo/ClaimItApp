@@ -54,8 +54,8 @@ async function main(): Promise<void> {
     await client.query('INSERT INTO users (uuid, alias) VALUES ($1, $2)', [u2, `plan2_u2_${stamp}`]);
 
     const itemRes = await client.query(
-      `INSERT INTO items (title, description, category, image_url, status)
-       VALUES ($1, $2, 'Misc.', '', 'available')
+      `INSERT INTO items (title, description, category, image_urls, status)
+       VALUES ($1, $2, 'Misc.', '[]'::jsonb, 'available')
        RETURNING id`,
       [`TEST-PLAN2-${stamp}`, 'temporary test item (rolled back)']
     );

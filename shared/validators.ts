@@ -26,9 +26,8 @@ export function validateItemInput(data: any): ValidationResult {
   if (!data.category) {
     errors.push('Category: required');
   }
-  if (!data.imageUrl?.trim()) {
-    errors.push('Image URL: required');
-  }
+  // Al menos 1 foto por Item (arreglo ordenado de URLs)
+  validateImageUrls(data.imageUrls, errors);
 
   // Optional fields validation
   if (data.infoUrl && data.infoUrl.trim()) {
@@ -99,6 +98,25 @@ export function isValidUrl(url: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Validate the ordered photo array of an Item (imageUrls).
+ * - Must be a non-empty array (al menos 1 foto por Item).
+ * - Each element must be a non-empty valid URL string.
+ * Pushes specific errors to the provided list.
+ */
+export function validateImageUrls(imageUrls: any, errors: string[]): void {
+  if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
+    errors.push('Image URLs: at least one photo is required');
+    return;
+  }
+  for (let i = 0; i < imageUrls.length; i++) {
+    const url = imageUrls[i];
+    if (typeof url !== 'string' || !url.trim() || !isValidUrl(url)) {
+      errors.push(`Image URL #${i + 1}: invalid URL format`);
+    }
   }
 }
 

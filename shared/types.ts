@@ -23,7 +23,12 @@ export interface Item {
   description: string | null;
   category: ItemCategory;
   infoUrl: string | null;
-  imageUrl: string;
+  /**
+   * Arreglo ordenado de URLs de fotos del Item (JSONB image_urls en la BD).
+   * La lista/portada usa imageUrls[0]; el detalle muestra el resto como
+   * thumbnails. Siempre contiene al menos 1 URL en items válidos.
+   */
+  imageUrls: string[];
   status: ItemStatus;
   createdAt: string;
 }

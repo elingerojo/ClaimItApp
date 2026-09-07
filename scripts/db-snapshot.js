@@ -65,11 +65,14 @@ async function main() {
 
   fs.writeFileSync(outFile, JSON.stringify(snapshot, null, 2), 'utf8');
 
-  const imageUrls = items.rows.map((r) => r.image_url).filter(Boolean);
+  // image_urls es un arreglo JSONB por item; se aplana para el conteo.
+  const allImageUrls = items.rows.flatMap((r) =>
+    Array.isArray(r.image_urls) ? r.image_urls : []
+  ).filter(Boolean);
   console.log(`[SNAPSHOT] Wrote ${outFile}`);
   console.log(`[SNAPSHOT] items=${items.rows.length}, events=${events.rows.length}, users=${users.rows.length}`);
   console.log(`[SNAPSHOT] memberships=${members.rows.length}, invitations=${invitations.rows.length}, claims=${claims.rows.length}`);
-  console.log(`[SNAPSHOT] distinct image_url=${new Set(imageUrls).size}`);
+  console.log(`[SNAPSHOT] distinct image_urls=${new Set(allImageUrls).size}`);
 
   await pool.end();
 }

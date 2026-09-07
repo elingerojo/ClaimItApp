@@ -20,7 +20,8 @@ export interface StoreItem {
   description: string | null;
   category: string;
   infoUrl: string | null;
-  imageUrl: string;
+  /** Arreglo ordenado de URLs de fotos del Item (JSONB image_urls). */
+  imageUrls: string[];
   status: string;
   visibilityLevel: number | null;
   eventId: string | null;
@@ -166,7 +167,8 @@ export async function rehydrateAll(): Promise<boolean> {
       description: item.description,
       category: item.category,
       infoUrl: item.info_url,
-      imageUrl: item.image_url,
+      // pg devuelve el JSONB como arreglo JS ya parseado.
+      imageUrls: Array.isArray(item.image_urls) ? item.image_urls : [],
       status: item.status,
       visibilityLevel: item.visibility_level,
       eventId: item.event_id,

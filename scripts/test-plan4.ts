@@ -76,7 +76,7 @@ async function main(): Promise<void> {
       description: null,
       category: 'Misc.',
       infoUrl: null,
-      imageUrl: 'https://example.com/x.jpg',
+      imageUrls: ['https://example.com/x.jpg'],
       status: 'waitlist_open',
       visibilityLevel: 4,
       eventId: null,

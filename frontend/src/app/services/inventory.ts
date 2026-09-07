@@ -182,6 +182,7 @@ export class InventoryService implements OnDestroy {
         title?: string;
         description?: string | null;
         infoUrl?: string | null;
+        imageUrls?: string[];
         evicted?: boolean;
         pickedUp?: boolean;
         evictedUsername?: string;
@@ -249,6 +250,7 @@ export class InventoryService implements OnDestroy {
             ...(updateData.title !== undefined && { title: updateData.title }),
             ...(updateData.description !== undefined && { description: updateData.description }),
             ...(updateData.infoUrl !== undefined && { infoUrl: updateData.infoUrl }),
+            ...(updateData.imageUrls !== undefined && { imageUrls: updateData.imageUrls }),
             ...(updateData.pickupDeadline !== undefined &&
               updateData.userUuid === this.userService.currentUuid() && {
                 myPickupDeadline: updateData.pickupDeadline

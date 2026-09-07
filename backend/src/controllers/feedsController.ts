@@ -177,7 +177,8 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
           description: item.description,
           category: item.category,
           infoUrl: item.infoUrl,
-          imageUrl: item.imageUrl,
+          // Arreglo ordenado completo: la lista usa imageUrls[0], el detalle los thumbnails.
+          imageUrls: item.imageUrls,
           status: item.status,
           visibilityLevel: item.visibilityLevel ?? 4, // Default to public
           eventId: item.eventId ?? null,

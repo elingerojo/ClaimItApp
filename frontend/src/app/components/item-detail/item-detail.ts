@@ -53,6 +53,10 @@ export class ItemDetail {
   /** Diálogo de confirmación previa al apartado (preflight, Fase 5). */
   readonly isConfirmingClaim = signal(false);
 
+  // ---- Galería de fotos (arreglo imageUrls, portada = índice 0) ----
+  /** Foto ampliada activa (índice dentro de imageUrls). */
+  readonly selectedPhoto = signal(0);
+
   // ---- Pestañas (Datos / Tiempos / Condiciones) ----
   /** Pestaña activa; 'Datos' es la inicial y la referencia de altura del área de tabs. */
   readonly activeTab = signal<DetailTab>('datos');
@@ -79,6 +83,8 @@ export class ItemDetail {
     effect(() => {
       this.item();
       this.activeTab.set('datos');
+      // Cada vez que cambia el objeto se vuelve a la primera foto (portada).
+      this.selectedPhoto.set(0);
       this.tabAreaHeight.set(null);
       // afterNextRender exige un contexto de inyección, pero el callback de un
       // effect NO lo es (lanza NG0203 y aborta el primer render del card).
@@ -104,6 +110,29 @@ export class ItemDetail {
   /** Cambia la pestaña activa del detalle. */
   selectTab(tab: DetailTab): void {
     this.activeTab.set(tab);
+  }
+
+  /** Arreglo de fotos del Item (con respaldo defensivo si falta). */
+  photoUrls(): string[] {
+    return this.item().imageUrls?.length ? this.item().imageUrls : [];
+  }
+
+  /** URL de la foto ampliada activa (clamp al rango del arreglo). */
+  mainPhotoUrl(): string {
+    const urls = this.photoUrls();
+    const idx = Math.min(this.selectedPhoto(), Math.max(urls.length - 1, 0));
+    return urls[idx] ?? '';
+  }
+
+  /** Cambia la foto ampliada pulsando un thumbnail. */
+  selectPhoto(i: number): void {
+    const urls = this.photoUrls();
+    if (i >= 0 && i < urls.length) this.selectedPhoto.set(i);
+  }
+
+  /** ¿Hay más de una foto (para mostrar la franja de thumbnails)? */
+  hasMultiplePhotos(): boolean {
+    return this.photoUrls().length > 1;
   }
 
   /** ¿Aplican límites/consecuencias para el usuario actual en este evento? */

@@ -19,6 +19,22 @@ export interface EventOption {
   status?: string;
 }
 
+/** Máximo de fotos que se envían a Gemini en una sola llamada (índices 0..2). */
+const MAX_IMAGES_TO_ANALYZE = 3;
+
+/**
+ * Mueve un elemento de un arreglo una posición (dir = -1 izquierda | +1 derecha).
+ * Devuelve un arreglo nuevo (inmutable); no muta el original.
+ */
+function moveInArray<T>(list: T[], index: number, dir: -1 | 1): T[] {
+  const target = index + dir;
+  if (index < 0 || index >= list.length || target < 0 || target >= list.length) return list;
+  const next = [...list];
+  const [moved] = next.splice(index, 1);
+  next.splice(target, 0, moved);
+  return next;
+}
+
 @Component({
   selector: 'app-admin-ingest',
   standalone: true,
@@ -32,9 +48,18 @@ export class AdminIngest implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
 
+  // ---- Estado de subida / análisis IA ----
+  /** Subiendo una o más fotos a Vercel Blob. */
+  readonly isUploading = signal<boolean>(false);
+  /** Análisis IA en curso para la captura (nuevo Item). */
   readonly isAiProcessing = signal<boolean>(false);
-  readonly previewUrl = signal<string>('');
-  readonly uploadedBlobUrl = signal<string>('');
+  /** Análisis IA en curso para el editor (Item existente). */
+  readonly isEditAiProcessing = signal<boolean>(false);
+
+  // ---- Fotos de la CAPTURA (nuevo Item): lista ordenada local hasta guardar ----
+  readonly captureImages = signal<string[]>([]);
+  // ---- Fotos del EDITOR (Item existente): lista ordenada local hasta PATCH ----
+  readonly editImages = signal<string[]>([]);
 
   // Evento destino de la captura (persistente en localStorage hasta cambiarlo)
   readonly events = signal<EventOption[]>([]);
@@ -129,17 +154,19 @@ export class AdminIngest implements OnInit {
       if (!res.ok) throw new Error((await res.json()).error || 'No autorizado');
       const item = await res.json();
 
+      const imageUrls: string[] = Array.isArray(item.imageUrls) ? item.imageUrls : [];
       this.editingItem.set({
         id: item.id,
         title: item.title,
         description: item.description,
         category: item.category,
         infoUrl: item.infoUrl,
-        imageUrl: item.imageUrl,
+        imageUrls,
         status: item.status,
         createdAt: item.createdAt,
         queue: item.queue ?? []
       });
+      this.editImages.set(imageUrls);
       this.editTitle.set(item.title ?? '');
       this.editDescription.set(item.description ?? '');
       this.editInfoUrl.set(item.infoUrl ?? '');
@@ -220,56 +247,166 @@ export class AdminIngest implements OnInit {
     localStorage.removeItem(this.INGEST_EVENT_STORAGE_KEY);
   }
 
+  // ==========================================================================
+  //  SUBIDA MÚLTIPLE A VERCEL BLOB (compartida por captura y editor)
+  // ==========================================================================
+
   /**
-   * Captures photo from camera, uploads to Vercel Blobs, triggers AI analysis
+   * Sube cada archivo a Vercel Blob y devuelve sus URLs públicas. Cada foto se
+   * sube de inmediato (el editor acumula las URLs en memoria hasta guardar).
    */
-  async onCameraCapture(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    if (!input.files || input.files.length === 0) return;
-
-    const file = input.files[0];
-    this.previewUrl.set(URL.createObjectURL(file));
-    this.isAiProcessing.set(true);
-
-    try {
+  private async uploadFiles(files: File[]): Promise<string[]> {
+    const urls: string[] = [];
+    for (const file of files) {
       const blob = await upload(file.name, file, {
         access: 'public',
         handleUploadUrl: `${this.apiUrl}/admin/blob-token`,
         clientPayload: JSON.stringify({ token: this.adminTokenService.token() })
       });
+      urls.push(blob.url);
+    }
+    return urls;
+  }
 
-      this.uploadedBlobUrl.set(blob.url);
+  /** Agrega las fotos elegidas (cámara/galería) a la lista de la CAPTURA. */
+  async onCapturePhotos(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+    const files = Array.from(input.files);
+    input.value = ''; // permite volver a elegir el mismo archivo
+    if (files.length === 0) return;
 
-      const aiRes = await fetch(`${this.apiUrl}/admin/analyze-item`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Admin-Token': this.adminTokenService.token()
-        },
-        body: JSON.stringify({ imageUrl: blob.url })
-      });
+    this.isUploading.set(true);
+    try {
+      const urls = await this.uploadFiles(files);
+      this.captureImages.update(list => [...list, ...urls]);
+    } catch (err: any) {
+      this.toastService.error(`Error al subir la(s) foto(s): ${err.message}`);
+    } finally {
+      this.isUploading.set(false);
+    }
+  }
 
-      const aiResult = await aiRes.json();
-      if (!aiRes.ok) throw new Error(aiResult.error || 'La IA falló al analizar el objeto.');
+  /** Agrega las fotos elegidas a la lista del EDITOR (Item existente). */
+  async onEditPhotos(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+    const files = Array.from(input.files);
+    input.value = '';
+    if (files.length === 0) return;
 
-      const aiData = aiResult.data;
+    this.isUploading.set(true);
+    try {
+      const urls = await this.uploadFiles(files);
+      this.editImages.update(list => [...list, ...urls]);
+    } catch (err: any) {
+      this.toastService.error(`Error al subir la(s) foto(s): ${err.message}`);
+    } finally {
+      this.isUploading.set(false);
+    }
+  }
+
+  // ---- Gestión local (captura): reordenar / quitar ----
+
+  /** Mueve una foto de la captura una posición (dir -1 ◀ | +1 ▶). */
+  moveCapturePhoto(index: number, dir: -1 | 1): void {
+    this.captureImages.update(list => moveInArray(list, index, dir));
+  }
+
+  /** Quita una foto de la captura (puede quedar en 0; guardar queda bloqueado). */
+  removeCapturePhoto(index: number): void {
+    this.captureImages.update(list => list.filter((_, i) => i !== index));
+  }
+
+  // ---- Gestión local (editor): reordenar / quitar ----
+
+  /** Mueve una foto del editor una posición (dir -1 ◀ | +1 ▶). */
+  moveEditPhoto(index: number, dir: -1 | 1): void {
+    this.editImages.update(list => moveInArray(list, index, dir));
+  }
+
+  /** Quita una foto del editor; bloqueado si quedaría 0 (mínimo 1 foto por Item). */
+  removeEditPhoto(index: number): void {
+    if (this.editImages().length <= 1) return;
+    this.editImages.update(list => list.filter((_, i) => i !== index));
+  }
+
+  // ==========================================================================
+  //  ANÁLISIS GEMINI MANUAL (hasta las primeras 3 fotos de la lista ordenada)
+  // ==========================================================================
+
+  /** Llama al backend que envía hasta las primeras 3 fotos a Gemini en un solo request. */
+  private async analyzeUrls(urls: string[]): Promise<any> {
+    if (urls.length === 0) throw new Error('Agrega al menos una foto antes de analizar.');
+    const aiRes = await fetch(`${this.apiUrl}/admin/analyze-item`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Admin-Token': this.adminTokenService.token()
+      },
+      body: JSON.stringify({ imageUrls: urls.slice(0, MAX_IMAGES_TO_ANALYZE) })
+    });
+
+    const aiResult = await aiRes.json();
+    if (!aiRes.ok) throw new Error(aiResult.error || 'La IA falló al analizar el objeto.');
+    return aiResult.data;
+  }
+
+  /** Botón "Analizar con IA" de la CAPTURA: rellena el formulario de creación. */
+  async analyzeCapture(): Promise<void> {
+    const urls = this.captureImages();
+    if (urls.length === 0) {
+      this.toastService.error('Agrega al menos una foto para analizar.');
+      return;
+    }
+    this.isAiProcessing.set(true);
+    try {
+      const aiData = await this.analyzeUrls(urls);
       this.formTitle.set(aiData.title || '');
       this.formDescription.set(aiData.description || '');
       this.formCategory.set(aiData.category || 'Misc.');
       this.formInfoUrl.set(aiData.infoUrl || '');
-
     } catch (err: any) {
-      this.toastService.error(`Error en el flujo de cámara/IA: ${err.message}`);
+      this.toastService.error(`Error en el análisis IA: ${err.message}`);
     } finally {
       this.isAiProcessing.set(false);
     }
   }
 
+  /** Botón "Analizar con IA" del EDITOR: rellena los campos de edición. */
+  async analyzeEdit(): Promise<void> {
+    const urls = this.editImages();
+    if (urls.length === 0) {
+      this.toastService.error('Agrega al menos una foto para analizar.');
+      return;
+    }
+    this.isEditAiProcessing.set(true);
+    try {
+      const aiData = await this.analyzeUrls(urls);
+      if (aiData.title) this.editTitle.set(aiData.title);
+      if (aiData.description) this.editDescription.set(aiData.description);
+      if (aiData.infoUrl) this.editInfoUrl.set(aiData.infoUrl);
+    } catch (err: any) {
+      this.toastService.error(`Error en el análisis IA: ${err.message}`);
+    } finally {
+      this.isEditAiProcessing.set(false);
+    }
+  }
+
+  // ==========================================================================
+  //  GUARDADO
+  // ==========================================================================
+
   /**
-   * Saves the item to the database, then auto-opens the vertical editor
-   * for the last-added item
+   * Saves the item (with its full ordered photo array) to the database, then
+   * auto-opens the vertical editor for the last-added item.
    */
   async onSaveItemToInventory(): Promise<void> {
+    const images = this.captureImages();
+    if (images.length === 0) {
+      this.toastService.error('Agrega al menos una foto antes de guardar.');
+      return;
+    }
     try {
       const res = await fetch(`${this.apiUrl}/admin/items`, {
         method: 'POST',
@@ -282,7 +419,7 @@ export class AdminIngest implements OnInit {
           description: this.formDescription(),
           category: this.formCategory(),
           infoUrl: this.formInfoUrl(),
-          imageUrl: this.uploadedBlobUrl(),
+          imageUrls: images,
           precio_base_costo: this.formPrecioBase(),
           event_id: this.selectedEventId() || null
         })
@@ -296,17 +433,19 @@ export class AdminIngest implements OnInit {
 
       // Auto-open vertical editor for the newly created item
       const newItem = result.item;
+      const newImages: string[] = Array.isArray(newItem.imageUrls) ? newItem.imageUrls : images;
       this.editingItem.set({
         id: newItem.id,
         title: newItem.title,
         description: newItem.description,
         category: newItem.category,
         infoUrl: newItem.infoUrl,
-        imageUrl: newItem.imageUrl,
+        imageUrls: newImages,
         status: newItem.status,
         createdAt: newItem.createdAt,
         queue: []
       });
+      this.editImages.set(newImages);
       this.editTitle.set(newItem.title);
       this.editDescription.set(newItem.description || '');
       this.editInfoUrl.set(newItem.infoUrl || '');
@@ -316,8 +455,7 @@ export class AdminIngest implements OnInit {
       this.isPreloadedEdit.set(false);
 
       // Clear the ingest form for the next item
-      this.previewUrl.set('');
-      this.uploadedBlobUrl.set('');
+      this.captureImages.set([]);
       this.formTitle.set('');
       this.formDescription.set('');
       this.formCategory.set('Misc.');
@@ -330,7 +468,7 @@ export class AdminIngest implements OnInit {
   }
 
   /**
-   * Persists edits made in the vertical editor
+   * Persists edits made in the vertical editor (including the ordered photo array).
    */
   async onSaveEdit(): Promise<void> {
     const item = this.editingItem();
@@ -339,11 +477,16 @@ export class AdminIngest implements OnInit {
       this.toastService.error('El título es obligatorio.');
       return;
     }
+    if (this.editImages().length === 0) {
+      this.toastService.error('El objeto debe conservar al menos una foto.');
+      return;
+    }
 
     const body: Record<string, any> = {
       title: this.editTitle().trim(),
       description: this.editDescription() === '' ? null : this.editDescription(),
       infoUrl: this.editInfoUrl() === '' ? null : this.editInfoUrl(),
+      imageUrls: this.editImages(),
       event_id: this.editEventId() || null,
       precio_base_costo: this.editPriceBase(),
       visibility_level: this.editVisibilityLevel()
@@ -384,6 +527,7 @@ export class AdminIngest implements OnInit {
    */
   cancelEdit(): void {
     this.editingItem.set(null);
+    this.editImages.set([]);
     this.editTitle.set('');
     this.editDescription.set('');
     this.editInfoUrl.set('');
