@@ -11,10 +11,16 @@
  * - El mensaje es neutro a propósito: NO revela roles ni escalones superiores.
  */
 
-/** Construye el enlace de invitación completo para el HOME (usa el origin real). */
-export function buildInviteUrl(code: string): string {
+/**
+ * Construye el enlace de invitación completo para el HOME (usa el origin real).
+ * `apodo` (opcional) es la sugerencia del anfitrión: al abrirlo, el popup de
+ * bienvenida llega pre-llenado y editable (nunca crea identidad sin un clic).
+ */
+export function buildInviteUrl(code: string, apodo?: string): string {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  return `${origin}/?invite=${encodeURIComponent(code)}`;
+  const base = `${origin}/?invite=${encodeURIComponent(code)}`;
+  if (apodo && apodo.trim()) return `${base}&apodo=${encodeURIComponent(apodo.trim())}`;
+  return base;
 }
 
 /** Mensaje neutro (sin roles) que acompaña al enlace en WhatsApp / share. */

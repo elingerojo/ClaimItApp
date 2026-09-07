@@ -314,6 +314,7 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
  */
 export const acceptInvitation = async (req: Request, res: Response): Promise<void> => {
   const { invitationCode, userUuid } = req.body;
+  console.log(`[InviteAccept] ENTRY code=${invitationCode} userUuid=${userUuid}`);
 
   if (!invitationCode || !userUuid) {
     res.status(400).json({ error: 'Missing invitationCode or userUuid' });
@@ -346,6 +347,7 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     }
 
     const { role: invitationRole, event_id: eventId, title: eventTitle } = invResult.rows[0];
+    console.log(`[InviteAccept] CODE_ROLE=${invitationRole} eventId=${eventId} eventTitle=${eventTitle}`);
 
     // 2. Get or create user, get current role
     let userResult = await client.query('SELECT uuid, global_role FROM users WHERE uuid = $1', [
@@ -363,10 +365,12 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     } else {
       currentRole = userResult.rows[0].global_role;
     }
+    console.log(`[InviteAccept] userRow=${userResult.rows.length > 0} currentRole=${currentRole}`);
 
     // 3. Determine if role should cascade
     const newRole = determineRoleAfterInvitation(currentRole, invitationRole);
     const roleCascaded = newRole !== currentRole;
+    console.log(`[InviteAccept] newRole=${newRole} cascaded=${roleCascaded}`);
 
     // 4. Register user in event_members. La membresía ya no guarda rol (rol
     //    GLOBAL = única fuente de verdad): la invitación solo puede elevar
@@ -390,6 +394,7 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     ]);
 
     await client.query('COMMIT');
+    console.log(`[InviteAccept] COMMITTED userUuid=${userUuid} newRole=${newRole} cascaded=${roleCascaded}`);
 
     // Write-through: actualizar el rol del usuario en el store (preservando el alias)
     const existingUser = getUser(userUuid);
@@ -428,7 +433,7 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Invitation acceptance failed:', error);
+    console.error(`[InviteAccept] FAILED code=${invitationCode} userUuid=${userUuid}`, error);
     res.status(500).json({
       error: 'Failed to accept invitation',
       timestamp: new Date().toISOString()
@@ -712,6 +717,53 @@ export const validateInvitation = async (req: Request, res: Response): Promise<v
   } catch (error) {
     console.error('Invitation validation failed:', error);
     res.status(500).json({ error: 'Failed to validate invitation' });
+  }
+};
+
+/**
+ * GET /api/invitations/resolve?code=CODE
+ *
+ * Resuelve un código de invitación SUELTO (el enlace del HOME solo trae
+ * ?invite=TOKEN, sin event_id). Devuelve la info mínima del evento y del rol
+ * para que el frontend muestre el popup de bienvenida y decida si la
+ * invitación eleva por encima de 'publico'. Sin escribir nada (solo lectura).
+ */
+export const resolveInvitation = async (req: Request, res: Response): Promise<void> => {
+  const { code } = req.query;
+
+  if (!code || typeof code !== 'string' || !validateInvitationCode(code)) {
+    res.status(400).json({ error: 'Invalid invitation code format' });
+    return;
+  }
+
+  try {
+    const inv = await pool.query(
+      `SELECT ei.role, ei.is_active, ei.event_id, e.title
+       FROM event_invitations ei
+       JOIN events e ON ei.event_id = e.id
+       WHERE ei.code = $1
+       LIMIT 1`,
+      [code]
+    );
+
+    if (inv.rows.length === 0) {
+      res.status(404).json({ error: 'Invalid invitation code' });
+      return;
+    }
+    if (!inv.rows[0].is_active) {
+      res.status(403).json({ error: 'Invitation is inactive' });
+      return;
+    }
+
+    res.json({
+      eventId: inv.rows[0].event_id,
+      eventTitle: inv.rows[0].title,
+      role: inv.rows[0].role,
+      isActive: true
+    });
+  } catch (error) {
+    console.error('Invitation resolution failed:', error);
+    res.status(500).json({ error: 'Failed to resolve invitation' });
   }
 };
 

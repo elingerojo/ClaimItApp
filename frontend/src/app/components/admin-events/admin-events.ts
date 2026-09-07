@@ -78,6 +78,9 @@ export class AdminEvents implements OnInit, OnDestroy {
   /** Evento en edición (null = modo crear). */
   readonly editingEventId = signal<string | null>(null);
 
+  /** Apodos sugeridos por rol (campo opcional en cada link de invitación). */
+  private readonly suggestedApodos = signal<Record<string, string>>({});
+
   // Form fields (create / edit)
   readonly title = signal('');
   readonly description = signal('');
@@ -343,18 +346,27 @@ export class AdminEvents implements OnInit, OnDestroy {
     }
   }
 
-  /** Enlace completo compartible: HOME + token (https://SITIO/?invite=CODE). */
-  inviteUrl(code: string): string {
-    return buildInviteUrl(code);
+  /** Apodo sugerido (opcional) que se anexará a un link de un rol dado. */
+  suggestedApodo(role: string): string {
+    return this.suggestedApodos()[role] ?? '';
   }
 
-  async copyInviteLink(code: string): Promise<void> {
-    const ok = await copyText(buildInviteUrl(code));
+  setSuggestedApodo(role: string, value: string): void {
+    this.suggestedApodos.update(map => ({ ...map, [role]: value.trim() }));
+  }
+
+  /** Enlace completo compartible: HOME + token + apodo sugerido opcional. */
+  inviteUrl(code: string, apodo?: string): string {
+    return buildInviteUrl(code, apodo);
+  }
+
+  async copyInviteLink(code: string, apodo?: string): Promise<void> {
+    const ok = await copyText(buildInviteUrl(code, apodo));
     this.toastService[ok ? 'success' : 'error'](ok ? 'Enlace copiado.' : 'No se pudo copiar.');
   }
 
-  async shareInviteLink(code: string): Promise<void> {
-    const link = buildInviteUrl(code);
+  async shareInviteLink(code: string, apodo?: string): Promise<void> {
+    const link = buildInviteUrl(code, apodo);
     const shared = await tryNativeShare(link);
     if (!shared) {
       const ok = await copyText(link);
@@ -364,7 +376,7 @@ export class AdminEvents implements OnInit, OnDestroy {
     }
   }
 
-  whatsAppInviteUrl(code: string): string {
-    return buildWhatsAppInviteUrl(buildInviteUrl(code));
+  whatsAppInviteUrl(code: string, apodo?: string): string {
+    return buildWhatsAppInviteUrl(buildInviteUrl(code, apodo));
   }
 }

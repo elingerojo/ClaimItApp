@@ -31,6 +31,7 @@ import {
   getEvent,
   listEvents,
   validateInvitation,
+  resolveInvitation,
   getShareLink
 } from './controllers/eventsController.js';
 import {
@@ -71,6 +72,7 @@ app.get('/api/events', listEvents);
 app.get('/api/events/:eventId', getEvent);
 app.get('/api/events/:id/invite/:code', validateInvitation);
 app.get('/api/events/:id/share-link', getShareLink);
+app.get('/api/invitations/resolve', resolveInvitation);
 app.post('/api/invitations/accept', acceptInvitation);
 
 /* ==========================================================================

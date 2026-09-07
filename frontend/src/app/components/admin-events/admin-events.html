@@ -139,14 +139,26 @@
                             {{ inv.is_active ? 'Activo' : 'Inactivo' }} · {{ inv.use_count ?? 0 }} uso(s)
                           </span>
                         </div>
+                        <div class="mt-1.5 flex items-center gap-1.5">
+                          <label class="flex items-center gap-1 min-w-0">
+                            <span class="text-[9px] text-gray-400 whitespace-nowrap">Apodo sugerido:</span>
+                            <input #apodoInput
+                                   [value]="suggestedApodo(inv.role)"
+                                   (input)="setSuggestedApodo(inv.role, apodoInput.value)"
+                                   type="text"
+                                   placeholder="(opcional)"
+                                   title="Si lo llenas, el invitado llega con el apodo pre-llenado en el popup y solo confirma."
+                                   class="w-32 text-[9px] font-mono px-1.5 py-1 bg-white border border-gray-200 rounded-md" />
+                          </label>
+                        </div>
                         <div class="mt-1 flex items-center gap-1.5">
-                          <input [value]="inviteUrl(inv.code)" readonly
+                          <input [value]="inviteUrl(inv.code, suggestedApodo(inv.role))" readonly
                                  class="flex-1 min-w-0 text-[9px] font-mono px-1.5 py-1 bg-white border border-gray-200 rounded-md" />
-                          <button (click)="copyInviteLink(inv.code)" title="Copiar enlace completo"
+                          <button (click)="copyInviteLink(inv.code, suggestedApodo(inv.role))" title="Copiar enlace completo"
                                   class="shrink-0 text-md text-gray-500 hover:text-gray-800 px-1">📋</button>
-                          <button (click)="shareInviteLink(inv.code)" title="Compartir enlace"
+                          <button (click)="shareInviteLink(inv.code, suggestedApodo(inv.role))" title="Compartir enlace"
                                   class="shrink-0 text-md text-gray-500 hover:text-gray-800 px-1">📤</button>
-                          <a [href]="whatsAppInviteUrl(inv.code)" target="_blank" rel="noopener"
+                          <a [href]="whatsAppInviteUrl(inv.code, suggestedApodo(inv.role))" target="_blank" rel="noopener"
                              title="Enviar por WhatsApp"
                              class="shrink-0 text-md text-gray-500 hover:text-gray-800 px-1">💬</a>
                         </div>

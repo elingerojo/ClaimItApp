@@ -1,5 +1,6 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, computed, inject } from '@angular/core';
 import { railwayApiUrl } from '../app.config';
+import { InvitationService } from './invitations';
 
 export interface UserSession {
   uuid: string;
@@ -38,6 +39,7 @@ export interface SessionResult {
 })
 export class UserService {
   private readonly apiUrl = railwayApiUrl;
+  private readonly invitationService = inject(InvitationService);
 
   // Reactive internal signal primitive tracking session state
   private readonly userSessionSignal = signal<UserSession | null>(null);
@@ -250,5 +252,8 @@ export class UserService {
     localStorage.removeItem('claimit_role');
     localStorage.removeItem('claimit_blocked');
     this.userSessionSignal.set(null);
+    // Al cerrar sesión también se descarta la invitación pendiente persistida:
+    // no debe quedar colgada en el dispositivo (se limpia al éxito/inválido/logout).
+    this.invitationService.clearPending();
   }
 }

@@ -1,0 +1,51 @@
+@if (visible()) {
+  <div class="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+      <div class="p-6">
+        <div class="text-center">
+          <div class="mx-auto w-14 h-14 bg-indigo-100 rounded-full flex items-center justify-center mb-4">
+            <span class="text-2xl">🎉</span>
+          </div>
+          <h3 class="text-lg font-bold text-gray-900 mb-2">¡Bienvenido!</h3>
+          <p class="text-sm text-gray-600 mb-1">
+            Has sido invitado a participar en
+            <strong class="text-gray-900">{{ eventTitle() }}</strong>.
+          </p>
+          <p class="text-xs text-gray-400 mb-5">
+            Para apartar objetos e identificar tu lista, ingresa un apodo.
+          </p>
+        </div>
+
+        @if (error()) {
+          <div class="mb-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs px-3 py-2">
+            {{ error() }}
+          </div>
+        }
+
+        <label class="block">
+          <span class="text-[10px] font-medium text-gray-400">Apodo o alias</span>
+          <input
+            id="invite-welcome-alias"
+            [(ngModel)]="apodo"
+            type="text"
+            placeholder="Ej: JuanP"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            title="Elige un apodo o alias único para identificar tus selecciones y conservar tu misma lista en futuras sesiones."
+            class="w-full mt-1 text-sm px-3 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono"
+            (keyup.enter)="onJoin()"
+          />
+        </label>
+
+        <button
+          (click)="onJoin()"
+          [disabled]="loading()"
+          class="mt-4 w-full text-sm bg-gray-900 text-white px-4 py-3 rounded-xl font-medium hover:bg-gray-800 transition-colors disabled:opacity-50"
+        >
+          {{ loading() ? 'Registrando...' : 'Unirme' }}
+        </button>
+      </div>
+    </div>
+  </div>
+}

@@ -135,6 +135,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
       );
 
       upsertUser({ uuid, alias: cleanAlias, global_role: uuidResult.rows[0].global_role });
+      console.log(`[Session] UUID-EXISTS (alias/contact update) uuid=${uuid} alias=${cleanAlias} existingRole=${uuidResult.rows[0].global_role}`);
 
       // Si el alias cambió, propagarlo a las colas existentes (claims.username
       // en Neon + store RAM) y notificar por SSE para que todos los clientes
@@ -174,6 +175,7 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
     }
 
     upsertUser({ uuid, alias: cleanAlias, global_role: 'publico' });
+    console.log(`[Session] NEW USER CREATED uuid=${uuid} alias=${cleanAlias} isLegacy=${isLegacyUser} role=publico`);
 
     res.status(201).json({
       uuid,

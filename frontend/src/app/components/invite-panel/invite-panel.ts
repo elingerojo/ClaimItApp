@@ -60,6 +60,8 @@ export class InvitePanel {
   readonly selectedEventId = signal<string>('');
   readonly link = signal<string | null>(null);
   readonly loading = signal(false);
+  /** Apodo sugerido (opcional) para pre-llenar el popup del invitado. */
+  readonly apodoSugerido = signal('');
 
   /** Evento seleccionado (o el único cuando no hay selección explícita). */
   readonly selectedEvent = computed<EventContext | null>(() => {
@@ -90,7 +92,8 @@ export class InvitePanel {
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'No se pudo generar el enlace.');
-      this.link.set(buildInviteUrl(data.code));
+      const apodo = this.apodoSugerido().trim() || undefined;
+      this.link.set(buildInviteUrl(data.code, apodo));
     } catch (err: any) {
       this.toastService.error(`Error: ${err.message}`);
     } finally {
