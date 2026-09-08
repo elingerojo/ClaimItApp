@@ -8,7 +8,11 @@ import {
   removeClaimFromItem
 } from '../cache/appStore.js';
 import { validateClaimInput, validateEmailFormat, validatePhoneFormat } from '@claimitapp/shared';
-import { assignPickupDeadlineToFirst, advanceQueue } from '../services/queueService.js';
+import {
+  assignPickupDeadlineToFirst,
+  advanceQueue,
+  removeActiveClaimAndCascade
+} from '../services/queueService.js';
 import { reduceExpirationCount } from '../services/trustSanctions.js';
 import { runLazyCatchUp } from '../services/scheduler.js';
 
@@ -414,6 +418,81 @@ export const confirmPickup = async (req: Request, res: Response): Promise<void> 
     await client.query('ROLLBACK');
     console.error('Pickup confirmation failed:', error);
     res.status(500).json({ error: 'Internal error confirming pickup.' });
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * POST /api/claims/leave
+ *
+ * Salida voluntaria del visitante de la Línea de Espera de un objeto. Borra su
+ * claim ACTIVO (no picked_up), libera el lugar y recompone la fila
+ * (advanceQueue → estatus + deadline fresco del nuevo #1). Es NEUTRAL para la
+ * confianza: no se llama applyExpirationSanction. El visitante puede volver a
+ * anotarse más tarde; al hacerlo pierde su posición anterior (regla normal).
+ */
+export const leaveClaim = async (req: Request, res: Response): Promise<void> => {
+  const { itemId, userUuid } = req.body;
+
+  if (!itemId || !userUuid) {
+    res.status(400).json({ error: 'itemId and userUuid are required.' });
+    return;
+  }
+
+  // Catch-up perezoso antes de tocar la cola
+  await runLazyCatchUp();
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Lock del item para evitar carreras con otros claims/expulsiones
+    await client.query('SELECT id FROM items WHERE id = $1 FOR UPDATE', [itemId]);
+
+    const result = await removeActiveClaimAndCascade(itemId, userUuid, client);
+
+    if (!result.found) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'No tienes un apartado activo en este objeto.' });
+      return;
+    }
+
+    await client.query('COMMIT');
+
+    // Write-through: quitar al usuario de la cola en RAM + deadline del nuevo #1
+    removeClaimFromItem(itemId, userUuid, result.newStatus);
+    if (result.newFirstUuid) {
+      refreshClaimDeadline(itemId, result.newFirstUuid, result.newFirstPickupDeadline ?? null);
+    }
+
+    // Broadcast real-time: `evicted` reutiliza el filtrado de la cola del cliente
+    broadcastSseEvent('item_updated', {
+      itemId: itemId,
+      status: result.newStatus,
+      userUuid: userUuid,
+      username: result.username,
+      evicted: true,
+      evictedUsername: result.username,
+      newFirstUsername: result.newFirstUsername,
+      newFirstUuid: result.newFirstUuid,
+      newFirstPickupDeadline: result.newFirstPickupDeadline,
+      reason: 'user_left'
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Has salido de la lista. Tu lugar quedó liberado.',
+      newStatus: result.newStatus,
+      newFirstUsername: result.newFirstUsername,
+      newFirstUuid: result.newFirstUuid,
+      newFirstPickupDeadline: result.newFirstPickupDeadline
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Leave claim transaction failed:', error);
+    res.status(500).json({ error: 'Internal error removing the claim.' });
   } finally {
     client.release();
   }

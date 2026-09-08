@@ -264,3 +264,56 @@ export async function advanceQueue(itemId: string, client: any): Promise<Advance
 
   return { newStatus, newFirstUsername, newFirstUuid, newFirstPickupDeadline };
 }
+
+export interface RemoveClaimAndCascadeResult {
+  /** false cuando el usuario no tenía un claim activo (no picked_up) que borrar. */
+  found: boolean;
+  username: string | null;
+  newStatus: string;
+  newFirstUsername: string | null;
+  newFirstUuid?: string | null;
+  newFirstPickupDeadline?: string | null;
+}
+
+/**
+ * Borra el claim ACTIVO (no picked_up) de un usuario sobre un item y recompone
+ * la cola con advanceQueue (estatus + deadline fresco del nuevo #1). Corre
+ * dentro de la transacción del llamador. Es el flujo compartido que hoy estaba
+ * duplicado entre adminController.evictClaimant, claimsController y los casos
+ * de salida voluntaria. NO aplica sanciones de confianza: eso lo decide el
+ * llamador (p. ej. la salida voluntaria es neutral por decisión de producto).
+ */
+export async function removeActiveClaimAndCascade(
+  itemId: string,
+  userUuid: string,
+  client: any
+): Promise<RemoveClaimAndCascadeResult> {
+  const deleted = await client.query(
+    `DELETE FROM claims
+     WHERE item_id = $1 AND user_uuid = $2 AND COALESCE(picked_up, false) = false
+     RETURNING id`,
+    [itemId, userUuid]
+  );
+
+  if (deleted.rows.length === 0) {
+    return {
+      found: false,
+      username: null,
+      newStatus: 'available',
+      newFirstUsername: null,
+      newFirstUuid: null,
+      newFirstPickupDeadline: null
+    };
+  }
+
+  // Alias vigente del usuario (no el desnormalizado del claim) para el broadcast.
+  const userRes = await client.query('SELECT alias FROM users WHERE uuid = $1', [userUuid]);
+  const username = userRes.rows[0]?.alias || 'unknown';
+
+  const { newStatus, newFirstUsername, newFirstUuid, newFirstPickupDeadline } = await advanceQueue(
+    itemId,
+    client
+  );
+
+  return { found: true, username, newStatus, newFirstUsername, newFirstUuid, newFirstPickupDeadline };
+}

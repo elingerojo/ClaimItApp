@@ -8,7 +8,7 @@ import { rehydrateAll } from './cache/appStore.js';
 import { requireAdminSession } from './middleware/adminSession.js';
 import { getAuditLog } from './utils/auditLog.js';
 import { resolveSession } from './controllers/sessionController.js';
-import { createClaim, confirmPickup } from './controllers/claimsController.js';
+import { createClaim, confirmPickup, leaveClaim } from './controllers/claimsController.js';
 import { startScheduler, runLazyCatchUp } from './services/scheduler.js';
 import { getUploadToken } from './controllers/uploadController.js';
 import { analyzeItem } from './controllers/analyzerController.js';
@@ -64,6 +64,8 @@ app.get('/api/items', getInventoryFeed);
 app.get('/api/ledger', getLedgerFeed);
 app.post('/api/claims', createClaim);
 app.post('/api/claims/pickup', confirmPickup);
+// Salida voluntaria del visitante de la Línea de Espera (neutral para confianza).
+app.post('/api/claims/leave', leaveClaim);
 
 /* ==========================================================================
    PUBLIC EVENTS & INVITATIONS ENDPOINTS

@@ -3,7 +3,7 @@ import pool from '../config/db.js';
 import { broadcastSseEvent } from '../config/sse.js';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 import { refreshClaimDeadline, removeClaimFromItem } from '../cache/appStore.js';
-import { advanceQueue } from '../services/queueService.js';
+import { removeActiveClaimAndCascade } from '../services/queueService.js';
 
 export const evictClaimant = async (req: Request, res: Response): Promise<void> => {
   const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
@@ -22,36 +22,30 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
     // Lock the target item row to prevent race conditions
     await client.query('SELECT id FROM items WHERE id = $1 FOR UPDATE', [itemId]);
 
-    // Get the current alias of the user being evicted (for SSE broadcast)
-    const userResult = await client.query('SELECT alias FROM users WHERE uuid = $1', [userUuid]);
-    const username = userResult.rows[0]?.alias || 'unknown';
+    // Remove the ACTIVE claim (no picked_up) y recompone la cola (estatus +
+    // deadline del nuevo #1) vía el helper compartido con leaveClaim.
+    const result = await removeActiveClaimAndCascade(itemId, userUuid, client);
 
-    // Remove the specific user from this item's claim ledger queue by userUuid
-    const deleteQuery = `
-      DELETE FROM claims 
-      WHERE item_id = $1 AND user_uuid = $2
-    `;
-    await client.query(deleteQuery, [itemId, userUuid]);
+    if (!result.found) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'No active claim found for this item and user.' });
+      return;
+    }
 
     // Count remaining active claims (for audit)
     const countResult = await client.query(
-      'SELECT COUNT(*)::int AS active_count FROM claims WHERE item_id = $1',
+      `SELECT COUNT(*)::int AS active_count FROM claims
+       WHERE item_id = $1 AND COALESCE(picked_up, false) = false`,
       [itemId]
     );
     const remainingCount = countResult.rows[0].active_count;
 
-    // Auto-advance the queue: recompute status + assign deadline to the new first
-    const { newStatus, newFirstUsername, newFirstUuid, newFirstPickupDeadline } = await advanceQueue(
-      itemId,
-      client
-    );
-
     await client.query('COMMIT');
 
     // Write-through: actualizar el store en RAM + refrescar deadline del nuevo primero
-    removeClaimFromItem(itemId, userUuid, newStatus);
-    if (newFirstUuid) {
-      refreshClaimDeadline(itemId, newFirstUuid, newFirstPickupDeadline ?? null);
+    removeClaimFromItem(itemId, userUuid, result.newStatus);
+    if (result.newFirstUuid) {
+      refreshClaimDeadline(itemId, result.newFirstUuid, result.newFirstPickupDeadline ?? null);
     }
 
     // Log audit entry
@@ -61,10 +55,10 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
       itemId: itemId,
       userId: userUuid,
       details: {
-        username: username,
+        username: result.username,
         remainingClaims: remainingCount,
-        newStatus: newStatus,
-        newFirstUsername: newFirstUsername,
+        newStatus: result.newStatus,
+        newFirstUsername: result.newFirstUsername,
         cascadedAutomatically: true,
         timestamp: new Date().toISOString()
       }
@@ -73,14 +67,14 @@ export const evictClaimant = async (req: Request, res: Response): Promise<void> 
     // Broadcast the eviction event via SSE
     broadcastSseEvent('item_updated', {
       itemId: itemId,
-      status: newStatus,
+      status: result.newStatus,
       userUuid: userUuid,
-      username: username,
+      username: result.username,
       evicted: true,
-      evictedUsername: username,
-      newFirstUsername,
-      newFirstUuid,
-      newFirstPickupDeadline,
+      evictedUsername: result.username,
+      newFirstUsername: result.newFirstUsername,
+      newFirstUuid: result.newFirstUuid,
+      newFirstPickupDeadline: result.newFirstPickupDeadline,
       queuePosition: remainingCount,
       reason: 'manual_evict'
     });

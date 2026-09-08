@@ -71,13 +71,15 @@
               <th class="px-6 py-4">{{ 'Categoría' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Estado' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Evento' | stripAccents }}</th>
-              <th class="px-6 py-4">{{ 'Línea de Espera (Click para expulsar)' | stripAccents }}</th>
+              <th class="px-6 py-4">{{ 'Línea de Espera (Click en la fila para gestionar)' | stripAccents }}</th>
               <th class="px-6 py-4">{{ 'Acciones' | stripAccents }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-50 text-xs text-gray-700">
             @for (item of inventoryService.adminItems(); track item.id) {
-              <tr class="hover:bg-gray-50/50 transition-colors">
+              <tr (click)="openAdminDetail(item)"
+                  title="Click para abrir el detalle y gestionar la Línea de Espera"
+                  class="hover:bg-gray-50/50 transition-colors cursor-pointer">
                 <td class="px-6 py-4">
                   <div class="flex items-center space-x-3">
                     <img [src]="item.imageUrls?.[0] || ''" class="w-10 h-10 object-cover rounded-md bg-gray-50 border border-gray-100" />
@@ -104,6 +106,7 @@
                     <div class="flex flex-col gap-1 items-start">
                       <a
                         routerLink="/admin/events"
+                        (click)="$event.stopPropagation()"
                         [queryParams]="{ open: item.eventSummary.id }"
                         [title]="'Ver detalles del evento: ' + (item.eventSummary.title || 'Evento sin título')"
                         class="inline-flex items-center gap-1 text-indigo-600 hover:underline font-medium"
@@ -117,16 +120,14 @@
                   }
                 </td>
                 <td class="px-6 py-4">
-                  <div class="flex flex-wrap gap-2">
-                    @for (user of item.queue; track user.username; let idx = $index) {
-                      <button
-                        (click)="handleEviction(item.id, user.username)"
-                        title="Click para remover usuario de la cola"
-                        class="flex flex-col items-start space-y-0.5 px-2 py-1 border border-gray-200 rounded-lg hover:border-red-200 hover:bg-red-50 transition-all text-left"
+                  <div class="flex flex-wrap gap-1.5">
+                    @for (user of item.queue; track user.userUuid; let idx = $index) {
+                      <span
+                        [title]="(idx === 0 ? '👑 Primero en la fila' : '⏳ En espera (posición ' + (idx + 1) + ')') + ' — abre el detalle para expulsarlo'"
+                        class="inline-flex flex-col items-start space-y-0.5 px-2 py-1 border border-gray-100 rounded-lg bg-gray-50 text-left"
                       >
                         <span class="flex items-center gap-1.5 font-medium text-gray-900">
                           <span>{{ idx === 0 ? '👑' : '⏳' }} &#64;{{ user.username }}</span>
-                          <span class="text-[10px] text-gray-400 group-hover:text-red-500 font-mono">×</span>
                         </span>
                         @if (user.pickupDeadline) {
                           <span class="text-[10px] text-amber-600 font-mono">
@@ -134,7 +135,7 @@
                             @if (user.roleAtAssignment) { · rol: {{ user.roleAtAssignment }} }
                           </span>
                         }
-                      </button>
+                      </span>
                     } @empty {
                       <span class="text-gray-400 italic">Sin reclamos activos</span>
                     }
@@ -144,6 +145,7 @@
                   <div class="flex items-center gap-2">
                     <a
                       routerLink="/admin/ingest"
+                      (click)="$event.stopPropagation()"
                       [queryParams]="{ edit: item.id }"
                       title="Editar objeto (título, evento, precio, visibilidad, fechas)"
                       class="flex items-center space-x-1.5 px-2.5 py-1 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-all text-xs font-medium"
@@ -151,7 +153,7 @@
                       ✏️ Editar
                     </a>
                     <button
-                      (click)="handleDeleteItem(item.id, item.title)"
+                      (click)="$event.stopPropagation(); handleDeleteItem(item.id, item.title)"
                       title="Eliminar objeto permanentemente"
                       class="flex items-center space-x-1.5 px-2.5 py-1 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-all text-xs font-medium"
                     >
@@ -172,5 +174,14 @@
       </div>
     </div>
 
+  }
+
+  <!-- Modal de detalle admin (click en una fila para abrir; ✕ sobre un apodo para expulsar) -->
+  @if (adminTokenService.authenticated() && selectedAdminItem(); as adminItem) {
+    <app-item-detail
+      [item]="adminItem"
+      [adminMode]="true"
+      [onClose]="closeAdminDetail.bind(this)"
+    />
   }
 </div>

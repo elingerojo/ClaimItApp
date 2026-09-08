@@ -16,8 +16,9 @@ import { CommonModule } from '@angular/common';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
 import { formatDateEs } from '../../utils/date-es';
-import { InventoryService, ItemWithQueue } from '../../services/inventory';
+import { InventoryService, ItemWithQueue, QueueEntry } from '../../services/inventory';
 import { UserService } from '../../services/user';
+import { AdminTokenService } from '../../services/admin-token';
 import { ToastService } from '../../services/toast';
 import { railwayApiUrl } from '../../app.config';
 import { eventStatusBadge, eventStatusLabel } from '../../utils/event-status';
@@ -41,10 +42,13 @@ type DetailTab = 'datos' | 'tiempos' | 'condiciones';
 export class ItemDetail {
   readonly item = input.required<ItemWithQueue>();
   readonly onClose = input.required<() => void>();
+  /** true cuando el modal se abre en el área admin: X sobre cada apodo y sin UI de visitante. */
+  readonly adminMode = input(false);
 
   readonly inventoryService = inject(InventoryService);
   readonly userService = inject(UserService);
   readonly toastService = inject(ToastService);
+  readonly adminTokenService = inject(AdminTokenService);
   /** Inyector del componente para ejecutar afterNextRender desde el effect. */
   private readonly injector = inject(Injector);
 
@@ -52,6 +56,11 @@ export class ItemDetail {
   readonly shareVisible = signal(false);
   /** Diálogo de confirmación previa al apartado (preflight, Fase 5). */
   readonly isConfirmingClaim = signal(false);
+  /** Diálogo de peligro al salir voluntariamente de la lista (visitante). */
+  readonly isConfirmingLeave = signal(false);
+  /** Diálogo de peligro al expulsar (admin): apodo objetivo de la cola. */
+  readonly isConfirmingEvict = signal(false);
+  readonly evictTarget = signal<QueueEntry | null>(null);
 
   // ---- Galería de fotos (arreglo imageUrls, portada = índice 0) ----
   /** Foto ampliada activa (índice dentro de imageUrls). */
@@ -338,6 +347,83 @@ export class ItemDetail {
       this.close();
     } catch (err: any) {
       this.toastService.error(`Error al reclamar: ${err.message}`);
+    }
+  }
+
+  /** ¿Muestra la X sobre un apodo de la Línea de Espera? Solo sobre el propio
+   * apodo para el visitante; sobre todos en modo admin. */
+  canShowQueueX(userUuid: string): boolean {
+    if (this.adminMode()) return true;
+    return this.userService.isAuthenticated() && userUuid === this.userService.currentUuid();
+  }
+
+  /** Tooltip contextual de un chip de la Línea de Espera según rol (admin/visitante). */
+  queueChipTitle(claimer: QueueEntry, idx: number): string {
+    if (this.adminMode()) {
+      return `@${claimer.username} — click ✕ para expulsarlo de la lista.`;
+    }
+    if (idx === 0) {
+      return '👑 Primero en la fila — prioridad para llevarse este objeto.';
+    }
+    if (claimer.userUuid === this.userService.currentUuid()) {
+      return '✅ ¡Eres tú! Estás en la lista. Click ✕ para salir.';
+    }
+    return `⏳ En espera (posición ${idx + 1})`;
+  }
+
+  /** Click sobre la X de un apodo: abre el diálogo de peligro correspondiente. */
+  onQueueX(claimer: QueueEntry): void {
+    if (this.adminMode()) {
+      this.evictTarget.set(claimer);
+      this.isConfirmingEvict.set(true);
+      return;
+    }
+    if (claimer.userUuid === this.userService.currentUuid()) {
+      this.isConfirmingLeave.set(true);
+    }
+  }
+
+  cancelLeave(): void {
+    this.isConfirmingLeave.set(false);
+  }
+
+  cancelEvict(): void {
+    this.isConfirmingEvict.set(false);
+    this.evictTarget.set(null);
+  }
+
+  /** Confirma la salida voluntaria del visitante. Neutral para la confianza. */
+  async confirmLeave(): Promise<void> {
+    this.isConfirmingLeave.set(false);
+    const item = this.item();
+    const userUuid = this.userService.currentUuid();
+    if (!userUuid) return;
+    try {
+      const response = await this.inventoryService.submitLeave(item.id, userUuid);
+      this.toastService.success(response?.message || 'Saliste de la lista. Tu lugar quedó liberado.');
+      // submitLeave ya refresca el feed; solo cerramos el card.
+      this.close();
+    } catch (err: any) {
+      this.toastService.error(`Error al salir: ${err.message}`);
+    }
+  }
+
+  /** Confirma la expulsión (admin). Envía el userUuid exacto del claim. */
+  async confirmEvict(): Promise<void> {
+    const target = this.evictTarget();
+    this.cancelEvict();
+    if (!target) return;
+    const item = this.item();
+    const token = this.adminTokenService.token();
+    if (!token) return;
+    try {
+      await this.inventoryService.evictClaimant(item.id, target.userUuid, token);
+      this.toastService.success(`@${target.username} fue retirado de la lista.`);
+    } catch (err: any) {
+      this.toastService.error(`Error al expulsar: ${err.message}`);
+    } finally {
+      // Recompone la cola en la vista admin (el backend ya emitió SSE).
+      this.inventoryService.refreshAdminItems().catch(() => {});
     }
   }
 }

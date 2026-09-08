@@ -2,13 +2,13 @@ import { Component, inject, signal, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
-import { InventoryService } from '../../services/inventory';
+import { InventoryService, ItemWithQueue } from '../../services/inventory';
 import { AdminTokenService } from '../../services/admin-token';
 import { ToastService } from '../../services/toast';
-import { railwayApiUrl } from '../../app.config';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
 import { AdminAuth } from '../admin-auth/admin-auth';
+import { ItemDetail } from '../item-detail/item-detail';
 import { eventStatusBadge, eventStatusLabel } from '../../utils/event-status';
 
 /** Orden canónico de estatus de evento (mismo orden que EVENT_STATUSES del backend). */
@@ -28,15 +28,13 @@ const FILTER_STORAGE_KEY = 'claimit_admin_event_status_filter';
 @Component({
   selector: 'app-admin-manage',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, StripAccentsPipe, DateEsPipe, AdminAuth],
+  imports: [CommonModule, FormsModule, RouterModule, StripAccentsPipe, DateEsPipe, AdminAuth, ItemDetail],
   templateUrl: './admin-manage.html'
 })
 export class AdminManage {
   readonly inventoryService = inject(InventoryService);
   readonly adminTokenService = inject(AdminTokenService);
   readonly toastService = inject(ToastService);
-
-  private readonly apiUrl = railwayApiUrl;
 
   /** Estatus en orden canónico (para dibujar los chips). */
   readonly statusOptions: EventStatus[] = [...EVENT_STATUS_ORDER];
@@ -53,6 +51,9 @@ export class AdminManage {
   /** Evita re-disparar la carga mientras ya se arrancó en esta instancia. */
   private bootstrapped = false;
 
+  /** Item abierto en el modal de detalle en modo admin (click en una fila). */
+  readonly selectedAdminItem = signal<ItemWithQueue | null>(null);
+
   constructor() {
     // Cuando el admin se autentica (puede ocurrir de forma asíncrona tras el
     // mount), restauramos la selección de la sesión y cargamos el inventario
@@ -61,12 +62,25 @@ export class AdminManage {
       const authed = this.adminTokenService.authenticated();
       if (!authed) {
         this.bootstrapped = false;
+        this.selectedAdminItem.set(null);
         return;
       }
       if (this.bootstrapped) return;
       this.bootstrapped = true;
       this.activeStatusesSignal.set(new Set(this.readStoredStatuses()));
       void this.reload();
+    });
+
+    // Mantiene el item del modal de detalle sincronizado con la lista admin:
+    // tras una expulsión (o cualquier mutación SSE) se re-engancha el objeto
+    // fresco por id para que la Línea de Espera del modal se actualice en vivo.
+    effect(() => {
+      const items = this.inventoryService.adminItems();
+      const current = this.selectedAdminItem();
+      if (!current) return;
+      const fresh = items.find((i) => i.id === current.id);
+      if (fresh) this.selectedAdminItem.set(fresh);
+      else this.selectedAdminItem.set(null);
     });
   }
 
@@ -197,27 +211,14 @@ export class AdminManage {
     }
   }
 
-  async handleEviction(itemId: string, username: string): Promise<void> {
-    const confirmation = confirm(`¿Estás seguro de que deseas expulsar a @${username}?`);
-    if (!confirmation) return;
+  /** Abre el modal de detalle del objeto en modo admin (con X para expulsar). */
+  openAdminDetail(item: ItemWithQueue): void {
+    this.selectedAdminItem.set(item);
+  }
 
-    try {
-      const res = await fetch(`${this.apiUrl}/admin/evict`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Admin-Token': this.adminTokenService.token()
-        },
-        body: JSON.stringify({ itemId, username })
-      });
-
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Error en la expulsión.');
-      this.toastService.success('¡Línea actualizada con éxito!');
-      void this.reload();
-    } catch (err: any) {
-      this.toastService.error(`Error: ${err.message}`);
-    }
+  /** Cierra el modal de detalle admin. */
+  closeAdminDetail(): void {
+    this.selectedAdminItem.set(null);
   }
 
   /** Recorta el título de un evento a ~12 caracteres + puntos suspensivos. */

@@ -484,4 +484,43 @@ export class InventoryService implements OnDestroy {
       throw error;
     }
   }
+
+  /**
+   * Salida voluntaria del visitante de la Línea de Espera de un objeto.
+   * POST /api/claims/leave (público, sin penalización de confianza). La cola
+   * se recompone en el backend; el SSE/refresh mantiene el feed al día.
+   */
+  async submitLeave(itemId: string, userUuid: string): Promise<any> {
+    const response = await fetch(`${this.apiUrl}/claims/leave`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId, userUuid })
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || 'No se pudo salir de la lista.');
+    }
+    this.refresh().catch(() => {});
+    return result;
+  }
+
+  /**
+   * Expulsión forzada de un usuario de la Línea de Espera de un objeto
+   * (admin). POST /api/admin/evict exige el userUuid exacto del claim.
+   */
+  async evictClaimant(itemId: string, userUuid: string, adminToken: string): Promise<any> {
+    const response = await fetch(`${this.apiUrl}/admin/evict`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Admin-Token': adminToken
+      },
+      body: JSON.stringify({ itemId, userUuid })
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error || 'Error en la expulsión.');
+    }
+    return result;
+  }
 }
