@@ -159,6 +159,26 @@ export const getRoleConfig = async (_req: Request, res: Response): Promise<void>
 export const updateRoleConfig = async (req: Request, res: Response): Promise<void> => {
   const body = req.body?.config ?? req.body; // { roles: {...} }
 
+  // DEBUG: ver qué llega realmente del cliente (tipos exactos por campo).
+  if (body?.roles && typeof body.roles === 'object') {
+    for (const role of Object.keys(body.roles)) {
+      const r = body.roles[role];
+      if (!r || typeof r !== 'object') continue;
+      const dump = (key: string) => {
+        const v = r[key];
+        return { value: v, type: typeof v, isInteger: Number.isInteger(v) };
+      };
+      console.log(`[role-config][DEBUG] ${role} =`, {
+        advance_pub_hours_default: dump('advance_pub_hours_default'),
+        advance_disp_hours_default: dump('advance_disp_hours_default'),
+        multiplicador_precio_default: dump('multiplicador_precio_default'),
+        max_apartados_simultaneos: dump('max_apartados_simultaneos')
+      });
+    }
+  } else {
+    console.log('[role-config][DEBUG] body sin roles:', JSON.stringify(req.body));
+  }
+
   const validation = validateRoleDefaultsUpdate(body);
   if (!validation.valid) {
     res.status(400).json({ error: 'Validation failed', details: validation.errors });

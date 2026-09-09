@@ -196,6 +196,11 @@ export class AdminConfig {
       return;
     }
 
+    // DEBUG: ver qué se está por enviar (tipos exactos por rol/campo).
+    for (const [role, patch] of Object.entries(rolesPayload)) {
+      console.log(`[role-config][DEBUG] SENDING role=${role}`, patch);
+    }
+
     this.savingRoles.set(true);
     this.guardBlocked.set(false);
     this.guardMessage.set(null);
