@@ -156,6 +156,25 @@
               <div class="border-t border-gray-100 p-4 space-y-4">
                 <div class="text-[10px] text-gray-400 font-mono">Status: <span class="text-gray-700">{{ d.event.status }}</span></div>
 
+                <!-- Notas del evento (markdown en TEXTO PLANO, para revisar la
+                     redacción sin entrar a editar) -->
+                @if (d.event.times_notes || d.event.conditions_notes) {
+                  <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    @if (d.event.times_notes) {
+                      <div class="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2">
+                        <div class="text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-1">📝 Notas de Tiempos</div>
+                        <div class="text-xs text-gray-700 whitespace-pre-wrap break-words">{{ d.event.times_notes }}</div>
+                      </div>
+                    }
+                    @if (d.event.conditions_notes) {
+                      <div class="rounded-lg border border-indigo-200 bg-indigo-50/60 px-3 py-2">
+                        <div class="text-[10px] font-bold text-indigo-700 uppercase tracking-wider mb-1">📝 Notas de Condiciones</div>
+                        <div class="text-xs text-gray-700 whitespace-pre-wrap break-words">{{ d.event.conditions_notes }}</div>
+                      </div>
+                    }
+                  </div>
+                }
+
                 <!-- Miembros por rol -->
                 <div>
                   <div class="text-xs font-bold text-gray-500 mb-1.5">Miembros</div>
