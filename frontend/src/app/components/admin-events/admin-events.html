@@ -228,6 +228,27 @@
                     </p>
                   }
 
+                  <!-- Mensaje personalizado (SOLO admin): texto que acompaña al
+                       enlace en WhatsApp/Compartir. Vacío = mensaje por defecto.
+                       Se guarda en localStorage (sobrevive recargas); no toca la
+                       DB ni el panel de participantes. -->
+                  <label class="block mt-3">
+                    <span class="text-[10px] font-medium text-gray-400">💬 Mensaje de invitación (opcional)</span>
+                    <textarea
+                      [value]="inviteMessageFor(d.event.id)"
+                      (input)="setInviteMessageFor(d.event.id, $any($event.target).value)"
+                      rows="2"
+                      maxlength="500"
+                      placeholder="Te invito a este evento 🎉 Entra, mira el catálogo y aparta lo que te guste."
+                      title="Texto que acompaña al enlace cuando compartes. Vacío = mensaje por defecto."
+                      class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg font-mono"></textarea>
+                    <span class="text-[10px] text-gray-400 mt-1 block">
+                      Vacío = mensaje por defecto. Solo aplica a lo que compartas tú (WhatsApp/Compartir);
+                      se guarda en tu navegador y sobrevive a recargas. Los participantes conservan el
+                      mensaje por defecto.
+                    </span>
+                  </label>
+
                   <!-- Grupo único de 3 botones para compartir el enlace -->
                   <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button (click)="copyInviteLink(selectedInvitationCode(), suggestedApodo(selectedRole()))"

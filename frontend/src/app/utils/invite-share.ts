@@ -23,14 +23,24 @@ export function buildInviteUrl(code: string, apodo?: string): string {
   return base;
 }
 
-/** Mensaje neutro (sin roles) que acompaña al enlace en WhatsApp / share. */
-export function inviteMessage(link: string): string {
-  return `Te invito a este evento 🎉 Entra, mira el catálogo y aparta lo que te guste.\n${link}`;
+/** Texto por defecto (neutro, sin roles) que acompaña al enlace. */
+export const DEFAULT_INVITE_MESSAGE =
+  'Te invito a este evento 🎉 Entra, mira el catálogo y aparta lo que te guste.';
+
+/**
+ * Construye el texto que acompaña al enlace en WhatsApp / share.
+ * `custom` (opcional) es un mensaje personalizado del ADMIN; si viene vacío o
+ * en blanco se usa el mensaje por defecto (DEFAULT_INVITE_MESSAGE). El enlace
+ * SIEMPRE se anexa en su propia línea.
+ */
+export function inviteMessage(link: string, custom?: string): string {
+  const body = (custom?.trim() || DEFAULT_INVITE_MESSAGE).trim();
+  return `${body}\n${link}`;
 }
 
 /** URL wa.me con el mensaje ya precargado para "Enviar por WhatsApp". */
-export function buildWhatsAppInviteUrl(link: string): string {
-  return `https://wa.me/?text=${encodeURIComponent(inviteMessage(link))}`;
+export function buildWhatsAppInviteUrl(link: string, custom?: string): string {
+  return `https://wa.me/?text=${encodeURIComponent(inviteMessage(link, custom))}`;
 }
 
 /** Copia texto al portapapeles (con fallback legacy). Devuelve true si tuvo éxito. */
@@ -63,10 +73,10 @@ export async function copyText(text: string): Promise<boolean> {
  * Devuelve true si se invocó el share; false si el llamador debe usar un
  * fallback (copiar al portapapeles o abrir WhatsApp).
  */
-export async function tryNativeShare(link: string): Promise<boolean> {
+export async function tryNativeShare(link: string, custom?: string): Promise<boolean> {
   if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
     try {
-      await navigator.share({ text: inviteMessage(link) });
+      await navigator.share({ text: inviteMessage(link, custom) });
       return true;
     } catch {
       /* el usuario canceló o falló → se usa el fallback */

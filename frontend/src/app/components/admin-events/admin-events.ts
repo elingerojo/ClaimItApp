@@ -66,6 +66,13 @@ const DEFAULT_AGENDA: AgendaInput = {
   closing_window_hours: 48
 };
 
+/**
+ * Clave de localStorage donde se guarda el mapa {eventId: texto} de mensajes
+ * de invitación personalizados por el ADMIN. Se persiste localmente (no en la
+ * DB) para que sobreviva a recargas; vacío/ausente = mensaje por defecto.
+ */
+const INVITE_MESSAGES_STORAGE_KEY = 'claimit_admin_invite_messages';
+
 @Component({
   selector: 'app-admin-events',
   standalone: true,
@@ -92,6 +99,56 @@ export class AdminEvents implements OnInit, OnDestroy {
   private readonly suggestedApodos = signal<Record<string, string>>({});
   /** Rol elegido en el composer de compartir ('' = sin selección previa). */
   readonly selectedRole = signal<string>('');
+
+  /**
+   * Mensajes de invitación personalizados POR EVENTO (solo admin). Se persisten
+   * en localStorage (JSON único {eventId: texto}) para sobrevivir recargas de la
+   * sesión; vacío/ausente = mensaje por defecto (DEFAULT_INVITE_MESSAGE). NO se
+   * envía al backend ni toca la DB; el panel de participantes (invite-panel)
+   * nunca lee esta clave y conserva el mensaje por defecto.
+   */
+  readonly inviteMessages = signal<Record<string, string>>(this.loadStoredInviteMessages());
+
+  /** Lee el mapa {eventId: texto} persistido en localStorage ({} si no existe). */
+  private loadStoredInviteMessages(): Record<string, string> {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem(INVITE_MESSAGES_STORAGE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /** Persiste el mapa completo en localStorage (fallo silencioso ante privacidad). */
+  private persistInviteMessages(map: Record<string, string>): void {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(INVITE_MESSAGES_STORAGE_KEY, JSON.stringify(map));
+    } catch {
+      /* cuota/privacidad: no bloquear la edición */
+    }
+  }
+
+  /** Texto guardado del evento ('' si nunca se personalizó → mensaje por defecto). */
+  inviteMessageFor(eventId: string): string {
+    return this.inviteMessages()[eventId] ?? '';
+  }
+
+  /** Guarda el texto del evento y persiste. '' / blanco = usar el mensaje por defecto. */
+  setInviteMessageFor(eventId: string, value: string): void {
+    const next = { ...this.inviteMessages(), [eventId]: value };
+    this.inviteMessages.set(next);
+    this.persistInviteMessages(next);
+  }
+
+  /** Mensaje custom del evento abierto en el detalle ('' si no hay ninguno). */
+  private currentInviteMessage(): string {
+    const id = this.detail()?.event?.id;
+    return id ? this.inviteMessageFor(id) : '';
+  }
 
   // Form fields (create / edit)
   readonly title = signal('');
@@ -471,7 +528,9 @@ export class AdminEvents implements OnInit, OnDestroy {
 
   async shareInviteLink(code: string, apodo?: string): Promise<void> {
     const link = buildInviteUrl(code, apodo);
-    const shared = await tryNativeShare(link);
+    // El mensaje que acompaña al enlace lo compone SOLO el admin: el texto
+    // custom de este evento si lo escribió, o el mensaje por defecto si no.
+    const shared = await tryNativeShare(link, this.currentInviteMessage());
     if (!shared) {
       const ok = await copyText(link);
       this.toastService[ok ? 'success' : 'error'](
@@ -481,6 +540,6 @@ export class AdminEvents implements OnInit, OnDestroy {
   }
 
   whatsAppInviteUrl(code: string, apodo?: string): string {
-    return buildWhatsAppInviteUrl(buildInviteUrl(code, apodo));
+    return buildWhatsAppInviteUrl(buildInviteUrl(code, apodo), this.currentInviteMessage());
   }
 }
