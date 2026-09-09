@@ -4,11 +4,11 @@
   <div class="space-y-4">
     @for (log of activityLogs(); track log.claimed_at) {
       <div class="text-xs text-gray-600 border-b border-gray-50 pb-3 last:border-0 last:pb-0">
-        <span class="font-medium text-gray-900 font-mono">&#64;{{ log.username }}</span> 
-        claimed 
+        <span class="font-medium text-gray-900 font-mono">&#64;{{ log.username }}</span>
+        {{ log.kind === 'release' ? 'liberó' : 'apartó' }}
         <span class="italic text-gray-800 font-medium">"{{ log.title }}"</span>
         <div class="flex items-center space-x-2 mt-1 text-[10px] text-gray-400">
-          <span class="px-1.5 py-0.5 bg-gray-50 rounded text-gray-500 font-medium">{{ log.category }}</span>
+          <span class="px-1.5 py-0.5 bg-gray-50 rounded text-gray-500 font-medium">{{ log.category | categoryEs }}</span>
           <span>•</span>
           <span>{{ log.claimed_at | dateEs:'time' }}</span>
         </div>

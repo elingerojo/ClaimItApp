@@ -7,6 +7,8 @@ import { InvitationService } from '../../services/invitations';
 import { ItemCategory } from '@claimitapp/shared';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
+import { CategoryEsPipe } from '../../pipes/category-es.pipe';
+import { CATEGORY_LABELS, categoryLabel } from '../../utils/category-label';
 import { ItemDetail } from '../item-detail/item-detail';
 import {
   eventStatusBadge,
@@ -20,7 +22,7 @@ import {
 @Component({
   selector: 'app-inventory-list',
   standalone: true,
-  imports: [CommonModule, NgOptimizedImage, StripAccentsPipe, DateEsPipe, ItemDetail],
+  imports: [CommonModule, NgOptimizedImage, StripAccentsPipe, DateEsPipe, CategoryEsPipe, ItemDetail],
   templateUrl: './inventory-list.html'
 })
 export class InventoryList implements OnInit {
@@ -193,28 +195,9 @@ export class InventoryList implements OnInit {
     });
   }
 
-  readonly categories: ItemCategory[] = [
-    'Kitchen', 'Electronics', 'Decor', 'Books', 'Media', 
-    'Clothing', 'Bedding', 'Shoes', 'Accessories', 'Bathroom', 
-    'Office', 'Utilities', 'Cleaning', 'Sports', 'Misc.'
-  ];
-  readonly translationMap = {
-    Kitchen: "Cocina",
-    Electronics: "Electrónica",
-    Decor: "Decoración",
-    Books: "Libros",
-    Media: "Medios",
-    Clothing: "Ropa",
-    Bedding: "Blancos",
-    Shoes: "Zapatos",
-    Accessories: "Accesorios",
-    Bathroom: "Baño",
-    Office: "Oficina",
-    Utilities: "Utilería",
-    Cleaning: "Limpieza",
-    Sports: "Deportes",
-    "Misc.": "Varios",
-  } as const;
+  readonly categories: ItemCategory[] = Object.keys(CATEGORY_LABELS) as ItemCategory[];
+  /** Traducción centralizada de categoría a español (para atributos/title). */
+  readonly categoryLabel = categoryLabel;
 
   // Pipeline combinado reactivo para calcular la rejilla en tiempo real
   readonly filteredItems = computed(() => {

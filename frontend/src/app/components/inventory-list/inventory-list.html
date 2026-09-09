@@ -63,8 +63,8 @@
           Todos
         </button>
         @for (cat of categories; track cat) {
-          <button (click)="onSelectCategory(cat)" [title]="'Filtrar solo objetos de la categoría: ' + translationMap[cat]" [class]="activeCategory() === cat && !showOnlyMyClaims() ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
-            {{ translationMap[cat] }}
+          <button (click)="onSelectCategory(cat)" [title]="'Filtrar solo objetos de la categoría: ' + categoryLabel(cat)" [class]="activeCategory() === cat && !showOnlyMyClaims() ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+            {{ cat | categoryEs }}
           </button>
         }
       </div>
@@ -209,7 +209,7 @@
         <div class="flex-1 p-3 sm:p-4 min-w-0 flex flex-col justify-between">
           <div>
             <div class="flex items-center justify-between mb-1">
-              <span class="text-[10px] uppercase font-bold tracking-wider text-gray-500">{{ (translationMap[item.category]?? item.category) | stripAccents }}</span>
+              <span class="text-[10px] uppercase font-bold tracking-wider text-gray-500">{{ item.category | categoryEs | stripAccents }}</span>
               @if (item.infoUrl) {
                 <a [href]="item.infoUrl" target="_blank" [title]="'Abrir página externa con más información sobre: ' + item.title"
                    class="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5 shrink-0 ml-1">Ver Info Externa ↗</a>

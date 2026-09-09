@@ -15,6 +15,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
+import { CategoryEsPipe } from '../../pipes/category-es.pipe';
 import { InventoryService, ItemWithQueue, QueueEntry } from '../../services/inventory';
 import { UserService } from '../../services/user';
 import { AdminTokenService } from '../../services/admin-token';
@@ -48,7 +49,7 @@ interface FixedTimelineRow {
 @Component({
   selector: 'app-item-detail',
   standalone: true,
-  imports: [CommonModule, StripAccentsPipe, DateEsPipe],
+  imports: [CommonModule, StripAccentsPipe, DateEsPipe, CategoryEsPipe],
   templateUrl: './item-detail.html'
 })
 export class ItemDetail implements OnInit, OnDestroy {

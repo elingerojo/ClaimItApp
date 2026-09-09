@@ -45,7 +45,7 @@
     <div class="p-6">
       <!-- Category + External info -->
       <div class="flex items-center justify-between mb-2">
-        <span class="text-xs uppercase font-bold tracking-wider text-gray-400">{{ item().category | stripAccents }}</span>
+        <span class="text-xs uppercase font-bold tracking-wider text-gray-400">{{ item().category | categoryEs | stripAccents }}</span>
         @if (item().infoUrl) {
           <a [href]="item().infoUrl" target="_blank"
              [title]="'Abrir página externa con más información sobre: ' + item().title"

@@ -132,6 +132,7 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
       userUuid,
       username,
       claimId: outcome.claimId,
+      claimedAt: outcome.claimedAt,
       deliveredClaimId: outcome.deliveredClaimId,
       deliveredAt: outcome.deliveredAt,
       title,
@@ -201,12 +202,18 @@ export const leaveClaim = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
+    const storeItem = getItemById(itemId);
     broadcastSseEvent('item_updated', {
       itemId,
       status: outcome.status,
       phase: outcome.phase,
       userUuid,
       username: outcome.username,
+      // Datos del item para que el feed de actividad en vivo pueda renderizar
+      // "@usuario liberó \"Título\"" (antes llegaba sin título y mostraba "").
+      title: storeItem?.title ?? null,
+      category: storeItem?.category ?? null,
+      releasedAt: new Date().toISOString(),
       claimState: outcome.claimState,
       freeWindowOpenedAt: outcome.freeWindowOpenedAt,
       reason: 'user_left_voluntarily'
