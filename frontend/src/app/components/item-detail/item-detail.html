@@ -109,7 +109,7 @@
 
             <!-- Precio según el nivel del usuario -->
             @if (item().precioVisible != null) {
-              <div class="mt-1 text-xl font-extrabold text-gray-900">${{ item().precioVisible }}</div>
+              <div class="mt-1 text-xl font-extrabold text-gray-900">${{ item().precioVisible | precioEs }}</div>
             }
 
             <!-- Descripción completa (sin truncar) -->
@@ -133,7 +133,7 @@
                           <b class="font-mono text-sky-700"> {{ countdown(claimsCloseAt()) }}</b>
                         } @else {
                           <b> {{ claimsCloseAt() | dateEs }}</b>
-                        } · ({{ claimsCloseAt() | dateEs:'date' }})
+                        } · (Fecha final: {{ claimsCloseAt() | dateEs:'date' }})
                       </div>
                     }
                     @if (myActiveClaim()) {
@@ -242,7 +242,7 @@
               } @else {
                 <!-- Pre-congelamiento (claim_open): aún no hay calendario fijo -->
                 <div class="pt-1 text-[10px] text-gray-400 italic">
-                  El calendario de turnos (V1..V3 y ventana libre) se fijará cuando cierre la lista de apartados. Mientras, la recolección del evento termina el <b>{{ pickupDeadline() | dateEs:'date' }}</b>.
+                  La recolección del evento termina en la <b>Fecha límite: {{ pickupDeadline() | dateEs:'date' }}</b>.
                 </div>
               }
 

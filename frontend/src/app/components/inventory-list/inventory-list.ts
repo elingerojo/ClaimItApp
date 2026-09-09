@@ -8,6 +8,7 @@ import { ItemCategory } from '@claimitapp/shared';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
 import { CategoryEsPipe } from '../../pipes/category-es.pipe';
+import { PrecioEsPipe } from '../../pipes/precio-es.pipe';
 import { CATEGORY_LABELS, categoryLabel } from '../../utils/category-label';
 import { ItemDetail } from '../item-detail/item-detail';
 import {
@@ -23,7 +24,7 @@ import { faseSectionVisible } from '../../utils/fase-reveal';
 @Component({
   selector: 'app-inventory-list',
   standalone: true,
-  imports: [CommonModule, NgOptimizedImage, StripAccentsPipe, DateEsPipe, CategoryEsPipe, ItemDetail],
+  imports: [CommonModule, NgOptimizedImage, StripAccentsPipe, DateEsPipe, CategoryEsPipe, PrecioEsPipe, ItemDetail],
   templateUrl: './inventory-list.html'
 })
 export class InventoryList implements OnInit {

@@ -17,6 +17,7 @@ import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
 import { CategoryEsPipe } from '../../pipes/category-es.pipe';
 import { MarkdownPipe } from '../../pipes/markdown.pipe';
+import { PrecioEsPipe } from '../../pipes/precio-es.pipe';
 import { InventoryService, ItemWithQueue, QueueEntry } from '../../services/inventory';
 import { UserService } from '../../services/user';
 import { AdminTokenService } from '../../services/admin-token';
@@ -50,7 +51,7 @@ interface FixedTimelineRow {
 @Component({
   selector: 'app-item-detail',
   standalone: true,
-  imports: [CommonModule, StripAccentsPipe, DateEsPipe, CategoryEsPipe, MarkdownPipe],
+  imports: [CommonModule, StripAccentsPipe, DateEsPipe, CategoryEsPipe, MarkdownPipe, PrecioEsPipe],
   templateUrl: './item-detail.html'
 })
 export class ItemDetail implements OnInit, OnDestroy {

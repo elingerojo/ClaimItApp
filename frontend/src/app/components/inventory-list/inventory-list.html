@@ -218,7 +218,7 @@
             </div>
             <h2 class="text-sm font-bold text-gray-900 line-clamp-1">{{ item.title }}</h2>
             @if (item.precioVisible != null) {
-              <div class="text-sm font-extrabold text-gray-900 mt-0.5">${{ item.precioVisible }}</div>
+              <div class="text-sm font-extrabold text-gray-900 mt-0.5">${{ item.precioVisible | precioEs }}</div>
             }
             <p class="text-xs text-gray-500 mt-1 line-clamp-2">{{ item.description || 'Sin descripción adicional.' }}</p>
 
