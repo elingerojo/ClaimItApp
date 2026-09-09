@@ -136,11 +136,11 @@ export const resolveSession = async (req: Request, res: Response): Promise<void>
 
       upsertUser({ uuid, alias: cleanAlias, global_role: uuidResult.rows[0].global_role });
 
-      // Si el alias cambió, propagarlo a las colas existentes (claims.username
-      // en Neon + store RAM) y notificar por SSE para que todos los clientes
-      // muestren el nuevo vanity name.
+      // Si el alias cambió, propagarlo al store RAM (colas + ledger) y notificar
+      // por SSE para que todos los clientes muestren el nuevo vanity name. En v2
+      // `claims` ya NO denormaliza username (solo users); el alias se resuelve
+      // siempre por JOIN/lectura del store.
       if (isAliasChange) {
-        await pool.query('UPDATE claims SET username = $1 WHERE user_uuid = $2', [cleanAlias, uuid]);
         renameUserInStore(uuid, cleanAlias);
         broadcastSseEvent('user_renamed', { userUuid: uuid, alias: cleanAlias });
       }

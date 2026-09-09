@@ -1,3 +1,10 @@
+/*
+ * ⚠️ LEGACY / OBSOLETO — Estrategia temporal v2 (Fase 5): valida precios por rol
+ * congelados al crear item y apartados vía createClaim del modelo ANTERIOR (v2 lee la
+ * matriz dinámicamente y los apartados los gestiona el motor de queueService).
+ * Conservado solo como referencia histórica. Verificación E2E vigente:
+ *   npx tsx scripts/test-v2-strategy.ts
+ */
 /**
  * scripts/test-plan5.ts
  *

@@ -1,3 +1,10 @@
+/*
+ * ⚠️ LEGACY / OBSOLETO — Estrategia temporal v2 (Fase 5): valida Plan 3 (API de eventos,
+ * share links, disponibilidad efectiva) con controladores/store del modelo ANTERIOR a v2
+ * y funciones/columnas que ya no existen. Conservado solo como referencia histórica.
+ * Verificación E2E vigente del motor v2:
+ *   npx tsx scripts/test-v2-strategy.ts
+ */
 /**
  * scripts/test-plan3.ts
  *

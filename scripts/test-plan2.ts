@@ -1,3 +1,10 @@
+/*
+ * ⚠️ LEGACY / OBSOLETO — Estrategia temporal v2 (Fase 5): valida el modelo temporal
+ * ANTERIOR (deadlines por claim, assignPickupDeadlineToFirst/advanceQueue) y referencia
+ * símbolos ya eliminados del motor v2 (no corre contra el schema actual). Conservado solo
+ * como referencia histórica. Verificación E2E vigente del motor v2:
+ *   npx tsx scripts/test-v2-strategy.ts
+ */
 /**
  * scripts/test-plan2.ts
  *

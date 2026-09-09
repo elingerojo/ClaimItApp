@@ -1,3 +1,10 @@
+/*
+ * ⚠️ LEGACY / OBSOLETO — Estrategia temporal v2 (Fase 5): valida myPickupDeadline por
+ * claim (deadline individual) del modelo ANTERIOR; en v2 el calendario es POR EVENTO
+ * (V1..V3 congelados en items.frozen_schedule). Conservado solo como referencia histórica.
+ * Verificación E2E vigente:
+ *   npx tsx scripts/test-v2-strategy.ts
+ */
 /**
  * scripts/test-plan4.ts
  *
@@ -80,10 +87,7 @@ async function main(): Promise<void> {
       status: 'waitlist_open',
       visibilityLevel: 4,
       eventId: null,
-      visibleAt: null,
-      availableFrom: null,
       precioBaseCosto: null,
-      nivelAccesoMinimo: null,
       createdAt: new Date().toISOString(),
       queue: [
         { userUuid: uuid, username: alias, claimedAt: new Date().toISOString(), pickupDeadline: deadline }

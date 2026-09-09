@@ -9,6 +9,32 @@
 
 Here is the complete, consolidated master plan for your Virtual Moving Giveaway Application. This recap organizes every architectural decision, user experience flow, and database rule we agreed upon into a chronological blueprint, from your initial book photography to the final waitlist processing.
 
+---
+
+## Estrategia temporal v2 (VIGENTE) — contenedor rígido por evento
+
+> Contrato: [`plans/estrategia-temporal-v2.md`](plans/estrategia-temporal-v2.md) (§4 reglas deterministas).
+> Las fases que siguen en este README describen el **modelo original/legacy** (deadline por claim y `items.status` de 3 estados); se conservan como historia. El ciclo de vida real lo gestiona **v2**:
+
+- **Contenedor rígido por evento**: `events.claims_close_at` = **T_inicio** (corte de la cola FIFO / comienzo de recolección) y `events.pickup_deadline` = **T_final** (envío a caridad). `published_at`/`available_from` siguen como bases de publicación y disponibilidad.
+- **Publicación y "Lo quiero" = dinámico puro (cero columnas por evento)**: la matriz `trust_levels_settings` guarda `advance_pub_hours_default` (visibilidad desde `published_at`) y `advance_disp_hours_default` (inicio de claim desde `available_from`), con `CHECK (advance_disp <= advance_pub)` = nunca se reclama sin ver.
+- **Motor de recolección (porciones FIFO constantes, D4)**: familiares 25%, amigos 20%, conocidos 15%, público = `0.6·Vmin` (Vmin = % del rol con ventaja de menor jerarquía presente; 15% si solo público o cola vacía), posición vacía 0%, ventana libre = `100% − Σ`. `V1 = T_inicio + C·s1`, `V2 = V1 + C·s2`, `V3 = V2 + C·s3` con `C = pickup_deadline − claims_close_at`.
+- **Congelamiento determinista**: al llegar T_inicio la cola se congela y se persiste `items.frozen_schedule` (snapshot idempotente V1..V3 + ventana libre, `frozen_at`) y en cada claim `fifo_position` + `turn_v_expires_at` (V inmutable); cancelaciones/expirios **no recolocan** los cortes (el dominó hereda el V fijo siguiente).
+- **Fases de artículo** (`items.phase`): `claim_open → pickup_turns → ventana_libre | entregado | enviado_a_caridad`. `items.status` (available / waitlist_open / unavailable) se conserva solo como derivado legacy de lectura.
+- **Cancelación activa** "Ya no lo quiero" = dominó **neutral** (sin sanción). **Expirio** de turno = `expirado` + sanción de confianza (`expiraciones_acumuladas`, `bloqueado_invitar`, degradación a `publico`, blacklist `bloqueado_apartar`).
+- **Ventana libre**: tras agotarse posiciones, cualquiera reclama directo (sin FIFO); el primero se lo lleva (captura inmediata; no cuenta en `max_apartados_simultaneos`).
+- **Entrega por ADMIN**: 'item recogido' cierra el artículo (`entregado` con `delivered_claim_id`/`delivered_at`), void de los demás activos (cola conservada como registro forense) y detiene los workflows.
+- **Caridad**: si al llegar `pickup_deadline` no hubo entrega → `enviado_a_caridad` (`charity_at`), irreversable; purga tras la gracia.
+
+**Scripts de schema y verificación:**
+- Reset + re-seed v2 (preserva items vía `scripts/.db-preserved-items.json`, **gitignored**): `node scripts/db-reset.js --yes [--seed]`.
+- Verificación read-only del schema v2: `node scripts/db-verify-v2.js`.
+- **Verificación E2E del motor v2** (unit del motor puro + integración contra la BD con limpieza, 112 aserciones): `npm --prefix shared run build && npx tsx scripts/test-v2-strategy.ts`.
+- Migraciones legacy archivadas (solo referencia, no se aplican): `database/migrations/_legacy/`.
+- Los tests .ts del modelo legacy (`scripts/test-plan*.ts`, `test-plan2-live.ts`, `test-lazy-catchup.ts`, `test-role-timeline.ts`, `smoke-role-feed.ts`) quedan marcados como **LEGACY / OBSOLETO** en su cabecera.
+
+---
+
 ### Phase 1: The Database Schema & Concurrency Design ( Neon[^neon-term] PostgreSQL[^PostgreSQL-term] )
 
 The foundation of the app is a relational database designed to handle high concurrency and prevent race conditions for high-value items.

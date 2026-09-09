@@ -7,14 +7,28 @@ import { ToastService } from '../../services/toast';
 import { railwayApiUrl } from '../../app.config';
 import { AdminAuth } from '../admin-auth/admin-auth';
 
-/** Fila editable de la matriz por rol (valores numéricos en horas). */
+/** Máx. horas de adelanto en la matriz (0..360 = 15 días, espejo de shared). */
+const ADVANCE_HOURS_MAX = 360;
+/** Multiplicador de precio por rol (rango que valida el backend/shared). */
+const MULTIPLIER_MAX = 9.99;
+
+/**
+ * Fila editable de la matriz de confianza v2 (trust_levels_settings).
+ * Por rol:
+ *  - advancePub  = advance_pub_hours_default  (adelanta la VISIBILIDAD desde published_at)
+ *  - advanceDisp = advance_disp_hours_default (adelanta el INICIO DE CLAIM desde available_from)
+ *  - multiplier  = multiplicador_precio_default
+ *  - maxApartados = max_apartados_simultaneos
+ * Invariante por rol (CHECK BD + validador shared): advanceDisp <= advancePub
+ * ("nunca se reclama sin ver"). Ya NO existen advance_hours_default,
+ * share_bonus_default ni intervalo_recoleccion_horas_default (D8).
+ */
 export interface RoleRow {
   id: string;
-  advance: number; // anticipación (horas antes de available_from)
-  bonus: number; // bonus por referido (horas)
-  pickup: number; // ventana de recogida (horas)
-  multiplier: number | null; // read-only (precio)
-  maxApartados: number | null; // read-only (apartados simultáneos)
+  advancePub: number;
+  advanceDisp: number;
+  multiplier: number | null;
+  maxApartados: number | null;
 }
 
 /** Plantilla de agenda global (event_config id=1). */
@@ -49,6 +63,12 @@ export class AdminConfig {
   readonly savingRoles = signal(false);
   readonly savingAgenda = signal(false);
 
+  /** Valores cargados por rol (para mandar al PUT solo las columnas cambiadas). */
+  private original = new Map<string, RoleRow>();
+  /** Mensaje/flag de la GUARDA 409 de la matriz (eventos publicados o en curso). */
+  readonly guardBlocked = signal(false);
+  readonly guardMessage = signal<string | null>(null);
+
   readonly roleLabels = ROLE_LABELS;
   private bootstrapped = false;
 
@@ -69,6 +89,8 @@ export class AdminConfig {
 
   async load(): Promise<void> {
     this.loading.set(true);
+    this.guardBlocked.set(false);
+    this.guardMessage.set(null);
     try {
       const token = this.adminTokenService.token();
       const [rolesRes, agendaRes] = await Promise.all([
@@ -88,22 +110,18 @@ export class AdminConfig {
       const rolesData = await rolesRes.json();
       const agendaData = await agendaRes.json();
 
-      this.roles.set(
-        (rolesData.roles ?? []).map((r: any) => ({
-          id: r.id,
-          advance: r.advance_hours_default != null ? Number(r.advance_hours_default) : 0,
-          bonus: r.share_bonus_default != null ? Number(r.share_bonus_default) : 0,
-          pickup: r.intervalo_recoleccion_horas_default != null
-            ? Number(r.intervalo_recoleccion_horas_default)
-            : 0,
-          multiplier: r.multiplicador_precio_default != null
-            ? Number(r.multiplicador_precio_default)
-            : null,
-          maxApartados: r.max_apartados_simultaneos != null
-            ? Number(r.max_apartados_simultaneos)
-            : null
-        }))
-      );
+      const mapped: RoleRow[] = (rolesData.roles ?? []).map((r: any) => ({
+        id: r.id,
+        advancePub: r.advance_pub_hours_default != null ? Number(r.advance_pub_hours_default) : 0,
+        advanceDisp: r.advance_disp_hours_default != null ? Number(r.advance_disp_hours_default) : 0,
+        multiplier:
+          r.multiplicador_precio_default != null ? Number(r.multiplicador_precio_default) : null,
+        maxApartados:
+          r.max_apartados_simultaneos != null ? Number(r.max_apartados_simultaneos) : null
+      }));
+      this.roles.set(mapped);
+      // Snapshot de referencia para detectar cambios campo a campo al guardar.
+      this.original = new Map(mapped.map((r) => [r.id, { ...r }]));
 
       const c = agendaData.config ?? {};
       this.agenda.set({
@@ -119,18 +137,68 @@ export class AdminConfig {
     }
   }
 
-  /** Guarda las ventajas por rol editables (advance/bonus/recogida). */
+  /** Invariante v2 por rol: nunca se reclama sin ver (advanceDisp <= advancePub). */
+  rowInvalid(row: RoleRow): boolean {
+    return row.advanceDisp > row.advancePub;
+  }
+
+  /** ¿Algún rol rompe la invariante (bloquea el guardado)? */
+  hasInvariantErrors(): boolean {
+    return this.roles().some((r) => this.rowInvalid(r));
+  }
+
+  /**
+   * Guarda la matriz v2 (PUT /api/admin/role-config). Solo envía las columnas
+   * que el admin cambió: así editar SOLO precio/apartados se permite aunque
+   * haya eventos en curso, mientras que tocar advance_pub/disp dispara la
+   * guarda del backend (409) si hay eventos scheduled/active/closing.
+   */
   async saveRoles(): Promise<void> {
-    const roles: Record<string, any> = {};
+    if (this.hasInvariantErrors()) {
+      const bad = this.roles()
+        .filter((r) => this.rowInvalid(r))
+        .map((r) => ROLE_LABELS[r.id] ?? r.id)
+        .join(', ');
+      this.toastService.error(
+        `Corrige la invariante antes de guardar (${bad}): el adelanto de apartado (disp) ` +
+          'no puede superar al de visibilidad (pub).'
+      );
+      return;
+    }
+
+    const rolesPayload: Record<string, Record<string, number>> = {};
+    let changed = false;
+
     for (const row of this.roles()) {
-      roles[row.id] = {
-        advance_hours_default: Number(row.advance),
-        share_bonus_default: Number(row.bonus),
-        intervalo_recoleccion_horas_default: Number(row.pickup)
-      };
+      const orig = this.original.get(row.id);
+      if (!orig) continue;
+      const patch: Record<string, number> = {};
+      if (row.advancePub !== orig.advancePub) {
+        patch['advance_pub_hours_default'] = Number(row.advancePub);
+      }
+      if (row.advanceDisp !== orig.advanceDisp) {
+        patch['advance_disp_hours_default'] = Number(row.advanceDisp);
+      }
+      if (row.multiplier !== orig.multiplier && row.multiplier != null) {
+        patch['multiplicador_precio_default'] = Number(row.multiplier);
+      }
+      if (row.maxApartados !== orig.maxApartados && row.maxApartados != null) {
+        patch['max_apartados_simultaneos'] = Number(row.maxApartados);
+      }
+      if (Object.keys(patch).length > 0) {
+        rolesPayload[row.id] = patch;
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      this.toastService.info('No hay cambios en la matriz de confianza.');
+      return;
     }
 
     this.savingRoles.set(true);
+    this.guardBlocked.set(false);
+    this.guardMessage.set(null);
     try {
       const res = await fetch(`${this.apiUrl}/admin/role-config`, {
         method: 'PUT',
@@ -138,11 +206,18 @@ export class AdminConfig {
           'Content-Type': 'application/json',
           'X-Admin-Token': this.adminTokenService.token()
         },
-        body: JSON.stringify({ config: { roles } })
+        body: JSON.stringify({ config: { roles: rolesPayload } })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Error al guardar ventajas por rol.');
-      this.toastService.success('Ventajas por rol actualizadas.');
+      if (!res.ok) {
+        if (res.status === 409) {
+          // Guarda de la matriz: hay eventos publicados/en curso (scheduled/active/closing).
+          this.guardBlocked.set(true);
+          this.guardMessage.set(data?.error ?? 'La matriz está bloqueada por eventos en curso.');
+        }
+        throw new Error(data?.error || 'Error al guardar la matriz de roles.');
+      }
+      this.toastService.success('Matriz de confianza actualizada.');
       // Refrescar valores normalizados desde el server.
       await this.load();
     } catch (err: any) {
@@ -152,7 +227,7 @@ export class AdminConfig {
     }
   }
 
-  /** Guarda la plantilla de agenda. */
+  /** Guarda la plantilla de agenda (event-config se conserva en v2). */
   async saveAgenda(): Promise<void> {
     const agenda = this.agenda();
     if (!agenda) return;
@@ -183,4 +258,8 @@ export class AdminConfig {
       this.savingAgenda.set(false);
     }
   }
+
+  /** Rango máx. de horas de adelanto (para atributos min/max). */
+  readonly advanceHoursMax = ADVANCE_HOURS_MAX;
+  readonly multiplierMax = MULTIPLIER_MAX;
 }

@@ -39,36 +39,54 @@
             <input [(ngModel)]="title" type="text" placeholder="Título del evento *" class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg" />
           </label>
           <label class="block">
-            <span class="text-[10px] font-medium text-gray-400">📢 Fecha de publicación *</span>
+            <span class="text-[10px] font-medium text-gray-400">📢 Publicación *</span>
             <input [(ngModel)]="publishedAt" (ngModelChange)="onPublishedChange()" type="datetime-local"
-                   title="Única fecha editable; las demás se calculan con la agenda de Configuración."
+                   title="Al crear, cambiar esta fecha re-deriva las demás con la agenda de Configuración; luego puedes ajustarlas a mano."
                    class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg" />
           </label>
           <label class="block">
-            <span class="text-[10px] font-medium text-gray-400">🟢 Apertura de apartados (calculada)</span>
-            <input [(ngModel)]="availableFrom" type="datetime-local" [disabled]="!editingEventId()"
-                   class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg disabled:bg-gray-100 disabled:text-gray-400" />
+            <span class="text-[10px] font-medium text-gray-400">🟢 Apertura de apartados *</span>
+            <input [(ngModel)]="availableFrom" type="datetime-local"
+                   title="Primer instante en que los roles pueden empezar a separar (disponibilidad)."
+                   class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg" />
           </label>
           <label class="block">
-            <span class="text-[10px] font-medium text-gray-400">🟠 Corte de separaciones (calculada)</span>
-            <input [(ngModel)]="claimsCloseAt" type="datetime-local" [disabled]="!editingEventId()"
-                   title="Dejan de aceptarse nuevas separaciones e inicia la fase closing."
-                   class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg disabled:bg-gray-100 disabled:text-gray-400" />
+            <span class="text-[10px] font-medium text-gray-400">🟠 Corte de apartados (T_inicio) *</span>
+            <input [(ngModel)]="claimsCloseAt" type="datetime-local"
+                   title="Último instante para unirse a la cola; al llegar, el calendario de turnos se congela."
+                   class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg" />
           </label>
           <label class="block">
-            <span class="text-[10px] font-medium text-gray-400">🔴 Fecha límite de recogida (calculada)</span>
-            <input [(ngModel)]="pickupDeadline" type="datetime-local" [disabled]="!editingEventId()"
-                   title="Fin del closing: último momento para recoger."
-                   class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg disabled:bg-gray-100 disabled:text-gray-400" />
+            <span class="text-[10px] font-medium text-gray-400">🔴 Límite de recogida (T_final) *</span>
+            <input [(ngModel)]="pickupDeadline" type="datetime-local"
+                   title="Fin de la recolección: si nadie recogió, el objeto se envía a caridad."
+                   class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg" />
           </label>
           <label class="block">
             <span class="text-[10px] font-medium text-gray-400">Descripción (opcional)</span>
             <textarea [(ngModel)]="description" rows="2" placeholder="Descripción (opcional)" class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg"></textarea>
           </label>
         </div>
+
+        <!-- Validación en vivo del orden de las 4 fechas -->
+        @if (inlineDateError(); as err) {
+          <div class="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+            ⚠️ {{ err }}
+          </div>
+        }
+
+        <label class="block mt-3">
+          <span class="text-[10px] font-medium text-gray-400">📦 Nota de recogida (opcional)</span>
+          <textarea [(ngModel)]="pickupScheduleInfo" rows="2" placeholder="Ej.: Entrega a domicilio coordinada con el administrador."
+                    class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg"></textarea>
+        </label>
+
         <p class="text-[10px] text-gray-400">
-          Al crear, eliges solo la fecha de publicación; las demás se calculan desde la agenda
-          (⚙️ Configuración). Las ventajas por rol se aplican automáticamente y quedan fijas en el evento.
+          El evento v2 se define SOLO por estas 4 fechas + título/descripción + nota. Las ventajas por rol
+          (publicación/separación) se leen en <b>tiempo real</b> de la matriz de Configuración: ya no se
+          congelan columnas por rol en el evento. Al crear, si cambias la publicación se re-sugieren las
+          demás con la agenda (⚙️ Configuración); puedes ajustarlas a mano respetando el orden
+          publicación ≤ apertura ≤ corte ≤ límite.
         </p>
         <button (click)="submit()" [disabled]="saving()" class="text-xs px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
           {{ saving() ? 'Guardando...' : (editingEventId() ? 'Guardar Cambios' : 'Crear Evento') }}
@@ -82,11 +100,24 @@
         <div class="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
           <div class="flex flex-col md:flex-row md:items-center justify-between p-4 gap-2">
             <div class="min-w-0">
-              <div class="font-semibold text-gray-900 text-sm">{{ ev.title }}</div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <div class="font-semibold text-gray-900 text-sm">{{ ev.title }}</div>
+                @if (ev.status) {
+                  <span class="text-[9px] uppercase font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                    {{ eventStatusLabel(ev.status) }}
+                  </span>
+                }
+              </div>
               <div class="text-[10px] text-gray-400 font-mono mt-0.5">{{ ev.id }}</div>
               <div class="text-[10px] text-gray-500 mt-1">
-                Disponible: {{ ev.available_from | dateEs:'full' }} · Recogida: {{ ev.pickup_deadline | dateEs:'full' }}
+                Publica: {{ ev.published_at ? (ev.published_at | dateEs:'full') : '—' }} · Apertura: {{ ev.available_from | dateEs:'full' }}
               </div>
+              <div class="text-[10px] text-gray-500 mt-0.5">
+                Corte apartados: {{ ev.claims_close_at ? (ev.claims_close_at | dateEs:'full') : '—' }} · Última recogida: {{ ev.pickup_deadline | dateEs:'full' }}
+              </div>
+              @if (ev.pickup_schedule_info) {
+                <div class="text-[10px] text-gray-500 mt-0.5">📦 {{ ev.pickup_schedule_info }}</div>
+              }
             </div>
             <div class="flex items-center gap-2 shrink-0">
               <button (click)="openDetail(ev.id)" class="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">👁 Detalle</button>

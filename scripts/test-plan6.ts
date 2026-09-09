@@ -1,3 +1,11 @@
+/*
+ * ⚠️ LEGACY / OBSOLETO — Estrategia temporal v2 (Fase 5): la tolerancia/sanciones siguen
+ * vigentes (trustSanctions) pero este script usa entry-points de controllers y flujos del
+ * modelo ANTERIOR (createClaim/getShareLink/upsertUser) que ya no existen como se invocan
+ * aquí. El expirio + sanción por rol v2 se verifica en:
+ *   npx tsx scripts/test-v2-strategy.ts   (sección B.3)
+ * Conservado solo como referencia histórica.
+ */
 /**
  * scripts/test-plan6.ts
  *

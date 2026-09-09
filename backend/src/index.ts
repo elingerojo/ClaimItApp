@@ -17,10 +17,11 @@ import {
   updateItem,
   deleteItem,
   getItemDetail,
-  listAllAdminItems
+  listAllAdminItems,
+  getItemTemporalState
 } from './controllers/itemsController.js';
 import { getInventoryFeed, getLedgerFeed } from './controllers/feedsController.js';
-import { evictClaimant } from './controllers/adminController.js';
+import { evictClaimant, deliverItem } from './controllers/adminController.js';
 import { adminLogin, adminSessionStatus, adminLogout } from './controllers/adminAuthController.js';
 import {
   createEvent,
@@ -58,13 +59,18 @@ app.use(express.json());
 app.post('/api/session', resolveSession);
 
 /* ==========================================================================
-   PUBLIC FEEDS & DATA DISCOVERY ENDPOINTS
+   PUBLIC FEEDS & DATA DISCOVERY ENDPOINTS (v2)
    ========================================================================== */
 app.get('/api/items', getInventoryFeed);
+// Estado temporal de un item (contrato v2 §4.4). Se declara antes de cualquier
+// /api/items/:id futuro.
+app.get('/api/items/:id/estado-temporal', getItemTemporalState);
 app.get('/api/ledger', getLedgerFeed);
 app.post('/api/claims', createClaim);
+// v2: la entrega la marca el ADMIN (POST /api/admin/items/:id/deliver). Este
+// stub responde 410 a clientes legacy que aún llamen a /claims/pickup.
 app.post('/api/claims/pickup', confirmPickup);
-// Salida voluntaria del visitante de la Línea de Espera (neutral para confianza).
+// Salida voluntaria "Ya no lo quiero" (dominó NEUTRO, sin sanción).
 app.post('/api/claims/leave', leaveClaim);
 
 /* ==========================================================================
@@ -89,8 +95,9 @@ app.get('/api/stream', (req: Request, res: Response) => {
 
   registerSseClient(res);
 
-  // Catch-up perezoso al conectar (un usuario está mirando): resuelve
-  // deadlines vencidos y avanza la cola. Solo toca Neon si hay vencidos.
+  // Catch-up perezoso al conectar (un usuario está mirando): congela colas en
+  // T_inicio y resuelve expirios/ventana/caridad por reloj. Solo toca Neon si
+  // hay trabajo pendiente (store en RAM).
   runLazyCatchUp().catch(() => {});
 });
 
@@ -113,8 +120,7 @@ app.get('/api/admin/events/:id', requireAdminSession, getEventDetail);
 app.patch('/api/admin/events/:id', requireAdminSession, updateEvent);
 app.delete('/api/admin/events/:id', requireAdminSession, deleteEvent);
 app.post('/api/admin/evict', requireAdminSession, evictClaimant);
-// Configuración global de eventos: plantilla de agenda + ventajas por rol
-// (matriz). Solo admin.
+// Configuración global de eventos: plantilla de agenda + matriz de confianza.
 app.get('/api/admin/event-config', requireAdminSession, getEventConfig);
 app.put('/api/admin/event-config', requireAdminSession, updateEventConfig);
 app.get('/api/admin/role-config', requireAdminSession, getRoleConfig);
@@ -125,6 +131,8 @@ app.get('/api/admin/items', requireAdminSession, listAllAdminItems);
 app.get('/api/admin/items/:id', requireAdminSession, getItemDetail);
 app.patch('/api/admin/items/:id', requireAdminSession, updateItem);
 app.delete('/api/admin/items/:id', requireAdminSession, deleteItem);
+// ADMIN marca 'item recogido' (v2 — entrega). Declarado antes de /:id genérico.
+app.post('/api/admin/items/:id/deliver', requireAdminSession, deliverItem);
 
 /* ==========================================================================
    ADMIN AUDITING & OPERATIONAL OVERSIGHT
@@ -140,8 +148,7 @@ app.get('/api/admin/audit-log', requireAdminSession, async (req: Request, res: R
 
 // Rehidratar el store en RAM desde Neon (única carga en frío), luego arrancar
 rehydrateAll().then(() => {
-  // Arrancar las automatizaciones temporales (releaseBatches, verifyDeadlines,
-  // updateEventStatus) una vez que el store está listo.
+  // Arrancar las automatizaciones temporales v2 (lazy por defecto).
   startScheduler();
   app.listen(PORT, () => {
     console.log(`🚀 ClaimItApp Core Server successfully listening out on port [:${PORT}]`);

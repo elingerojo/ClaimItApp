@@ -1,25 +1,38 @@
 import { Request, Response } from 'express';
-import pool from '../config/db.js';
-import { broadcastSseEvent } from '../config/sse.js';
-import {
-  addClaimToItem,
-  appendLedger,
-  refreshClaimDeadline,
-  removeClaimFromItem
-} from '../cache/appStore.js';
 import { validateClaimInput, validateEmailFormat, validatePhoneFormat } from '@claimitapp/shared';
-import {
-  assignPickupDeadlineToFirst,
-  advanceQueue,
-  removeActiveClaimAndCascade
-} from '../services/queueService.js';
-import { reduceExpirationCount } from '../services/trustSanctions.js';
+import { broadcastSseEvent } from '../config/sse.js';
+import { appendLedger, getItemById } from '../cache/appStore.js';
+import { claimItem, voluntarilyLeaveItem, type ClaimOutcome } from '../services/queueService.js';
 import { runLazyCatchUp } from '../services/scheduler.js';
 
+function claimErrorHttp(code: string): number {
+  switch (code) {
+    case 'not_found':
+      return 404;
+    case 'blocked':
+      return 403;
+    default:
+      return 409;
+  }
+}
+
+/**
+ * POST /api/claims — "Lo quiero" (v2)
+ *
+ * - phase='claim_open' (evento active, now dentro de [claim_from(rol),
+ *   claims_close_at)) y cola < 3 → se une a la FIFO (respuesta con
+ *   fifo_position). Rechaza si el item ya quedó congelado (pickup_turns):
+ *   solo queda esperar la ventana libre.
+ * - phase='ventana_libre' → captura directa: entrega inmediata (phase
+ *   entregado, delivered_claim_id/delivered_at). No cuenta en
+ *   max_apartados_simultaneos, no dispara sanción.
+ *
+ * Todos los gates de fase/rol/límites se validan de forma transaccional dentro
+ * de queueService.claimItem (row-lock FOR UPDATE; el primero gana).
+ */
 export const createClaim = async (req: Request, res: Response): Promise<void> => {
   const { itemId, userUuid, email, phone } = req.body;
 
-  // Validation: userUuid and Item ID are strictly required
   const validation = validateClaimInput({ itemId, userUuid, email, phone });
   if (!validation.valid) {
     res.status(400).json({
@@ -29,8 +42,6 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
     });
     return;
   }
-
-  // Additional validation for email and phone if provided
   if (email && email.trim() && !validateEmailFormat(email)) {
     res.status(400).json({
       error: 'Validation failed',
@@ -39,7 +50,6 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
     });
     return;
   }
-
   if (phone && phone.trim() && !validatePhoneFormat(phone)) {
     res.status(400).json({
       error: 'Validation failed',
@@ -49,388 +59,124 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
     return;
   }
 
-  // Catch-up perezoso antes de tocar la cola
+  // Catch-up perezoso: si T_inicio pasó, el item debe congelarse antes de que el
+  // claim siguiente se resuelva (un claim_open vencido pasa a ventana libre).
   await runLazyCatchUp();
 
-  const client = await pool.connect();
-
   try {
-    await client.query('BEGIN');
+    const outcome = await claimItem({ itemId, userUuid, email, phone } as any);
 
-    // 0. Resolve current alias from users table + blacklist check
-    const userResult = await client.query(
-      'SELECT alias, bloqueado_apartar FROM users WHERE uuid = $1',
-      [userUuid]
-    );
-    if (userResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      res.status(404).json({ error: 'User not found. Please register your alias first.' });
-      return;
-    }
-    if (userResult.rows[0].bloqueado_apartar) {
-      await client.query('ROLLBACK');
-      res.status(403).json({
-        error: 'Tu cuenta está bloqueada para nuevas separaciones por exceder el umbral de expiraciones.'
+    if (!outcome.ok) {
+      res.status(claimErrorHttp(outcome.code)).json({
+        error: outcome.message,
+        code: outcome.code,
+        timestamp: new Date().toISOString()
       });
       return;
     }
-    const username = userResult.rows[0].alias;
 
-    // 1. Check if this user already has a claim on this item (by userUuid)
-    const existingClaimQuery = `
-      SELECT id FROM claims 
-      WHERE item_id = $1 AND user_uuid = $2
-      LIMIT 1
-    `;
-    const existingClaimResult = await client.query(existingClaimQuery, [itemId, userUuid]);
+    const storeItem = getItemById(itemId);
+    const title = storeItem?.title ?? null;
+    const category = storeItem?.category ?? null;
 
-    if (existingClaimResult.rows.length > 0) {
-      await client.query('ROLLBACK');
-      res.status(409).json({ error: `Ya estás en la lista de este objeto.` });
-      return;
-    }
+    if (outcome.kind === 'fifo') {
+      const myClaim = storeItem?.queue.find((c) => c.id === outcome.claimId);
+      const username = myClaim?.username ?? userUuid;
+      const claimedAt = outcome.claimedAt;
 
-    // 2. Fetch the parent item and apply an exclusive pessimistic row lock
-    const itemCheckQuery = `
-      SELECT id, status, title, category, event_id, available_from
-      FROM items
-      WHERE id = $1
-      FOR UPDATE
-    `;
-    const itemResult = await client.query(itemCheckQuery, [itemId]);
+      // Ledger / feed de actividad (write-through RAM).
+      appendLedger({ user_uuid: userUuid, username, claimed_at: claimedAt, title: title ?? '', category: category ?? '' });
 
-    if (itemResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      res.status(404).json({ error: 'Item not found.' });
-      return;
-    }
-
-    const item = itemResult.rows[0];
-
-    if (item.status === 'unavailable') {
-      await client.query('ROLLBACK');
-      res.status(409).json({ error: 'The waitlist for this item is completely full.' });
-      return;
-    }
-
-    // 2a. Ventana por rol (timing strategy — symmetric widening). El rol puede
-    //     reclamar desde su available efectivo (available − A) hasta su cierre
-    //     efectivo (claims_close + A / pickup_deadline + A). El estatus GLOBAL
-    //     del evento es solo etiqueta: los cortes se evalúan con las fechas
-    //     efectivas del rol, así que familiares puede seguir apartando tras el
-    //     cierre público. A = evento.<rol>_advance_hours + bonus por referido.
-    if (item.event_id) {
-      const evRes = await client.query(
-        `SELECT status, published_at, available_from, claims_close_at, pickup_deadline,
-                familiares_advance_hours, amigos_advance_hours,
-                conocidos_advance_hours, publico_advance_hours
-         FROM events WHERE id = $1`,
-        [item.event_id]
-      );
-      const ev = evRes.rows[0];
-      if (ev) {
-        const nowMs = Date.now();
-        const roleRes = await client.query('SELECT global_role FROM users WHERE uuid = $1', [
-          userUuid
-        ]);
-        const role = roleRes.rows[0]?.global_role || 'publico';
-        const memRes = await client.query(
-          `SELECT COALESCE(bonus_hours, 0)::int AS bonus FROM event_members
-           WHERE event_id = $1 AND user_uuid = $2`,
-          [item.event_id, userUuid]
-        );
-        const bonus = memRes.rows[0]?.bonus ?? 0;
-        const advance = Number(ev[`${role}_advance_hours`] ?? 0) || 0;
-        const A = advance + bonus;
-        const widenMs = A * 60 * 60 * 1000;
-
-        // Base available del objeto: override del item, si no el del evento.
-        const baseAvailable = item.available_from ?? ev.available_from ?? null;
-
-        const effAvailableMs = baseAvailable ? new Date(baseAvailable).getTime() - widenMs : null;
-        const effClaimsCloseMs = ev.claims_close_at
-          ? new Date(ev.claims_close_at).getTime() + widenMs
-          : null;
-        const effPickupMs = ev.pickup_deadline
-          ? new Date(ev.pickup_deadline).getTime() + widenMs
-          : null;
-        const hardClosed =
-          ev.status === 'closed' && effClaimsCloseMs === null && effPickupMs === null;
-
-        // Aún no abre para este rol (sin fechas no hay gate de "todavía no").
-        if (effAvailableMs !== null && nowMs < effAvailableMs) {
-          await client.query('ROLLBACK');
-          res.status(409).json({
-            error: 'Este objeto aún no está disponible para tu rol (tu ventana abre más tarde).'
-          });
-          return;
-        }
-        if (
-          hardClosed ||
-          (effClaimsCloseMs !== null && effClaimsCloseMs <= nowMs) ||
-          (effPickupMs !== null && effPickupMs <= nowMs)
-        ) {
-          await client.query('ROLLBACK');
-          res.status(409).json({
-            error: 'El evento ya no acepta nuevas separaciones para tu rol (cierre alcanzado).'
-          });
-          return;
-        }
-      }
-    }
-
-    // 2b. Límite de apartados simultáneos por rol (global: única fuente de verdad)
-    if (item.event_id) {
-      const userRoleRes = await client.query('SELECT global_role FROM users WHERE uuid = $1', [
-        userUuid
-      ]);
-      const role = userRoleRes.rows[0]?.global_role || 'publico';
-
-      const setting = await client.query(
-        'SELECT max_apartados_simultaneos FROM trust_levels_settings WHERE id = $1',
-        [role]
-      );
-      const limit = setting.rows[0]?.max_apartados_simultaneos ?? 1;
-
-      const activeInEvent = await client.query(
-        `SELECT COUNT(*)::int AS n FROM claims c
-         JOIN items i ON c.item_id = i.id
-         WHERE c.user_uuid = $1 AND COALESCE(c.picked_up, false) = false AND i.event_id = $2`,
-        [userUuid, item.event_id]
-      );
-
-      if (activeInEvent.rows[0].n >= limit) {
-        await client.query('ROLLBACK');
-        res.status(409).json({
-          error: `Límite de apartados simultáneos alcanzado (máximo ${limit} para tu rol en este evento).`
-        });
-        return;
-      }
-    }
-
-    // 3. Count current active queue rows for this target item
-    const countClaimsQuery = `
-      SELECT COUNT(*) as current_claims 
-      FROM claims 
-      WHERE item_id = $1
-    `;
-    const countResult = await client.query(countClaimsQuery, [itemId]);
-    const currentClaimsCount = parseInt(countResult.rows[0].current_claims, 10);
-
-    if (currentClaimsCount >= 3) {
-      await client.query('ROLLBACK');
-      res.status(409).json({ error: 'The waitlist for this item is completely full.' });
-      return;
-    }
-
-    // 4. Insert new claim line into ledger with userUuid and denormalized username (current alias)
-    const insertClaimQuery = `
-      INSERT INTO claims (item_id, user_uuid, username, claimant_email, claimant_phone) 
-      VALUES ($1, $2, $3, $4, $5) 
-      RETURNING id, claimed_at
-    `;
-    const newClaimResult = await client.query(insertClaimQuery, [
-      itemId, userUuid, username, email || null, phone || null
-    ]);
-    const newClaim = newClaimResult.rows[0];
-
-    // 5. Update operational item lifecycle state mapping
-    const updatedCount = currentClaimsCount + 1;
-    let newStatus = 'available';
-
-    if (updatedCount === 1 || updatedCount === 2) {
-      newStatus = 'waitlist_open';
-    } else if (updatedCount === 3) {
-      newStatus = 'unavailable';
-    }
-
-    const updateItemStatusQuery = `
-      UPDATE items
-      SET status = $1
-      WHERE id = $2
-    `;
-    await client.query(updateItemStatusQuery, [newStatus, itemId]);
-
-    // 5b. If this claim is first in line, assign its pickup deadline
-    if (updatedCount === 1) {
-      await assignPickupDeadlineToFirst(itemId, client);
-    }
-
-    // 6. Everything looks correct. Commit state payload to database.
-    await client.query('COMMIT');
-
-    // 6b. Write-through: actualizar el store en RAM (mismo await)
-    const claimRes = await pool.query(
-      `SELECT pickup_deadline, role_at_assignment, pickup_window_hours
-       FROM claims WHERE item_id = $1 AND user_uuid = $2`,
-      [itemId, userUuid]
-    );
-    addClaimToItem(
-      itemId,
-      {
+      broadcastSseEvent('item_updated', {
+        itemId,
+        status: outcome.status,
+        phase: outcome.phase,
         userUuid,
         username,
-        claimedAt: newClaim.claimed_at,
-        pickupDeadline: claimRes.rows[0]?.pickup_deadline ?? null,
-        roleAtAssignment: claimRes.rows[0]?.role_at_assignment ?? null,
-        pickupWindowHours:
-          claimRes.rows[0]?.pickup_window_hours != null
-            ? Number(claimRes.rows[0].pickup_window_hours)
-            : null
-      },
-      newStatus
-    );
+        claimId: outcome.claimId,
+        queuePosition: outcome.fifoPosition,
+        title,
+        category,
+        claimedAt,
+        reason: 'claim_created'
+      });
+
+      const first = outcome.fifoPosition === 1;
+      res.status(201).json({
+        success: true,
+        message: first ? 'Item claimed successfully!' : `Joined waitlist at spot #${outcome.fifoPosition}.`,
+        queuePosition: outcome.fifoPosition,
+        fifoPosition: outcome.fifoPosition,
+        claimId: outcome.claimId,
+        phase: outcome.phase,
+        status: outcome.status
+      });
+      return;
+    }
+
+    // free_window_capture
+    const myClaim = storeItem?.queue.find((c) => c.id === outcome.claimId);
+    const username = myClaim?.username ?? userUuid;
     appendLedger({
       user_uuid: userUuid,
       username,
-      claimed_at: newClaim.claimed_at,
-      title: item.title,
-      category: item.category
+      claimed_at: outcome.claimedAt,
+      title: title ?? '',
+      category: category ?? ''
     });
 
-    // Broadcast real-time message with userUuid for precise frontend matching
     broadcastSseEvent('item_updated', {
-      itemId: itemId,
-      status: newStatus,
-      userUuid: userUuid,
-      username: username,
-      queuePosition: updatedCount,
-      title: item.title,
-      category: item.category,
-      claimedAt: newClaim.claimed_at,
-      pickupDeadline: claimRes.rows[0]?.pickup_deadline ?? null
+      itemId,
+      status: outcome.status,
+      phase: outcome.phase,
+      userUuid,
+      username,
+      claimId: outcome.claimId,
+      deliveredClaimId: outcome.deliveredClaimId,
+      deliveredAt: outcome.deliveredAt,
+      title,
+      category,
+      reason: 'ventana_libre_capture'
     });
 
     res.status(201).json({
       success: true,
-      message: updatedCount === 1 ? 'Item claimed successfully!' : `Joined waitlist at spot #${updatedCount}.`,
-      queuePosition: updatedCount,
-      claimId: newClaim.id,
-      // Deadline congelado del nuevo primero en fila (F1) para feedback inmediato.
-      pickupDeadline: claimRes.rows[0]?.pickup_deadline ?? null,
-      roleAtAssignment: claimRes.rows[0]?.role_at_assignment ?? null,
-      pickupWindowHours:
-        claimRes.rows[0]?.pickup_window_hours != null
-          ? Number(claimRes.rows[0].pickup_window_hours)
-          : null
+      message: '¡Reclamado! Te llevas este objeto (ventana libre).',
+      delivered: true,
+      claimId: outcome.claimId,
+      deliveredClaimId: outcome.deliveredClaimId,
+      deliveredAt: outcome.deliveredAt,
+      phase: outcome.phase,
+      status: outcome.status
     });
-
   } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Transaction execution failed:', error);
+    console.error('Claim transaction failed:', error);
     res.status(500).json({ error: 'Internal system error processing the claim transaction.' });
-  } finally {
-    client.release();
   }
 };
 
 /**
- * POST /api/claims/pickup
- *
- * Confirms that the user picked up the item: marks the claim as picked_up,
- * clears its deadline and auto-advances the queue (FIFO) so the next claimant
- * (if any) becomes first and receives a fresh pickup deadline.
+ * POST /api/claims/pickup — OBSOLETO en v2.
+ * La entrega la marca el ADMIN (POST /api/admin/items/:id/deliver). Este stub
+ * responde 410 para que un cliente legacy reciba un error claro.
  */
-export const confirmPickup = async (req: Request, res: Response): Promise<void> => {
-  const { itemId, userUuid } = req.body;
-
-  if (!itemId || !userUuid) {
-    res.status(400).json({ error: 'itemId and userUuid are required.' });
-    return;
-  }
-
-  // Catch-up perezoso antes de confirmar recogida
-  await runLazyCatchUp();
-
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
-
-    // Lock the target item row to prevent race conditions
-    const itemLock = await client.query(
-      'SELECT id, event_id FROM items WHERE id = $1 FOR UPDATE',
-      [itemId]
-    );
-    const targetEventId = itemLock.rows[0]?.event_id ?? null;
-
-    // Find the active (not picked up) claim for this user on this item
-    const claimResult = await client.query(
-      `SELECT id, username FROM claims
-       WHERE item_id = $1 AND user_uuid = $2 AND COALESCE(picked_up, false) = false`,
-      [itemId, userUuid]
-    );
-
-    if (claimResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      res.status(404).json({ error: 'No active claim found for this item and user.' });
-      return;
-    }
-
-    const claim = claimResult.rows[0];
-
-    // Mark as picked up and clear its deadline
-    await client.query('UPDATE claims SET picked_up = true, pickup_deadline = NULL WHERE id = $1', [
-      claim.id
-    ]);
-
-    // Auto-advance the queue: next claim (if any) becomes first with a deadline
-    const { newStatus, newFirstUsername, newFirstUuid, newFirstPickupDeadline } = await advanceQueue(
-      itemId,
-      client
-    );
-
-    // Tolerancia: completar a tiempo reduce el contador de expiraciones
-    if (targetEventId) {
-      await reduceExpirationCount(targetEventId, userUuid, client);
-    }
-
-    await client.query('COMMIT');
-
-    // Write-through: remove the picked-up user from the RAM store queue and
-    // refresh the frozen deadline of the new first-in-line (if any).
-    removeClaimFromItem(itemId, userUuid, newStatus);
-    if (newFirstUuid) {
-      refreshClaimDeadline(itemId, newFirstUuid, newFirstPickupDeadline ?? null);
-    }
-
-    // Broadcast with pickup context
-    broadcastSseEvent('item_updated', {
-      itemId,
-      status: newStatus,
-      userUuid,
-      username: claim.username,
-      pickedUp: true,
-      newFirstUsername,
-      newFirstUuid,
-      newFirstPickupDeadline,
-      reason: 'pickup_confirmed'
-    });
-
-    res.status(200).json({
-      success: true,
-      message: 'Pickup confirmed. Queue advanced.',
-      newStatus,
-      newFirstUsername,
-      newFirstPickupDeadline
-    });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Pickup confirmation failed:', error);
-    res.status(500).json({ error: 'Internal error confirming pickup.' });
-  } finally {
-    client.release();
-  }
+export const confirmPickup = async (_req: Request, res: Response): Promise<void> => {
+  res.status(410).json({
+    error:
+      'El flujo de recogida cambió en la Estrategia v2: la entrega la marca el ADMIN (POST /api/admin/items/:id/deliver).'
+  });
 };
 
 /**
- * POST /api/claims/leave
+ * POST /api/claims/leave — "Ya no lo quiero" (v2, dominó NEUTRO)
  *
- * Salida voluntaria del visitante de la Línea de Espera de un objeto. Borra su
- * claim ACTIVO (no picked_up), libera el lugar y recompone la fila
- * (advanceQueue → estatus + deadline fresco del nuevo #1). Es NEUTRAL para la
- * confianza: no se llama applyExpirationSanction. El visitante puede volver a
- * anotarse más tarde; al hacerlo pierde su posición anterior (regla normal).
+ * - claim_open (pre-congelamiento): libera la posición (neutral).
+ * - pickup_turns: el TITULAR activo dispara el dominó (la siguiente posición
+ *   activa hereda su V fijo; si no hay más activos se abre la ventana libre en
+ *   este instante). Un no-titular activo se marca cancelado_voluntario (neutral)
+ *   y la cola se recompone sola.
+ * - No se puede dejar un claim de un item ya entregado / enviado a caridad.
+ * NUNCA aplica sanción (el expirio sí).
  */
 export const leaveClaim = async (req: Request, res: Response): Promise<void> => {
   const { itemId, userUuid } = req.body;
@@ -440,60 +186,42 @@ export const leaveClaim = async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
-  // Catch-up perezoso antes de tocar la cola
   await runLazyCatchUp();
 
-  const client = await pool.connect();
-
   try {
-    await client.query('BEGIN');
+    const outcome = await voluntarilyLeaveItem(itemId, userUuid);
 
-    // Lock del item para evitar carreras con otros claims/expulsiones
-    await client.query('SELECT id FROM items WHERE id = $1 FOR UPDATE', [itemId]);
-
-    const result = await removeActiveClaimAndCascade(itemId, userUuid, client);
-
-    if (!result.found) {
-      await client.query('ROLLBACK');
-      res.status(404).json({ error: 'No tienes un apartado activo en este objeto.' });
+    if (!outcome.ok) {
+      const status = outcome.code === 'not_found' ? 404 : 409;
+      res.status(status).json({
+        error: outcome.message,
+        code: outcome.code,
+        timestamp: new Date().toISOString()
+      });
       return;
     }
 
-    await client.query('COMMIT');
-
-    // Write-through: quitar al usuario de la cola en RAM + deadline del nuevo #1
-    removeClaimFromItem(itemId, userUuid, result.newStatus);
-    if (result.newFirstUuid) {
-      refreshClaimDeadline(itemId, result.newFirstUuid, result.newFirstPickupDeadline ?? null);
-    }
-
-    // Broadcast real-time: `evicted` reutiliza el filtrado de la cola del cliente
     broadcastSseEvent('item_updated', {
-      itemId: itemId,
-      status: result.newStatus,
-      userUuid: userUuid,
-      username: result.username,
-      evicted: true,
-      evictedUsername: result.username,
-      newFirstUsername: result.newFirstUsername,
-      newFirstUuid: result.newFirstUuid,
-      newFirstPickupDeadline: result.newFirstPickupDeadline,
-      reason: 'user_left'
+      itemId,
+      status: outcome.status,
+      phase: outcome.phase,
+      userUuid,
+      username: outcome.username,
+      claimState: outcome.claimState,
+      freeWindowOpenedAt: outcome.freeWindowOpenedAt,
+      reason: 'user_left_voluntarily'
     });
 
     res.status(200).json({
       success: true,
-      message: 'Has salido de la lista. Tu lugar quedó liberado.',
-      newStatus: result.newStatus,
-      newFirstUsername: result.newFirstUsername,
-      newFirstUuid: result.newFirstUuid,
-      newFirstPickupDeadline: result.newFirstPickupDeadline
+      message: 'Has salido de la lista. Tu lugar quedó liberado (sin sanción).',
+      claimState: outcome.claimState,
+      phase: outcome.phase,
+      status: outcome.status,
+      freeWindowOpenedAt: outcome.freeWindowOpenedAt
     });
   } catch (error) {
-    await client.query('ROLLBACK');
     console.error('Leave claim transaction failed:', error);
     res.status(500).json({ error: 'Internal error removing the claim.' });
-  } finally {
-    client.release();
   }
 };

@@ -1,15 +1,31 @@
 /**
- * backend/src/controllers/eventsController.ts
+ * backend/src/controllers/eventsController.ts — Eventos v2 (Estrategia temporal v2)
  *
- * Handlers for event creation, member management, and invitation processing.
- * Implements role cascading, availability calculations, admin CRUD with date
- * propagation and share links. Item↔event assignments happen individually via
- * the item PATCH endpoint.
+ * Crear/actualizar un evento v2 = SOLO las 4 marcas de tiempo
+ * (published_at <= available_from <= claims_close_at <= pickup_deadline) +
+ * status + título/descripción + pickup_schedule_info. CERO columnas por rol
+ * (D8): las ventajas de publicación/"Lo quiero" se leen en tiempo real de la
+ * matriz trust_levels_settings (advance_pub/disp_hours_default) con la regla
+ * "nunca se reclama sin ver" (CHECK disp <= pub).
+ *
+ * Conserva: invitaciones en cascada por rol, membresías (sin rol/bonus), share
+ * links y aceptación de invitaciones (eleva users.global_role).
  */
 
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
-import { validateEventInput, validateInvitationCode } from '@claimitapp/shared';
+import {
+  determineRoleAfterInvitation,
+  deriveEventSchedule,
+  generateInvitationCode,
+  validateEventInput,
+  validateInvitationCode,
+  claimFromForRole,
+  visibleAtForRole,
+  EVENT_STATUSES,
+  VALID_ROLES,
+  type Role
+} from '@claimitapp/shared';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 import {
   getUser,
@@ -17,17 +33,8 @@ import {
   upsertEvent,
   removeEvent,
   upsertEventMember,
-  propagateEventDates,
-  getTrustSetting
+  type StoreEvent
 } from '../cache/appStore.js';
-import {
-  VALID_ROLES,
-  calculateEffectiveAvailability,
-  determineRoleAfterInvitation,
-  generateInvitationCode,
-  validateEventDates,
-  deriveEventSchedule
-} from '@claimitapp/shared';
 
 /** Which link a user receives to invite one level down the cascade. */
 const NEXT_ROLE: Record<string, string | null> = {
@@ -37,11 +44,7 @@ const NEXT_ROLE: Record<string, string | null> = {
   publico: null
 };
 
-/**
- * Lee la plantilla de agenda global (event_config id=1) para derivar fechas
- * desde la ancla única. Si la fila no existe (migración 012 sin aplicar) usa
- * los huecos por defecto actuales del form de eventos.
- */
+/** Lee la plantilla de agenda global (event_config id=1) para derivar fechas. */
 async function readEventConfig(): Promise<{
   open_after_publish_hours: number;
   claims_window_hours: number;
@@ -64,45 +67,50 @@ async function readEventConfig(): Promise<{
   }
 }
 
+function toStoreEvent(row: any): StoreEvent {
+  return {
+    id: row.id,
+    title: row.title ?? null,
+    description: row.description ?? null,
+    available_from: row.available_from,
+    published_at: row.published_at ?? null,
+    claims_close_at: row.claims_close_at ?? null,
+    pickup_deadline: row.pickup_deadline,
+    status: row.status ?? 'draft',
+    pickup_schedule_info: row.pickup_schedule_info ?? null
+  };
+}
+
 /**
- * Create a new event with invitation links
- * Automatically generates 4 cryptic invitation codes (one per role)
+ * POST /api/admin/events — crea un evento v2.
+ * Cuando el body trae solo la fecha de publicación (ancla única) y faltan las
+ * fechas derivadas, se completan con la plantilla event_config
+ * (deriveEventSchedule). Valida orden y futuro con shared validators
+ * (requireFuture=true: claims_close_at/pickup_deadline futuros al crear).
  */
 export const createEvent = async (req: Request, res: Response): Promise<void> => {
   const {
     title,
     description,
-    available_from,
-    pickup_deadline,
-    claims_close_at,
     published_at,
-    familiares_advance_hours,
-    amigos_advance_hours,
-    conocidos_advance_hours,
-    familiares_share_bonus,
-    amigos_share_bonus,
-    conocidos_share_bonus,
-    familiares_pickup_hours,
-    amigos_pickup_hours,
-    conocidos_pickup_hours,
-    publico_pickup_hours,
+    available_from,
+    claims_close_at,
+    pickup_deadline,
+    status,
     pickup_schedule_info
   } = req.body;
-  const adminCode = (req as any).adminCode || 'system'; // If called via admin endpoint
+  const adminCode = (req as any).adminCode || 'system';
 
-  // --- 1. Fechas: ancla única (published_at) → derivar el resto desde la agenda ---
-  // Cuando el body trae solo la fecha de publicación y faltan las fechas
-  // derivadas, se calculan con deriveEventSchedule usando la plantilla
-  // event_config (huecos). El evento queda con snapshot de fechas fijas.
-  let availableFrom = available_from;
-  let pickupDeadline = pickup_deadline;
-  let claimsCloseAt = claims_close_at;
+  // 1. Ancla única → derivar el resto de fechas desde la plantilla de agenda.
   let publishedAt = published_at;
+  let availableFrom = available_from;
+  let claimsCloseAt = claims_close_at;
+  let pickupDeadline = pickup_deadline;
 
   const pubParsed = publishedAt ? new Date(publishedAt) : null;
   const pubValid = pubParsed !== null && !Number.isNaN(pubParsed.getTime());
 
-  if ((!availableFrom || !pickupDeadline) && pubValid) {
+  if ((!availableFrom || !claimsCloseAt || !pickupDeadline) && pubValid) {
     const agenda = await readEventConfig();
     const sched = deriveEventSchedule(
       {
@@ -118,29 +126,18 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     publishedAt = publishedAt ?? sched.published_at.toISOString();
   }
 
-  // Payload efectivo para validar (con fechas derivadas + valores por rol).
   const effectiveBody = {
     title,
     description,
-    available_from: availableFrom,
-    pickup_deadline: pickupDeadline,
-    claims_close_at: claimsCloseAt,
     published_at: publishedAt,
-    familiares_advance_hours,
-    amigos_advance_hours,
-    conocidos_advance_hours,
-    familiares_share_bonus,
-    amigos_share_bonus,
-    conocidos_share_bonus,
-    familiares_pickup_hours,
-    amigos_pickup_hours,
-    conocidos_pickup_hours,
-    publico_pickup_hours,
+    available_from: availableFrom,
+    claims_close_at: claimsCloseAt,
+    pickup_deadline: pickupDeadline,
     pickup_schedule_info
   };
 
-  // Validate input
-  const validation = validateEventInput(effectiveBody);
+  // 2. Validación v2 (orden + fechas futuras al crear).
+  const validation = validateEventInput(effectiveBody, { requireFuture: true });
   if (!validation.valid) {
     res.status(400).json({
       error: 'Validation failed',
@@ -150,89 +147,34 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     return;
   }
 
-  // Validate dates
-  const dateValidation = validateEventDates(new Date(availableFrom), new Date(pickupDeadline));
-  if (!dateValidation.valid) {
+  const eventStatus = status ?? 'draft';
+  if (!(EVENT_STATUSES as readonly string[]).includes(eventStatus)) {
     res.status(400).json({
-      error: 'Date validation failed',
-      details: [dateValidation.error!],
+      error: 'Validation failed',
+      details: [`status must be one of: ${EVENT_STATUSES.join(', ')}`],
       timestamp: new Date().toISOString()
     });
     return;
   }
-
-  if (claimsCloseAt && new Date(claimsCloseAt) <= new Date(availableFrom)) {
-    res.status(400).json({
-      error: 'Date validation failed',
-      details: ['claims_close_at must be after available_from'],
-      timestamp: new Date().toISOString()
-    });
-    return;
-  }
-  if (claimsCloseAt && new Date(claimsCloseAt) >= new Date(pickupDeadline)) {
-    res.status(400).json({
-      error: 'Date validation failed',
-      details: ['claims_close_at must be before pickup_deadline'],
-      timestamp: new Date().toISOString()
-    });
-    return;
-  }
-
-  // --- 2. Ventajas por rol: congelar desde la matriz cuando no vienen explícitas ---
-  // Fuente única: trust_levels_settings (advance_hours_default /
-  // share_bonus_default / intervalo_recoleccion_horas_default). Se lee desde
-  // el store en RAM (getTrustSetting) y se congela en las columnas del evento.
-  const matrix: Record<string, any> = {};
-  for (const role of VALID_ROLES) matrix[role] = getTrustSetting(role) || {};
-  const matrixNumber = (role: string, column: string, fallback: number): number => {
-    const v = matrix[role]?.[column];
-    return v != null ? Number(v) : fallback;
-  };
-
-  const familiaresAdvance = familiares_advance_hours ?? matrixNumber('familiares', 'advance_hours_default', 72);
-  const amigosAdvance = amigos_advance_hours ?? matrixNumber('amigos', 'advance_hours_default', 24);
-  const conocidosAdvance = conocidos_advance_hours ?? matrixNumber('conocidos', 'advance_hours_default', 0);
-  const familiaresBonus = familiares_share_bonus ?? matrixNumber('familiares', 'share_bonus_default', 6);
-  const amigosBonus = amigos_share_bonus ?? matrixNumber('amigos', 'share_bonus_default', 4);
-  const conocidosBonus = conocidos_share_bonus ?? matrixNumber('conocidos', 'share_bonus_default', 2);
-  const familiaresPickup = familiares_pickup_hours ?? matrixNumber('familiares', 'intervalo_recoleccion_horas_default', 48);
-  const amigosPickup = amigos_pickup_hours ?? matrixNumber('amigos', 'intervalo_recoleccion_horas_default', 36);
-  const conocidosPickup = conocidos_pickup_hours ?? matrixNumber('conocidos', 'intervalo_recoleccion_horas_default', 24);
-  const publicoPickup = publico_pickup_hours ?? matrixNumber('publico', 'intervalo_recoleccion_horas_default', 12);
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Create event: las ventajas por rol (advance/share/pickup) se congelan
-    // desde la matriz de confianza cuando el admin no las sobrescribe.
     const eventResult = await client.query(
       `INSERT INTO events
-       (title, description, available_from, pickup_deadline, claims_close_at,
-        published_at,
-        familiares_advance_hours, amigos_advance_hours, conocidos_advance_hours,
-        familiares_share_bonus, amigos_share_bonus, conocidos_share_bonus,
-        familiares_pickup_hours, amigos_pickup_hours, conocidos_pickup_hours,
-        publico_pickup_hours, pickup_schedule_info)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+       (title, description, published_at, available_from, claims_close_at,
+        pickup_deadline, status, pickup_schedule_info)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
         title,
         description || null,
-        availableFrom,
-        pickupDeadline,
-        claimsCloseAt || null,
         publishedAt || null,
-        familiaresAdvance,
-        amigosAdvance,
-        conocidosAdvance,
-        familiaresBonus,
-        amigosBonus,
-        conocidosBonus,
-        familiaresPickup,
-        amigosPickup,
-        conocidosPickup,
-        publicoPickup,
+        availableFrom,
+        claimsCloseAt || null,
+        pickupDeadline,
+        eventStatus,
         pickup_schedule_info || null
       ]
     );
@@ -244,7 +186,6 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     for (const role of VALID_ROLES) {
       const code = generateInvitationCode();
       invitationCodes[role] = code;
-
       await client.query(
         `INSERT INTO event_invitations (event_id, role, code, created_by, is_active)
          VALUES ($1, $2, $3, $4, true)`,
@@ -254,34 +195,17 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
 
     await client.query('COMMIT');
 
-    // Write-through: keep the RAM store in sync with Neon (all event fields)
     const ev = eventResult.rows[0];
-    upsertEvent({
-      id: ev.id,
-      title: ev.title,
-      available_from: ev.available_from,
-      published_at: ev.published_at,
-      status: ev.status ?? 'draft',
-      pickup_deadline: ev.pickup_deadline,
-      claims_close_at: ev.claims_close_at,
-      pickup_window_hours: ev.pickup_window_hours,
-      familiares_advance_hours: ev.familiares_advance_hours,
-      amigos_advance_hours: ev.amigos_advance_hours,
-      conocidos_advance_hours: ev.conocidos_advance_hours,
-      publico_advance_hours: ev.publico_advance_hours,
-      familiares_pickup_hours: ev.familiares_pickup_hours,
-      amigos_pickup_hours: ev.amigos_pickup_hours,
-      conocidos_pickup_hours: ev.conocidos_pickup_hours,
-      publico_pickup_hours: ev.publico_pickup_hours,
-      pickup_schedule_info: ev.pickup_schedule_info ?? null
-    });
-    // Log audit entry (no itemId: events are not items and would violate the FK)
+    upsertEvent(toStoreEvent(ev));
+
     await logAudit({
       action: 'EVENT_CREATED',
       adminCodeSuffix: maskAdminCode(adminCode),
       details: {
         title: title,
+        published_at: publishedAt,
         available_from: availableFrom,
+        claims_close_at: claimsCloseAt,
         pickup_deadline: pickupDeadline,
         timestamp: new Date().toISOString()
       }
@@ -292,6 +216,7 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
       event: {
         eventId,
         title,
+        status: eventStatus,
         message: 'Event created with 4 invitation links generated'
       },
       invitationCodes
@@ -309,8 +234,8 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
 };
 
 /**
- * Accept an invitation with role cascading
- * If invitation role has higher privilege than user's current role, upgrade user
+ * POST /api/invitations/accept — acepta una invitación con cascada de rol.
+ * La membresía en v2 no guarda rol/bonus (users.global_role es la única fuente).
  */
 export const acceptInvitation = async (req: Request, res: Response): Promise<void> => {
   const { invitationCode, userUuid } = req.body;
@@ -319,8 +244,6 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     res.status(400).json({ error: 'Missing invitationCode or userUuid' });
     return;
   }
-
-  // Validate invitation code format
   if (!validateInvitationCode(invitationCode)) {
     res.status(400).json({ error: 'Invalid invitation code format' });
     return;
@@ -330,7 +253,6 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
   try {
     await client.query('BEGIN');
 
-    // 1. Validate invitation
     const invResult = await client.query(
       `SELECT ei.role, ei.event_id, e.title
        FROM event_invitations ei
@@ -347,14 +269,12 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
 
     const { role: invitationRole, event_id: eventId, title: eventTitle } = invResult.rows[0];
 
-    // 2. Get or create user, get current role
     let userResult = await client.query('SELECT uuid, global_role FROM users WHERE uuid = $1', [
       userUuid
     ]);
 
     let currentRole = 'publico';
     if (userResult.rows.length === 0) {
-      // Create user if doesn't exist
       await client.query('INSERT INTO users (uuid, alias, global_role) VALUES ($1, $2, $3)', [
         userUuid,
         'User_' + userUuid.slice(0, 8),
@@ -363,13 +283,10 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     } else {
       currentRole = userResult.rows[0].global_role;
     }
-    // 3. Determine if role should cascade
+
     const newRole = determineRoleAfterInvitation(currentRole, invitationRole);
     const roleCascaded = newRole !== currentRole;
 
-    // 4. Register user in event_members. La membresía ya no guarda rol (rol
-    //    GLOBAL = única fuente de verdad): la invitación solo puede elevar
-    //    users.global_role (paso 5).
     await client.query(
       `INSERT INTO event_members (event_id, user_uuid, invited_by, joined_at)
        VALUES ($1, $2, $3, NOW())
@@ -378,19 +295,16 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
       [eventId, userUuid, null]
     );
 
-    // 5. Update user's global role if cascaded
     if (roleCascaded) {
       await client.query('UPDATE users SET global_role = $1 WHERE uuid = $2', [newRole, userUuid]);
     }
 
-    // 6. Increment invitation use_count
     await client.query('UPDATE event_invitations SET use_count = use_count + 1 WHERE code = $1', [
       invitationCode
     ]);
 
     await client.query('COMMIT');
 
-    // Write-through: actualizar el rol del usuario en el store (preservando el alias)
     const existingUser = getUser(userUuid);
     upsertUser({
       uuid: userUuid,
@@ -399,11 +313,11 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
     });
     upsertEventMember(userUuid, {
       eventId,
-      bonusHours: 0,
-      invitedBy: null
+      invitedBy: null,
+      expiracionesAcumuladas: 0,
+      bloqueadoInvitar: false
     });
 
-    // Log audit entry (no itemId: events are not items and would violate the FK)
     await logAudit({
       action: 'INVITATION_ACCEPTED',
       adminCodeSuffix: 'N/A',
@@ -438,41 +352,64 @@ export const acceptInvitation = async (req: Request, res: Response): Promise<voi
 };
 
 /**
- * PATCH /api/admin/events/:id
- * Updates an event and propagates date changes to the items that inherit them
- * (items with their own override keep it — inheritance vs override).
+ * PATCH /api/admin/events/:id — actualiza un evento v2 (solo columnas v2) y
+ * propaga los cambios de fechas a los items que las heredan.
  */
 export const updateEvent = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
   const {
     title,
     description,
-    available_from,
-    pickup_deadline,
-    claims_close_at,
     published_at,
-    familiares_advance_hours,
-    amigos_advance_hours,
-    conocidos_advance_hours,
-    familiares_share_bonus,
-    amigos_share_bonus,
-    conocidos_share_bonus,
-    familiares_pickup_hours,
-    amigos_pickup_hours,
-    conocidos_pickup_hours,
-    publico_pickup_hours,
+    available_from,
+    claims_close_at,
+    pickup_deadline,
+    status,
     pickup_schedule_info
   } = req.body;
   const adminCode = (req as any).adminCode || 'system';
+
+  if (status !== undefined && !(EVENT_STATUSES as readonly string[]).includes(status)) {
+    res.status(400).json({
+      error: 'Validation failed',
+      details: [`status must be one of: ${EVENT_STATUSES.join(', ')}`],
+      timestamp: new Date().toISOString()
+    });
+    return;
+  }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const existing = await client.query('SELECT id FROM events WHERE id = $1 FOR UPDATE', [id]);
+    const existing = await client.query(
+      'SELECT id, title FROM events WHERE id = $1 FOR UPDATE',
+      [id]
+    );
     if (existing.rows.length === 0) {
       await client.query('ROLLBACK');
       res.status(404).json({ error: 'Event not found' });
+      return;
+    }
+
+    // Merge de fechas (solo las traídas) para validar el orden resultante.
+    const cur = existing.rows[0] && (await pool.query('SELECT * FROM events WHERE id = $1', [id])).rows[0];
+    const merged = {
+      title: title ?? cur.title,
+      description: description !== undefined ? description : cur.description,
+      published_at: published_at !== undefined ? published_at : cur.published_at,
+      available_from: available_from !== undefined ? available_from : cur.available_from,
+      claims_close_at: claims_close_at !== undefined ? claims_close_at : cur.claims_close_at,
+      pickup_deadline: pickup_deadline !== undefined ? pickup_deadline : cur.pickup_deadline
+    };
+    const validation = validateEventInput(merged, { requireFuture: false });
+    if (!validation.valid) {
+      await client.query('ROLLBACK');
+      res.status(400).json({
+        error: 'Validation failed',
+        details: validation.errors,
+        timestamp: new Date().toISOString()
+      });
       return;
     }
 
@@ -480,87 +417,32 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
       `UPDATE events SET
          title = COALESCE($1, title),
          description = COALESCE($2, description),
-         available_from = COALESCE($3, available_from),
-         pickup_deadline = COALESCE($4, pickup_deadline),
+         published_at = COALESCE($3, published_at),
+         available_from = COALESCE($4, available_from),
          claims_close_at = COALESCE($5, claims_close_at),
-         published_at = COALESCE($6, published_at),
-         familiares_advance_hours = COALESCE($7, familiares_advance_hours),
-         amigos_advance_hours = COALESCE($8, amigos_advance_hours),
-         conocidos_advance_hours = COALESCE($9, conocidos_advance_hours),
-         familiares_share_bonus = COALESCE($10, familiares_share_bonus),
-         amigos_share_bonus = COALESCE($11, amigos_share_bonus),
-         conocidos_share_bonus = COALESCE($12, conocidos_share_bonus),
-         familiares_pickup_hours = COALESCE($13, familiares_pickup_hours),
-         amigos_pickup_hours = COALESCE($14, amigos_pickup_hours),
-         conocidos_pickup_hours = COALESCE($15, conocidos_pickup_hours),
-         publico_pickup_hours = COALESCE($16, publico_pickup_hours),
-         pickup_schedule_info = COALESCE($17, pickup_schedule_info),
+         pickup_deadline = COALESCE($6, pickup_deadline),
+         status = COALESCE($7, status),
+         pickup_schedule_info = COALESCE($8, pickup_schedule_info),
          updated_at = NOW()
-       WHERE id = $18
+       WHERE id = $9
        RETURNING *`,
       [
         title ?? null,
-        description ?? null,
-        available_from ?? null,
-        pickup_deadline ?? null,
-        claims_close_at ?? null,
-        published_at ?? null,
-        familiares_advance_hours ?? null,
-        amigos_advance_hours ?? null,
-        conocidos_advance_hours ?? null,
-        familiares_share_bonus ?? null,
-        amigos_share_bonus ?? null,
-        conocidos_share_bonus ?? null,
-        familiares_pickup_hours ?? null,
-        amigos_pickup_hours ?? null,
-        conocidos_pickup_hours ?? null,
-        publico_pickup_hours ?? null,
+        description !== undefined ? description : null,
+        published_at !== undefined ? published_at : null,
+        available_from !== undefined ? available_from : null,
+        claims_close_at !== undefined ? claims_close_at : null,
+        pickup_deadline !== undefined ? pickup_deadline : null,
+        status ?? null,
         pickup_schedule_info ?? null,
         id
       ]
     );
 
-    // Propagate date changes to inheriting items (single UPDATE per field)
-    if (available_from) {
-      await client.query(
-        'UPDATE items SET available_from = $1 WHERE event_id = $2 AND available_from IS NULL',
-        [available_from, id]
-      );
-    }
-    if (published_at) {
-      await client.query(
-        'UPDATE items SET visible_at = $1 WHERE event_id = $2 AND visible_at IS NULL',
-        [published_at, id]
-      );
-    }
-
     await client.query('COMMIT');
 
-    // Write-through: sync the event and inherited dates in the RAM store
     const event = upd.rows[0];
-    upsertEvent({
-      id: event.id,
-      title: event.title,
-      available_from: event.available_from,
-      published_at: event.published_at,
-      status: event.status,
-      pickup_deadline: event.pickup_deadline,
-      claims_close_at: event.claims_close_at,
-      pickup_window_hours: event.pickup_window_hours,
-      familiares_advance_hours: event.familiares_advance_hours,
-      amigos_advance_hours: event.amigos_advance_hours,
-      conocidos_advance_hours: event.conocidos_advance_hours,
-      publico_advance_hours: event.publico_advance_hours,
-      familiares_pickup_hours: event.familiares_pickup_hours,
-      amigos_pickup_hours: event.amigos_pickup_hours,
-      conocidos_pickup_hours: event.conocidos_pickup_hours,
-      publico_pickup_hours: event.publico_pickup_hours,
-      pickup_schedule_info: event.pickup_schedule_info ?? null
-    });
-    propagateEventDates(id, {
-      availableFrom: event.available_from,
-      visibleAt: event.published_at
-    });
+    upsertEvent(toStoreEvent(event));
 
     await logAudit({
       action: 'EVENT_UPDATED',
@@ -579,9 +461,7 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
 };
 
 /**
- * DELETE /api/admin/events/:id
- * Deletes an event. Solo se permite cuando el evento no tiene items (regla
- * event-first: todo item pertenece a un evento, la FK es ON DELETE RESTRICT).
+ * DELETE /api/admin/events/:id — solo cuando el evento no tiene items.
  */
 export const deleteEvent = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
@@ -591,7 +471,6 @@ export const deleteEvent = async (req: Request, res: Response): Promise<void> =>
   try {
     await client.query('BEGIN');
 
-    // Pre-check: no se puede borrar un evento que aún tiene items.
     const itemsCount = await client.query(
       'SELECT COUNT(*)::int AS n FROM items WHERE event_id = $1',
       [id]
@@ -613,7 +492,6 @@ export const deleteEvent = async (req: Request, res: Response): Promise<void> =>
 
     await client.query('COMMIT');
 
-    // Write-through
     removeEvent(id);
 
     await logAudit({
@@ -633,8 +511,7 @@ export const deleteEvent = async (req: Request, res: Response): Promise<void> =>
 };
 
 /**
- * GET /api/admin/events/:id
- * Detail of an event with its items, members grouped by role and invitation links.
+ * GET /api/admin/events/:id — detalle admin (evento + items + miembros + invites).
  */
 export const getEventDetail = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
@@ -647,12 +524,13 @@ export const getEventDetail = async (req: Request, res: Response): Promise<void>
     }
 
     const items = await pool.query(
-      `SELECT id, title, status, visibility_level, available_from, visible_at
+      `SELECT id, title, status, phase, visibility_level
        FROM items WHERE event_id = $1 ORDER BY created_at DESC`,
       [id]
     );
     const members = await pool.query(
-      `SELECT em.user_uuid, u.alias, u.global_role AS role, em.bonus_hours, em.invited_by, em.joined_at
+      `SELECT em.user_uuid, u.alias, u.global_role AS role, em.invited_by,
+              em.expiraciones_acumuladas, em.bloqueado_invitar, em.joined_at
        FROM event_members em
        JOIN users u ON em.user_uuid = u.uuid
        WHERE em.event_id = $1 ORDER BY u.global_role, em.joined_at`,
@@ -677,8 +555,84 @@ export const getEventDetail = async (req: Request, res: Response): Promise<void>
 };
 
 /**
- * GET /api/events/:id/invite/:code
- * Validates an invitation code and returns the event/role/inviter info.
+ * GET /api/events/:eventId — evento público + ventanas dinámicas por rol
+ * (visibleAtForRole / claimFromForRole desde la matriz, cero columnas por evento).
+ */
+export const getEvent = async (req: Request, res: Response): Promise<void> => {
+  const { eventId } = req.params;
+  const userUuid = req.query.userUuid as string;
+
+  try {
+    const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [eventId]);
+    if (eventResult.rows.length === 0) {
+      res.status(404).json({ error: 'Event not found' });
+      return;
+    }
+    const event = eventResult.rows[0];
+
+    // Ventanas dinámicas por rol si hay usuario autenticado.
+    let roleWindows: Record<string, unknown> | null = null;
+    if (userUuid) {
+      try {
+        const userRes = await pool.query('SELECT global_role FROM users WHERE uuid = $1', [userUuid]);
+        const role = (userRes.rows[0]?.global_role || 'publico') as Role;
+        const trust = await pool.query(
+          `SELECT advance_pub_hours_default, advance_disp_hours_default
+           FROM trust_levels_settings WHERE id = $1`,
+          [role]
+        );
+        const advancePubHours = Number(trust.rows[0]?.advance_pub_hours_default ?? 0);
+        const advanceDispHours = Number(trust.rows[0]?.advance_disp_hours_default ?? 0);
+        const visible = visibleAtForRole(event.published_at, advancePubHours);
+        const claimFrom = claimFromForRole(event.available_from, advanceDispHours);
+        roleWindows = {
+          role,
+          advance_pub_hours: advancePubHours,
+          advance_disp_hours: advanceDispHours,
+          visible_at: visible ? visible.toISOString() : null,
+          claim_from: claimFrom ? claimFrom.toISOString() : null
+        };
+      } catch (error) {
+        console.warn('Could not compute role windows:', error);
+      }
+    }
+
+    res.json({ event, roleWindows });
+  } catch (error) {
+    console.error('Failed to fetch event:', error);
+    res.status(500).json({ error: 'Failed to fetch event' });
+  }
+};
+
+/** GET /api/events — listado paginado. */
+export const listEvents = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+
+    const result = await pool.query(
+      `SELECT e.id, e.title, e.description, e.published_at, e.available_from,
+              e.claims_close_at, e.pickup_deadline, e.status, e.created_at,
+              (SELECT COUNT(*)::int FROM items i WHERE i.event_id = e.id) AS item_count
+       FROM events e
+       ORDER BY e.created_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+
+    res.json({
+      events: result.rows,
+      limit,
+      offset
+    });
+  } catch (error) {
+    console.error('Failed to list events:', error);
+    res.status(500).json({ error: 'Failed to list events' });
+  }
+};
+
+/**
+ * GET /api/events/:id/invite/:code — valida un código de invitación.
  */
 export const validateInvitation = async (req: Request, res: Response): Promise<void> => {
   const { id, code } = req.params;
@@ -715,12 +669,7 @@ export const validateInvitation = async (req: Request, res: Response): Promise<v
 };
 
 /**
- * GET /api/invitations/resolve?code=CODE
- *
- * Resuelve un código de invitación SUELTO (el enlace del HOME solo trae
- * ?invite=TOKEN, sin event_id). Devuelve la info mínima del evento y del rol
- * para que el frontend muestre el popup de bienvenida y decida si la
- * invitación eleva por encima de 'publico'. Sin escribir nada (solo lectura).
+ * GET /api/invitations/resolve?code=CODE — resuelve un código suelto (sin event_id).
  */
 export const resolveInvitation = async (req: Request, res: Response): Promise<void> => {
   const { code } = req.query;
@@ -762,9 +711,7 @@ export const resolveInvitation = async (req: Request, res: Response): Promise<vo
 };
 
 /**
- * GET /api/events/:id/share-link
- * Returns the invitation link for the NEXT role down the cascade based on the
- * user's global role. Public users cannot share (403).
+ * GET /api/events/:id/share-link — link de invitación del siguiente rol en la cascada.
  */
 export const getShareLink = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
@@ -785,8 +732,6 @@ export const getShareLink = async (req: Request, res: Response): Promise<void> =
   }
 
   try {
-    // Sanción por tolerancia: quien excedió el umbral pierde temporalmente
-    // el derecho a invitar.
     const memberRes = await pool.query(
       'SELECT bloqueado_invitar FROM event_members WHERE event_id = $1 AND user_uuid = $2',
       [id, userUuid]
@@ -813,71 +758,5 @@ export const getShareLink = async (req: Request, res: Response): Promise<void> =
   } catch (error) {
     console.error('Share link failed:', error);
     res.status(500).json({ error: 'Failed to obtain share link' });
-  }
-};
-
-/**
- * Get event details with user's effective availability
- */
-export const getEvent = async (req: Request, res: Response): Promise<void> => {
-  const { eventId } = req.params;
-  const userUuid = req.query.userUuid as string;
-
-  try {
-    const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [eventId]);
-
-    if (eventResult.rows.length === 0) {
-      res.status(404).json({ error: 'Event not found' });
-      return;
-    }
-
-    const event = eventResult.rows[0];
-
-    // If userUuid provided, calculate their effective availability
-    let effectiveAvailability = null;
-    if (userUuid) {
-      try {
-        effectiveAvailability = await calculateEffectiveAvailability(userUuid, eventId, pool);
-      } catch (error) {
-        console.warn('Could not calculate effective availability:', error);
-      }
-    }
-
-    res.json({
-      event,
-      effectiveAvailability
-    });
-  } catch (error) {
-    console.error('Failed to fetch event:', error);
-    res.status(500).json({ error: 'Failed to fetch event' });
-  }
-};
-
-/**
- * Get all events (paginated)
- */
-export const listEvents = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
-    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
-
-    const result = await pool.query(
-      `SELECT e.id, e.title, e.description, e.available_from, e.pickup_deadline,
-              e.status, e.created_at,
-              (SELECT COUNT(*)::int FROM items i WHERE i.event_id = e.id) AS item_count
-       FROM events e
-       ORDER BY e.created_at DESC
-       LIMIT $1 OFFSET $2`,
-      [limit, offset]
-    );
-
-    res.json({
-      events: result.rows,
-      limit,
-      offset
-    });
-  } catch (error) {
-    console.error('Failed to list events:', error);
-    res.status(500).json({ error: 'Failed to list events' });
   }
 };

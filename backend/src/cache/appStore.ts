@@ -1,64 +1,93 @@
 /**
- * backend/src/cache/appStore.ts
+ * backend/src/cache/appStore.ts — Store v2 en RAM (Estrategia temporal v2)
  *
- * Store de lectura en RAM (única fuente para GET /api/items, /api/ledger y el
- * historial de feeds). Se rehidrata desde Neon al arrancar de Railway.
+ * Fuente de verdad del schema: `database/init.sql` + migraciones 0001..0004 y
+ * el plan maestro `plans/estrategia-temporal-v2.md`.
  *
+ * Es la única fuente para GET /api/items, /api/ledger, /api/items/:id/estado-
+ * temporal y el historial de feeds. Se rehidrata desde Neon al arrancar.
  * Write-through: cada writer de Neon actualiza el store en el mismo `await`.
  * Lecturas: nunca tocan la BD (solo RAM).
- * Sin sondeo periódico ni heartbeat hacia Neon: con cero tráfico el compute
- * de Neon puede autosuspenderse (no gasta "compute allowance" en inactividad).
  *
- * Válido porque hay UNA sola instancia de Railway (replicas=1).
+ * Cambios v2 (Fase 3):
+ *  - `StoreItem` expone `phase` (ItemPhase), `frozen_schedule` (FrozenSchedule
+ *    parseado), `frozen_at`, `free_window_opened_at`, `delivered_claim_id`,
+ *    `delivered_at`, `charity_at` y la cola como `StoreClaim[]` (claim_state,
+ *    role_at_claim, fifo_position, turn_v_expires_at). `status` se conserva
+ *    como derivado legacy (lectura).
+ *  - `StoreEvent` queda SOLO con las 4 fechas + status + pickup_schedule_info
+ *    (cero columnas por rol: D8).
+ *  - `StoreEventMember` ya no tiene `bonus_hours` (migración 0002): conserva
+ *    `expiraciones_acumuladas` y `bloqueado_invitar`.
  */
 
+import type {
+  ClaimState,
+  FifoPosition,
+  FrozenSchedule,
+  ItemPhase,
+  ItemStatus,
+  Role
+} from '@claimitapp/shared';
 import pool from '../config/db.js';
+
+// ---------------------------------------------------------------------------
+// Tipos v2 del store
+// ---------------------------------------------------------------------------
+
+/** Claim v2 en RAM — espejo de la tabla `claims` (registro forense). */
+export interface StoreClaim {
+  id: string;
+  itemId: string;
+  userUuid: string;
+  /** Alias vigente del usuario (decorativo; no está denormalizado en la BD). */
+  username: string | null;
+  claimedAt: string;
+  claimState: ClaimState;
+  roleAtClaim: Role;
+  fifoPosition: FifoPosition | null;
+  turnVExpiresAt: string | null;
+  claimantEmail: string | null;
+  claimantPhone: string | null;
+}
 
 export interface StoreItem {
   id: string;
+  eventId: string | null;
   title: string;
   description: string | null;
   category: string;
   infoUrl: string | null;
   /** Arreglo ordenado de URLs de fotos del Item (JSONB image_urls). */
   imageUrls: string[];
-  status: string;
+  /** status LEGACY/derivado (lectura para no romper el feed actual). */
+  status: ItemStatus;
+  /** Fase v2 (fuente de verdad del ciclo de vida). */
+  phase: ItemPhase;
   visibilityLevel: number | null;
-  eventId: string | null;
-  visibleAt: string | null;
-  availableFrom: string | null;
-  // Precio base del item (fuente); el precio por rol se calcula en tiempo de
-  // lectura (ver backend/src/utils/pricing.ts). Migración 015.
+  // Precio base del item (fuente); el precio por rol se calcula en lectura.
   precioBaseCosto: number | null;
-  nivelAccesoMinimo: string | null;
+  // Snapshot congelado del calendario (jsonb parseado) o null si no congelado.
+  frozenSchedule: FrozenSchedule | null;
+  frozenAt: string | null;
+  freeWindowOpenedAt: string | null;
+  deliveredClaimId: string | null;
+  deliveredAt: string | null;
+  charityAt: string | null;
   createdAt: string;
-  queue: Array<{
-    userUuid: string;
-    username: string;
-    claimedAt: string;
-    pickupDeadline: string | null;
-    roleAtAssignment?: string | null;
-    pickupWindowHours?: number | null;
-  }>;
+  /** Cola completa del item (forense: incluye cancelados/expirados/void). */
+  queue: StoreClaim[];
 }
 
 export interface StoreEvent {
   id: string;
-  title?: string;
+  title: string | null;
+  description?: string | null;
   available_from: string | null;
   published_at: string | null;
-  status: string;
-  pickup_deadline: string | null;
   claims_close_at: string | null;
-  pickup_window_hours: number | null;
-  familiares_advance_hours: number;
-  amigos_advance_hours: number;
-  conocidos_advance_hours: number;
-  publico_advance_hours: number;
-  familiares_pickup_hours: number | null;
-  amigos_pickup_hours: number | null;
-  conocidos_pickup_hours: number | null;
-  publico_pickup_hours: number | null;
+  pickup_deadline: string | null;
+  status: string;
   pickup_schedule_info?: string | null;
 }
 
@@ -85,9 +114,9 @@ export interface StoreUser {
 
 export interface StoreEventMember {
   eventId: string;
-  bonusHours: number;
   invitedBy: string | null;
-  bloqueadoInvitar?: boolean;
+  expiracionesAcumuladas: number;
+  bloqueadoInvitar: boolean;
 }
 
 export const MAX_FEED_HISTORY = 50;
@@ -98,93 +127,124 @@ let items: StoreItem[] = [];
 let ledger: LedgerEntry[] = [];
 let feedHistory: FeedEntry[] = [];
 let users: Map<string, StoreUser> = new Map();
-let events: Map<string, any> = new Map();
+let events: Map<string, StoreEvent> = new Map();
 let eventMembers: Map<string, StoreEventMember[]> = new Map(); // userUuid -> memberships
 let trustSettings: Map<string, any> = new Map(); // level id -> trust_levels_settings row
 
-// Índice por estatus de evento de los items (lazy). Clave = estatus de evento
-// canónico o NO_EVENT_STATUS_KEY para items sin evento/ huérfanos. Se construye
-// con un solo barrido la primera vez que se lee y se invalida (null) cuando una
-// escritura cambia el "bucket" de un item (link a evento o estatus de evento).
-// Así GET /api/admin/items?statuses=... sirve solo los buckets pedidos sin
-// escanear el catálogo completo en cada petición.
+// Índice por estatus de evento de los items (lazy). Ver getItemsByEventStatus.
 let itemsByEventStatus: Map<string, StoreItem[]> | null = null;
 
-// Estado de hidratación: evita releer Neon cuando el arranque ya fue exitoso y
-// permite auto-recuperarse (single-flight + cooldown) si el rehidratado inicial
-// falló porque Neon estaba autosuspendido (cold start > connectionTimeout).
 let hydrated = false;
 let hydrateInFlight: Promise<boolean> | null = null;
 let lastHydrateAttemptAt = 0;
 const HYDRATE_RETRY_COOLDOWN_MS = 15_000;
 
+/**
+ * Deriva el status LEGACY (`items.status`) desde la fase v2 + número de claims
+ * activos. Se conserva solo como columna/lectura para no romper el contrato del
+ * feed actual; el ciclo de vida v2 lo maneja `items.phase`.
+ */
+export function deriveLegacyStatus(
+  phase: ItemPhase,
+  activeCount: number
+): ItemStatus {
+  if (phase === 'claim_open') {
+    if (activeCount >= 3) return 'unavailable';
+    if (activeCount >= 1) return 'waitlist_open';
+    return 'available';
+  }
+  // pickup_turns / ventana_libre / entregado / enviado_a_caridad ya no aceptan
+  // unirse a la FIFO pública → legacy "unavailable".
+  return 'unavailable';
+}
+
+/** Conteo de claims activos de una cola (estado 'active'). */
+export function countActiveClaims(queue: StoreClaim[]): number {
+  let n = 0;
+  for (const c of queue) if (c.claimState === 'active') n++;
+  return n;
+}
+
 /** Carga todo desde Neon al arrancar. Único acceso a BD en frío. */
 export async function rehydrateAll(): Promise<boolean> {
   try {
-    // 1. Items + claims (queues)
-    const itemsResult = await pool.query('SELECT * FROM items ORDER BY created_at DESC');
-    const claimsResult = await pool.query(
-      `SELECT c.item_id, c.user_uuid, u.alias AS username, c.claimed_at,
-              c.pickup_deadline, c.role_at_assignment, c.pickup_window_hours
-       FROM claims c JOIN users u ON c.user_uuid = u.uuid
-       ORDER BY c.claimed_at ASC`
+    // 1. Items (columnas v2)
+    const itemsResult = await pool.query(
+      `SELECT id, event_id, title, description, category, info_url, image_urls,
+              status, phase, visibility_level, precio_base_costo,
+              frozen_schedule, frozen_at, free_window_opened_at,
+              delivered_claim_id, delivered_at, charity_at, created_at
+       FROM items ORDER BY created_at DESC`
     );
 
-    const claimsMap: Record<
-      string,
-      Array<{
-        userUuid: string;
-        username: string;
-        claimedAt: string;
-        pickupDeadline: string | null;
-        roleAtAssignment: string | null;
-        pickupWindowHours: number | null;
-      }>
-    > = {};
+    // 2. Claims (sin username denormalizado en v2: se une a users para el alias)
+    const claimsResult = await pool.query(
+      `SELECT c.id, c.item_id, c.user_uuid, u.alias AS username, c.claimed_at,
+              c.claim_state, c.role_at_claim, c.fifo_position,
+              c.turn_v_expires_at, c.claimant_email, c.claimant_phone
+       FROM claims c JOIN users u ON c.user_uuid = u.uuid
+       ORDER BY c.claimed_at ASC, c.id ASC`
+    );
+
+    const claimsMap: Record<string, StoreClaim[]> = {};
     claimsResult.rows.forEach((row: any) => {
-      if (!claimsMap[row.item_id]) claimsMap[row.item_id] = [];
-      claimsMap[row.item_id].push({
+      const claim: StoreClaim = {
+        id: row.id,
+        itemId: row.item_id,
         userUuid: row.user_uuid,
-        username: row.username,
+        username: row.username ?? null,
         claimedAt: row.claimed_at,
-        pickupDeadline: row.pickup_deadline,
-        roleAtAssignment: row.role_at_assignment ?? null,
-        pickupWindowHours: row.pickup_window_hours != null ? Number(row.pickup_window_hours) : null
-      });
+        claimState: row.claim_state,
+        roleAtClaim: (row.role_at_claim as Role) || 'publico',
+        fifoPosition: row.fifo_position != null ? (Number(row.fifo_position) as FifoPosition) : null,
+        turnVExpiresAt: row.turn_v_expires_at ?? null,
+        claimantEmail: row.claimant_email ?? null,
+        claimantPhone: row.claimant_phone ?? null
+      };
+      if (!claimsMap[claim.itemId]) claimsMap[claim.itemId] = [];
+      claimsMap[claim.itemId].push(claim);
     });
 
-    items = itemsResult.rows.map((item: any) => ({
-      id: item.id,
-      title: item.title,
-      description: item.description,
-      category: item.category,
-      infoUrl: item.info_url,
-      // pg devuelve el JSONB como arreglo JS ya parseado.
-      imageUrls: Array.isArray(item.image_urls) ? item.image_urls : [],
-      status: item.status,
-      visibilityLevel: item.visibility_level,
-      eventId: item.event_id,
-      visibleAt: item.visible_at,
-      availableFrom: item.available_from,
-      precioBaseCosto: item.precio_base_costo,
-      nivelAccesoMinimo: item.nivel_acceso_minimo,
-      createdAt: item.created_at,
-      queue: claimsMap[item.id] || []
-    }));
+    items = itemsResult.rows.map((item: any) => {
+      const queue = claimsMap[item.id] || [];
+      return {
+        id: item.id,
+        eventId: item.event_id ?? null,
+        title: item.title,
+        description: item.description,
+        category: item.category,
+        infoUrl: item.info_url,
+        // pg devuelve el JSONB como arreglo JS ya parseado.
+        imageUrls: Array.isArray(item.image_urls) ? item.image_urls : [],
+        status: item.status,
+        phase: item.phase,
+        visibilityLevel: item.visibility_level,
+        precioBaseCosto: item.precio_base_costo,
+        frozenSchedule: item.frozen_schedule ? (item.frozen_schedule as FrozenSchedule) : null,
+        frozenAt: item.frozen_at ?? null,
+        freeWindowOpenedAt: item.free_window_opened_at ?? null,
+        deliveredClaimId: item.delivered_claim_id ?? null,
+        deliveredAt: item.delivered_at ?? null,
+        charityAt: item.charity_at ?? null,
+        createdAt: item.created_at,
+        queue
+      } as StoreItem;
+    });
 
-    // 2. Ledger (últimas 50)
+    // 3. Ledger (últimas 50, solo claims activos como actividad vigente)
     const ledgerResult = await pool.query(
       `SELECT c.user_uuid, u.alias AS username, c.claimed_at, i.title, i.category
        FROM claims c
        JOIN items i ON c.item_id = i.id
        JOIN users u ON c.user_uuid = u.uuid
+       WHERE c.claim_state = 'active'
        ORDER BY c.claimed_at DESC
        LIMIT $1`,
       [MAX_LEDGER]
     );
     ledger = ledgerResult.rows;
 
-    // 3. Feed history (últimas 50, cronológico ascendente)
+    // 4. Feed history (últimas 50, cronológico ascendente)
     const feedResult = await pool.query(
       `SELECT event_name, event_data, created_at FROM feed_history ORDER BY created_at DESC LIMIT $1`,
       [MAX_FEED_HISTORY]
@@ -195,7 +255,7 @@ export async function rehydrateAll(): Promise<boolean> {
       timestamp: row.created_at
     }));
 
-    // 4. Usuarios (alias + roles + blacklist) para filtrado por rol en memoria
+    // 5. Usuarios (alias + roles + blacklist)
     const usersResult = await pool.query(
       'SELECT uuid, alias, global_role, bloqueado_apartar FROM users'
     );
@@ -206,25 +266,25 @@ export async function rehydrateAll(): Promise<boolean> {
       ])
     );
 
-    // 5. Trust level settings (pricing multipliers / limits)
-    const trustResult = await pool.query('SELECT * FROM trust_levels_settings');
+    // 6. Matriz de confianza v2 (advance pub/disp + precio + apartados)
+    const trustResult = await pool.query(
+      `SELECT id, advance_pub_hours_default, advance_disp_hours_default,
+              multiplicador_precio_default, max_apartados_simultaneos, updated_at
+       FROM trust_levels_settings`
+    );
     trustSettings = new Map(trustResult.rows.map((r: any) => [r.id, r]));
 
-    // 6. Eventos + membresías para calcular disponibilidad efectiva en RAM
+    // 7. Eventos v2 (solo 4 fechas + status + nota)
     const eventsResult = await pool.query(
-      `SELECT id, title, available_from, published_at, status, pickup_deadline,
-              claims_close_at, pickup_window_hours,
-              familiares_advance_hours, amigos_advance_hours,
-              conocidos_advance_hours, publico_advance_hours,
-              familiares_pickup_hours, amigos_pickup_hours,
-              conocidos_pickup_hours, publico_pickup_hours,
-              pickup_schedule_info
+      `SELECT id, title, description, available_from, published_at,
+              claims_close_at, pickup_deadline, status, pickup_schedule_info
        FROM events`
     );
-    events = new Map(eventsResult.rows.map((e: any) => [e.id, e]));
+    events = new Map(eventsResult.rows.map((e: any) => [e.id, e as StoreEvent]));
 
+    // 8. Membresías v2 (sin role/bonus_hours)
     const membersResult = await pool.query(
-      `SELECT event_id, user_uuid, bonus_hours, invited_by, bloqueado_invitar
+      `SELECT event_id, user_uuid, invited_by, expiraciones_acumuladas, bloqueado_invitar
        FROM event_members`
     );
     eventMembers = new Map<string, StoreEventMember[]>();
@@ -232,15 +292,15 @@ export async function rehydrateAll(): Promise<boolean> {
       const list = eventMembers.get(m.user_uuid) || [];
       list.push({
         eventId: m.event_id,
-        bonusHours: m.bonus_hours,
-        invitedBy: m.invited_by,
-        bloqueadoInvitar: m.bloqueado_invitar
+        invitedBy: m.invited_by ?? null,
+        expiracionesAcumuladas: Number(m.expiraciones_acumuladas) || 0,
+        bloqueadoInvitar: !!m.bloqueado_invitar
       });
       eventMembers.set(m.user_uuid, list);
     });
 
     console.log(
-      `[APPSTORE] Rehydrated: ${items.length} items, ${ledger.length} ledger, ${feedHistory.length} feeds, ${users.size} users, ${events.size} events, ${membersResult.rows.length} memberships`
+      `[APPSTORE] Rehydrated v2: ${items.length} items, ${ledger.length} ledger, ${feedHistory.length} feeds, ${users.size} users, ${events.size} events, ${membersResult.rows.length} memberships`
     );
     // El store se reemplazó por completo: descartar el índice cacheado.
     itemsByEventStatus = null;
@@ -256,20 +316,14 @@ export async function rehydrateAll(): Promise<boolean> {
   }
 }
 
-/**
- * true cuando el store en RAM ya fue rehidratado correctamente desde Neon.
- */
+/** true cuando el store en RAM ya fue rehidratado correctamente desde Neon. */
 export function isHydrated(): boolean {
   return hydrated;
 }
 
 /**
- * Self-heal perezoso del store: si el rehidratado de arranque falló (Neon
- * autosuspendido), la primera lectura que pase por aquí reintenta cargar todo.
- * - Single-flight: solo hay un intento en curso a la vez (sin estampida).
- * - Cooldown: tras un fallo no se vuelve a tocar Neon durante unos segundos,
- *   aunque lleguen varias peticiones seguidas (sin gasto de compute innecesario).
- * En el caso sano (hydrated === true) NO toca la BD: regresa al instante.
+ * Self-heal perezoso del store: si el rehidratado de arranque falló, la primera
+ * lectura que pase por aquí reintenta cargar todo (single-flight + cooldown).
  */
 export function ensureHydrated(): Promise<void> {
   if (hydrated) return Promise.resolve();
@@ -290,10 +344,12 @@ export function ensureHydrated(): Promise<void> {
 
 // --- Lecturas (sin BD) ---
 export const getItems = (): StoreItem[] => items;
+export const getItemById = (itemId: string): StoreItem | undefined =>
+  items.find(i => i.id === itemId);
 export const getLedger = (): LedgerEntry[] => ledger;
 export const getFeedHistory = (): FeedEntry[] => feedHistory;
 export const getUser = (uuid: string): StoreUser | undefined => users.get(uuid);
-export const getEvent = (eventId: string): any => events.get(eventId);
+export const getEvent = (eventId: string): StoreEvent | undefined => events.get(eventId);
 export const getEventMembership = (
   userUuid: string,
   eventId: string
@@ -303,15 +359,60 @@ export const getTrustSetting = (level: string): any => trustSettings.get(level);
 
 /**
  * Write-through: aplica un parche a una fila de la matriz de confianza en RAM
- * (después del UPDATE en Neon). Hace merge conservando las columnas no tocadas
- * (precios / apartados simultáneos), que solo se rehidratan al arranque.
+ * (después del UPDATE en Neon). Hace merge conservando columnas no tocadas.
  */
 export function upsertTrustSetting(levelId: string, patch: Record<string, any>): void {
   const prev = trustSettings.get(levelId) ?? {};
   trustSettings.set(levelId, { ...prev, ...patch, id: levelId });
 }
 
-// --- Escrituras (write-through, llamadas por los controladores) ---
+// --- Escrituras (write-through, llamadas por los controladores/servicios) ---
+
+function invalidateEventStatusIndex(): void {
+  itemsByEventStatus = null;
+}
+
+/** Aplica un parche a un item en RAM y revalida el índice si cambió el evento. */
+export function patchItem(itemId: string, patch: Partial<StoreItem>): void {
+  const idx = items.findIndex(i => i.id === itemId);
+  if (idx < 0) return;
+  const prev = items[idx];
+  const next = { ...prev, ...patch };
+  // Sanidad: mantener la cola del item previo si el parche no la trae.
+  if (!('queue' in patch) && !next.queue) next.queue = prev.queue || [];
+  items[idx] = next;
+  if (patch.eventId !== undefined && patch.eventId !== prev.eventId) {
+    invalidateEventStatusIndex();
+  }
+}
+
+/** Aplica un parche a un claim dentro de la cola de un item en RAM. */
+export function patchClaim(
+  itemId: string,
+  claimId: string,
+  patch: Partial<StoreClaim>
+): void {
+  const idx = items.findIndex(i => i.id === itemId);
+  if (idx < 0) return;
+  const item = items[idx];
+  const cIdx = item.queue.findIndex(c => c.id === claimId);
+  if (cIdx < 0) return;
+  const queue = item.queue.slice();
+  queue[cIdx] = { ...queue[cIdx], ...patch };
+  items[idx] = { ...item, queue };
+}
+
+/** Inserta (o actualiza) un claim en la cola de un item en RAM. */
+export function addClaimToItem(itemId: string, claim: StoreClaim): void {
+  const idx = items.findIndex(i => i.id === itemId);
+  if (idx < 0) return;
+  const item = items[idx];
+  const exists = item.queue.some(c => c.id === claim.id);
+  const queue = exists ? item.queue.map(c => (c.id === claim.id ? claim : c)) : [...item.queue, claim];
+  items[idx] = { ...item, queue };
+}
+
+/** Write-through de un item completo (create/update). */
 export function upsertItem(item: StoreItem): void {
   const idx = items.findIndex(i => i.id === item.id);
   if (idx >= 0) items[idx] = item;
@@ -322,62 +423,6 @@ export function upsertItem(item: StoreItem): void {
 export function removeItem(itemId: string): void {
   items = items.filter(i => i.id !== itemId);
   invalidateEventStatusIndex();
-}
-
-export function addClaimToItem(
-  itemId: string,
-  claim: {
-    userUuid: string;
-    username: string;
-    claimedAt: string;
-    pickupDeadline: string | null;
-    roleAtAssignment?: string | null;
-    pickupWindowHours?: number | null;
-  },
-  newStatus: string
-): void {
-  items = items.map(i => {
-    if (i.id !== itemId) return i;
-    const queue = i.queue.some(q => q.userUuid === claim.userUuid)
-      ? i.queue
-      : [...i.queue, claim];
-    return { ...i, status: newStatus, queue };
-  });
-}
-
-export function removeClaimFromItem(itemId: string, userUuid: string, newStatus: string): void {
-  items = items.map(i => {
-    if (i.id !== itemId) return i;
-    return { ...i, status: newStatus, queue: i.queue.filter(q => q.userUuid !== userUuid) };
-  });
-}
-
-/**
- * Write-through: refresh the frozen deadline / role / window of a specific
- * queue entry (typically the new first-in-line after an advance). Keeps the
- * RAM store consistent with the frozen values persisted in Neon.
- */
-export function refreshClaimDeadline(
-  itemId: string,
-  userUuid: string,
-  pickupDeadline: string | null,
-  roleAtAssignment?: string | null,
-  pickupWindowHours?: number | null
-): void {
-  items = items.map(i => {
-    if (i.id !== itemId) return i;
-    const queue = i.queue.map(q =>
-      q.userUuid === userUuid
-        ? {
-            ...q,
-            pickupDeadline,
-            roleAtAssignment: roleAtAssignment ?? q.roleAtAssignment ?? null,
-            pickupWindowHours: pickupWindowHours != null ? pickupWindowHours : q.pickupWindowHours ?? null
-          }
-        : q
-    );
-    return { ...i, queue };
-  });
 }
 
 export function appendLedger(entry: LedgerEntry): void {
@@ -395,21 +440,19 @@ export function upsertUser(u: StoreUser): void {
 
 /**
  * Renombra el alias de un usuario en todo el store en RAM: colas de items,
- * ledger y mapa de usuarios. Es el write-through del UPDATE de alias en Neon.
- * Devuelve los itemIds donde el usuario tiene un claim (por si el emisor quiere
- * notificar por SSE por item), aunque el broadcast suele ser un evento único.
+ * ledger y mapa de usuarios. Devuelve los itemIds afectados.
  */
 export function renameUserInStore(userUuid: string, newAlias: string): string[] {
   const affectedItemIds: string[] = [];
 
   items = items.map(i => {
     let changed = false;
-    const queue = i.queue.map(q => {
-      if (q.userUuid === userUuid && q.username !== newAlias) {
+    const queue = i.queue.map(c => {
+      if (c.userUuid === userUuid && c.username !== newAlias) {
         changed = true;
-        return { ...q, username: newAlias };
+        return { ...c, username: newAlias };
       }
-      return q;
+      return c;
     });
     if (changed) {
       affectedItemIds.push(i.id);
@@ -428,16 +471,12 @@ export function renameUserInStore(userUuid: string, newAlias: string): string[] 
   return affectedItemIds;
 }
 
-export function upsertEvent(evt: any): void {
+export function upsertEvent(evt: StoreEvent): void {
   events.set(evt.id, evt);
   invalidateEventStatusIndex();
 }
 
-/**
- * Write-through del estatus de un evento en RAM (transiciones del scheduler o
- * del update admin). Cambia el bucket de todos sus items, por lo que invalida
- * el índice por estatus.
- */
+/** Write-through del estatus de un evento en RAM. */
 export function setEventStatusInStore(eventId: string, status: string): void {
   const evt = events.get(eventId);
   if (!evt) return;
@@ -449,7 +488,6 @@ export function setEventStatusInStore(eventId: string, status: string): void {
 export function removeEvent(eventId: string): void {
   events.delete(eventId);
   invalidateEventStatusIndex();
-  // Also drop memberships pointing to the removed event
   for (const [userUuid, members] of eventMembers) {
     const filtered = members.filter(m => m.eventId !== eventId);
     if (filtered.length === 0) eventMembers.delete(userUuid);
@@ -465,39 +503,18 @@ export function upsertEventMember(userUuid: string, membership: StoreEventMember
   eventMembers.set(userUuid, list);
 }
 
-/**
- * Propagate event-level date changes to the store items that INHERIT them
- * (items with their own value keep the override — inheritance vs override).
- */
-export function propagateEventDates(
-  eventId: string,
-  changes: { availableFrom?: string | null; visibleAt?: string | null }
-): void {
-  items = items.map(i => {
-    if (i.eventId !== eventId) return i;
-    const next = { ...i };
-    if (changes.availableFrom !== undefined && next.availableFrom === null) {
-      next.availableFrom = changes.availableFrom;
-    }
-    if (changes.visibleAt !== undefined && next.visibleAt === null) {
-      next.visibleAt = changes.visibleAt;
-    }
-    return next;
-  });
-}
-
-/** Detach all store items from a deleted event (clear inherited scheduling). */
+/** Desvincula todos los items del store de un evento eliminado. */
 export function detachItemsFromEvent(eventId: string): void {
   items = items.map(i => {
     if (i.eventId !== eventId) return i;
-    return { ...i, eventId: null, visibleAt: null, availableFrom: null };
+    return { ...i, eventId: null };
   });
   invalidateEventStatusIndex();
 }
 
-// --- Índice por estatus de evento (cambio 3 del plan) ---
+// --- Índice por estatus de evento (lista admin) ---
 
-/** Orden canónico de los estatus de evento para listar/contar de forma estable. */
+/** Orden canónico de los estatus de evento. */
 export const EVENT_STATUS_ORDER = ['draft', 'scheduled', 'active', 'closing', 'closed'] as const;
 
 /** Clave interna del bucket "sin evento / huérfano" (defensivo). */
@@ -508,11 +525,6 @@ function eventStatusOf(item: StoreItem): string {
   if (!item.eventId) return NO_EVENT_STATUS_KEY;
   const evt = events.get(item.eventId);
   return evt?.status ?? NO_EVENT_STATUS_KEY;
-}
-
-/** Invalida el índice cacheado (se reconstruirá en la próxima lectura). */
-export function invalidateEventStatusIndex(): void {
-  itemsByEventStatus = null;
 }
 
 /** Barrido único: agrupa items por estatus de evento. */
@@ -532,12 +544,7 @@ function ensureEventStatusIndex(): Map<string, StoreItem[]> {
   return itemsByEventStatus;
 }
 
-/**
- * Items de los buckets pedidos (concatenación, manteniendo el orden de carga:
- * created_at DESC en rehidratación). Opcionalmente incluye siempre los items sin
- * evento/huérfanos (defensivo: por regla no deberían existir, pero si llega uno
- * el admin debe poder verlo aunque el filtro no lo pida).
- */
+/** Items de los buckets pedidos (concatenación, orden de carga). */
 export function getItemsByEventStatus(statuses: string[], includeNoEvent = true): StoreItem[] {
   const index = ensureEventStatusIndex();
   const out: StoreItem[] = [];

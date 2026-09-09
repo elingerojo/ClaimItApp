@@ -4,7 +4,7 @@
   <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-100 pb-6 mb-6">
     <div>
       <h1 class="text-2xl font-bold text-gray-900 tracking-tight">Configuración</h1>
-      <p class="text-xs text-gray-500 mt-1">Ventajas por rol y agenda que alimentan la creación de nuevos eventos.</p>
+      <p class="text-xs text-gray-500 mt-1">Matriz de confianza v2 y plantilla de agenda que alimentan los eventos.</p>
     </div>
     <div class="mt-4 md:mt-0">
       <app-admin-auth />
@@ -26,61 +26,99 @@
     } @else {
 
       <!-- ==================================================================
-           Ventajas por rol (matriz de confianza, editable)
+           Matriz de confianza v2 (por rol, editable)
            ================================================================== -->
       <div class="bg-white border border-gray-100 rounded-xl shadow-sm p-5 mb-6">
         <div class="flex items-center justify-between mb-1">
-          <h2 class="text-sm font-bold text-gray-900">Ventajas por rol</h2>
-          <button (click)="saveRoles()" [disabled]="savingRoles()"
-                  class="text-xs px-4 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
-            {{ savingRoles() ? 'Guardando...' : 'Guardar ventajas' }}
+          <h2 class="text-sm font-bold text-gray-900">Matriz de confianza (v2)</h2>
+          <button (click)="saveRoles()" [disabled]="savingRoles() || hasInvariantErrors()"
+                  [title]="hasInvariantErrors() ? 'Corrige la invariante (adelanto de apartado &le; adelanto de visibilidad) para guardar.' : 'Guardar los cambios de la matriz.'"
+                  class="text-xs px-4 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
+            {{ savingRoles() ? 'Guardando...' : 'Guardar matriz' }}
           </button>
         </div>
-        <p class="text-[10px] text-gray-400 mb-4">
-          Cada rol conoce solo su propia ventaja. Se aplican al <b>crear</b> un evento y quedan
-          congeladas en él (editar la matriz no cambia eventos ya existentes). Precios y apartados
-          simultáneos se muestran como referencia (no editables aquí).
+        <p class="text-[10px] text-gray-400 mb-1">
+          Las ventajas se leen en <b>tiempo real</b> desde esta matriz (cero columnas por evento). Cada rol
+          adelanta su <b>visibilidad</b> desde <code class="font-mono">published_at</code> y su <b>inicio de
+          apartado</b> desde <code class="font-mono">available_from</code>. Regla "nunca se reclama sin ver":
+          el adelanto de apartado (disp) no puede superar al de visibilidad (pub) en el mismo rol.
         </p>
+
+        <!-- Guarda 409: no se puede editar advance_pub/disp con eventos publicados/en curso -->
+        @if (guardBlocked()) {
+          @if (guardMessage(); as msg) {
+            <div class="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <span class="font-bold">🔒 Guarda de la matriz:</span> {{ msg }}
+            </div>
+          }
+        }
 
         <div class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead>
               <tr class="text-left text-[10px] text-gray-400 uppercase tracking-wider border-b border-gray-100">
                 <th class="py-2 pr-3 font-medium">Rol</th>
-                <th class="py-2 pr-3 font-medium" title="Horas antes de available_from en que el rol puede apartar">Anticipación (h)</th>
-                <th class="py-2 pr-3 font-medium" title="Horas extra por cada referido que acepta">Bonus referido (h)</th>
-                <th class="py-2 pr-3 font-medium" title="Horas que tiene el primero en fila para recoger">Ventana recogida (h)</th>
-                <th class="py-2 pr-3 font-medium text-gray-300">Precio (ref.)</th>
-                <th class="py-2 pr-3 font-medium text-gray-300">Apartados (ref.)</th>
+                <th class="py-2 pr-3 font-medium" title="Adelanto de la VISIBILIDAD desde events.published_at (0..360 h)">
+                  👁 Adelanto visibilidad (h)
+                </th>
+                <th class="py-2 pr-3 font-medium" title="Adelanto del INICIO DE CLAIM desde events.available_from (0..360 h)">
+                  🙋 Adelanto apartado (h)
+                </th>
+                <th class="py-2 pr-3 font-medium" title="Precio del rol = precio base × este multiplicador">
+                  💲 Precio (× rol)
+                </th>
+                <th class="py-2 pr-3 font-medium" title="Límite de apartados simultáneos del rol en un evento">
+                  📦 Apartados máx.
+                </th>
               </tr>
             </thead>
             <tbody>
               @for (row of roles(); track row.id) {
-                <tr class="border-b border-gray-50">
+                <tr class="border-b border-gray-50 align-top">
                   <td class="py-2 pr-3 font-semibold text-gray-800">{{ roleLabels[row.id] ?? row.id }}</td>
                   <td class="py-2 pr-3">
-                    <input [(ngModel)]="row.advance" type="number" min="0" max="360"
-                           [disabled]="row.id === 'publico'"
-                           class="w-20 text-xs px-2 py-1.5 border border-gray-200 rounded-lg disabled:bg-gray-50 disabled:text-gray-400" />
-                  </td>
-                  <td class="py-2 pr-3">
-                    <input [(ngModel)]="row.bonus" type="number" min="0" max="500"
-                           [disabled]="row.id === 'publico'"
-                           class="w-20 text-xs px-2 py-1.5 border border-gray-200 rounded-lg disabled:bg-gray-50 disabled:text-gray-400" />
-                  </td>
-                  <td class="py-2 pr-3">
-                    <input [(ngModel)]="row.pickup" type="number" min="1" max="720"
+                    <input [(ngModel)]="row.advancePub" type="number" min="0" [max]="advanceHoursMax"
+                           title="Adelanto de visibilidad (h): instante en que el rol VE el objeto antes de published_at."
                            class="w-20 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" />
                   </td>
-                  <td class="py-2 pr-3 text-gray-500">{{ row.multiplier != null ? row.multiplier : '—' }}</td>
-                  <td class="py-2 pr-3 text-gray-500">{{ row.maxApartados ?? '—' }}</td>
+                  <td class="py-2 pr-3">
+                    <input [(ngModel)]="row.advanceDisp" type="number" min="0" [max]="advanceHoursMax"
+                           [class.border-red-400]="rowInvalid(row)"
+                           [class.bg-red-50]="rowInvalid(row)"
+                           [title]="rowInvalid(row)
+                             ? 'Invalida: el adelanto de apartado no puede superar al de visibilidad.'
+                             : 'Adelanto de inicio de apartado (h): instante en que el rol puede apartar el objeto antes de available_from.'"
+                           class="w-20 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" />
+                  </td>
+                  <td class="py-2 pr-3">
+                    <input [(ngModel)]="row.multiplier" type="number" min="0" [max]="multiplierMax" step="0.05"
+                           title="Multiplicador de precio por rol (0..9.99)."
+                           class="w-20 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" />
+                  </td>
+                  <td class="py-2 pr-3">
+                    <input [(ngModel)]="row.maxApartados" type="number" min="0" max="100" step="1"
+                           title="Máximo de apartados simultáneos del rol en un evento."
+                           class="w-20 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" />
+                  </td>
                 </tr>
               } @empty {
-                <tr><td class="py-3 text-gray-400 italic" colspan="6">Sin filas de rol.</td></tr>
+                <tr><td class="py-3 text-gray-400 italic" colspan="5">Sin filas de rol.</td></tr>
               }
             </tbody>
           </table>
         </div>
+
+        @if (hasInvariantErrors()) {
+          <div class="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            ⚠️ Hay roles con la invariante rota (adelanto de apartado > adelanto de visibilidad).
+            Corrígelos para poder guardar.
+          </div>
+        }
+        <p class="text-[10px] text-gray-400 mt-2">
+          Se guarda solo lo que cambiaste. Editar <b>precio/apartados</b> se permite siempre; editar
+          <b>adelantos</b> queda <b>bloqueado (409)</b> mientras exista un evento publicado o en curso
+          (scheduled/active/closing), porque esos cambios solo aplican a eventos futuros/no iniciados.
+        </p>
       </div>
 
       <!-- ==================================================================
@@ -96,8 +134,9 @@
             </button>
           </div>
           <p class="text-[10px] text-gray-400 mb-4">
-            Al crear un evento solo eliges la <b>fecha de publicación</b>; las demás fechas se
-            calculan con estos huecos y se muestran como información (no editables).
+            Al crear un evento se sugieren las 4 fechas a partir de la <b>fecha de publicación</b> con estos
+            huecos (puedes ajustarlas a mano en el formulario de Eventos). La agenda no cambia con la
+            Estrategia v2.
           </p>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">

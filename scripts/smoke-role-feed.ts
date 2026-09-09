@@ -1,3 +1,10 @@
+/*
+ * ⚠️ LEGACY / OBSOLETO — Estrategia temporal v2 (Fase 5): smoke del feed de "ventanas
+ * simétricas por rol" (buildRoleTimeline/effective availability), concepto ELIMINADO en v2
+ * (publicación/"Lo quiero" dinámico puro con la matriz advance_pub/disp). Conservado solo
+ * como referencia histórica. Verificación E2E vigente:
+ *   npx tsx scripts/test-v2-strategy.ts
+ */
 /**
  * scripts/smoke-role-feed.ts
  *

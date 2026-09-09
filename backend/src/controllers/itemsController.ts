@@ -1,19 +1,48 @@
 import { Request, Response } from 'express';
 import pool from '../config/db.js';
 import type { PoolClient } from 'pg';
+import type { ItemPhase } from '@claimitapp/shared';
 import { broadcastSseEvent } from '../config/sse.js';
 import { validateItemInput, validateImageUrls } from '@claimitapp/shared';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 import {
-  getItems,
+  getItemById,
   upsertItem,
   removeItem,
   getEvent,
   getItemsByEventStatus,
   getEventStatusCounts,
   ensureHydrated,
-  EVENT_STATUS_ORDER
+  EVENT_STATUS_ORDER,
+  type StoreItem
 } from '../cache/appStore.js';
+import { temporalStateFromStore } from '../services/queueService.js';
+import { runLazyCatchUp } from '../services/scheduler.js';
+
+/** Convierte una fila de `items` (RETURNING) a un StoreItem con la cola dada. */
+function toStoreItem(item: any, queue: StoreItem['queue']): StoreItem {
+  return {
+    id: item.id,
+    eventId: item.event_id ?? null,
+    title: item.title,
+    description: item.description,
+    category: item.category,
+    infoUrl: item.info_url,
+    imageUrls: Array.isArray(item.image_urls) ? item.image_urls : [],
+    status: item.status,
+    phase: item.phase,
+    visibilityLevel: item.visibility_level,
+    precioBaseCosto: item.precio_base_costo,
+    frozenSchedule: item.frozen_schedule ? item.frozen_schedule : null,
+    frozenAt: item.frozen_at ?? null,
+    freeWindowOpenedAt: item.free_window_opened_at ?? null,
+    deliveredClaimId: item.delivered_claim_id ?? null,
+    deliveredAt: item.delivered_at ?? null,
+    charityAt: item.charity_at ?? null,
+    createdAt: item.created_at,
+    queue
+  };
+}
 
 export const createItem = async (req: Request, res: Response): Promise<void> => {
   const {
@@ -24,13 +53,10 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     imageUrls,
     visibility_level,
     event_id,
-    available_from,
-    visible_at,
     precio_base_costo
   } = req.body;
-  const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
+  const adminSession = (req as any).adminSession;
 
-  // Validate input (imageUrls = arreglo ordenado de fotos, mínimo 1)
   const validation = validateItemInput({ title, description, category, infoUrl, imageUrls });
   if (!validation.valid) {
     res.status(400).json({
@@ -51,7 +77,6 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
   }
 
   try {
-    // Verificar que el evento destino exista (400 amigable en vez de FK violation).
     const evCheck = await pool.query('SELECT id FROM events WHERE id = $1', [event_id]);
     if (evCheck.rows.length === 0) {
       res.status(400).json({
@@ -64,48 +89,27 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     const insertQuery = `
       INSERT INTO items
         (title, description, category, info_url, image_urls,
-         visibility_level, event_id, available_from, visible_at, precio_base_costo)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      RETURNING id, title, description, category, info_url, image_urls, status,
-                visibility_level, event_id, available_from, visible_at,
-                precio_base_costo, nivel_acceso_minimo, created_at
+         visibility_level, event_id, precio_base_costo)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id, title, description, category, info_url, image_urls, status, phase,
+                visibility_level, event_id,
+                precio_base_costo, created_at
     `;
     const result = await pool.query(insertQuery, [
       title,
       description || null,
       category,
       infoUrl || null,
-      // JSONB: se envía serializado como JSON
       JSON.stringify(imageUrls),
       visibility_level ?? 4,
       event_id,
-      available_from ?? null,
-      visible_at ?? null,
       precio_base_costo ?? null
     ]);
 
     const item = result.rows[0];
 
-    // Write-through: actualizar el store en RAM
-    upsertItem({
-      id: item.id,
-      title: item.title,
-      description: item.description,
-      category: item.category,
-      infoUrl: item.info_url,
-      imageUrls: item.image_urls ?? [],
-      status: item.status,
-      visibilityLevel: item.visibility_level,
-      eventId: item.event_id,
-      visibleAt: item.visible_at,
-      availableFrom: item.available_from,
-      precioBaseCosto: item.precio_base_costo,
-      nivelAccesoMinimo: item.nivel_acceso_minimo,
-      createdAt: item.created_at,
-      queue: []
-    });
+    upsertItem(toStoreItem(item, []));
 
-    // Log audit entry
     await logAudit({
       action: 'ITEM_CREATED',
       adminCodeSuffix: maskAdminCode(String(adminSession?.id ?? '')),
@@ -113,6 +117,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
       details: {
         title: item.title,
         category: item.category,
+        phase: item.phase,
         timestamp: new Date().toISOString()
       }
     });
@@ -127,6 +132,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
         infoUrl: item.info_url,
         imageUrls: item.image_urls ?? [],
         status: item.status,
+        phase: item.phase,
         createdAt: item.created_at
       }
     });
@@ -141,7 +147,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
 
 export const updateItem = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
-  const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
+  const adminSession = (req as any).adminSession;
   const {
     title,
     description,
@@ -149,8 +155,6 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     imageUrls,
     visibility_level,
     event_id,
-    available_from,
-    visible_at,
     precio_base_costo
   } = req.body;
 
@@ -167,7 +171,6 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     }
   }
 
-  // imageUrls es un arreglo ordenado de fotos; se exige al menos 1 y URLs válidas
   if (imageUrls !== undefined) {
     const photoErrors: string[] = [];
     validateImageUrls(imageUrls, photoErrors);
@@ -177,10 +180,6 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     }
   }
 
-  // Construir el SET dinámicamente SOLO con las llaves presentes en el body.
-  // Así se puede asignar NULL explícito para limpiar un campo opcional
-  // (por ejemplo desasignar el evento o borrar available_from/visible_at),
-  // algo imposible con el enfoque anterior basado en COALESCE.
   const assignments: string[] = [];
   const params: any[] = [];
   const changedFields: Record<string, boolean> = {};
@@ -193,11 +192,9 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
   if (title !== undefined) set('title', title, 'title');
   if (description !== undefined) set('description', description, 'description');
   if (infoUrl !== undefined) set('info_url', infoUrl, 'infoUrl');
-  // JSONB: el arreglo ordenado viaja como JSON serializado
   if (imageUrls !== undefined) set('image_urls', JSON.stringify(imageUrls), 'imageUrls');
   if (visibility_level !== undefined) set('visibility_level', visibility_level, 'visibility_level');
   if (event_id !== undefined) {
-    // Regla event-first: el item no puede quedar sin evento.
     if (!event_id || typeof event_id !== 'string') {
       res.status(400).json({
         error: 'Invalid event_id: every item must belong to an event.',
@@ -207,11 +204,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     }
     set('event_id', event_id, 'event_id');
   }
-  if (available_from !== undefined) set('available_from', available_from, 'available_from');
-  if (visible_at !== undefined) set('visible_at', visible_at, 'visible_at');
   if (precio_base_costo !== undefined) {
-    // El precio por rol se calcula en tiempo de lectura (base × multiplicador);
-    // aquí solo se persiste el precio base del item.
     set('precio_base_costo', precio_base_costo, 'precio_base_costo');
   }
 
@@ -223,7 +216,6 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
   }
 
   try {
-    // Regla event-first: si se asigna un evento, debe existir.
     if (event_id !== undefined) {
       const evCheck = await pool.query('SELECT id FROM events WHERE id = $1', [event_id]);
       if (evCheck.rows.length === 0) {
@@ -240,9 +232,9 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       SET ${assignments.join(', ')},
           updated_at = NOW()
       WHERE id = $${params.length}
-      RETURNING id, title, description, category, info_url, image_urls, status,
-                visibility_level, event_id, available_from, visible_at,
-                precio_base_costo, nivel_acceso_minimo, created_at
+      RETURNING id, title, description, category, info_url, image_urls, status, phase,
+                visibility_level, event_id,
+                precio_base_costo, created_at
     `;
     const result = await pool.query(updateQuery, params);
 
@@ -252,28 +244,10 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     }
 
     const updatedItem = result.rows[0];
+    const existing = getItemById(updatedItem.id);
 
-    // Write-through: actualizar el store en RAM (preservando la cola actual)
-    const existing = getItems().find(i => i.id === updatedItem.id);
-    upsertItem({
-      id: updatedItem.id,
-      title: updatedItem.title,
-      description: updatedItem.description,
-      category: updatedItem.category,
-      infoUrl: updatedItem.info_url,
-      imageUrls: updatedItem.image_urls ?? [],
-      status: updatedItem.status,
-      visibilityLevel: updatedItem.visibility_level,
-      eventId: updatedItem.event_id,
-      visibleAt: updatedItem.visible_at,
-      availableFrom: updatedItem.available_from,
-      precioBaseCosto: updatedItem.precio_base_costo,
-      nivelAccesoMinimo: updatedItem.nivel_acceso_minimo,
-      createdAt: updatedItem.created_at,
-      queue: existing?.queue ?? []
-    });
+    upsertItem(toStoreItem(updatedItem, existing?.queue ?? []));
 
-    // Log audit entry
     await logAudit({
       action: 'ITEM_UPDATED',
       adminCodeSuffix: maskAdminCode(String(adminSession?.id ?? '')),
@@ -284,11 +258,10 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       }
     });
 
-    // Broadcast the update via SSE (incluye el arreglo de fotos para que la
-    // portada/galeía de otros clientes se actualice en vivo).
     broadcastSseEvent('item_updated', {
       itemId: updatedItem.id,
       status: updatedItem.status,
+      phase: updatedItem.phase,
       title: updatedItem.title,
       description: updatedItem.description,
       infoUrl: updatedItem.info_url,
@@ -305,6 +278,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
         infoUrl: updatedItem.info_url,
         imageUrls: updatedItem.image_urls ?? [],
         status: updatedItem.status,
+        phase: updatedItem.phase,
         createdAt: updatedItem.created_at
       }
     });
@@ -316,7 +290,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
 
 export const deleteItem = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
-  const adminSession = (req as any).adminSession; // Attached by requireAdminSession middleware
+  const adminSession = (req as any).adminSession;
 
   if (!id) {
     res.status(400).json({ error: 'Missing item id parameter.' });
@@ -325,16 +299,9 @@ export const deleteItem = async (req: Request, res: Response): Promise<void> => 
 
   let client: PoolClient | undefined;
   try {
-    // Single transaction: the ITEM_DELETED audit row is inserted BEFORE the item is
-    // removed (while the FK to items(id) still resolves) and the DELETE then runs in
-    // the same transaction. This fixes the audit_log_item_id_fkey (23503) violation,
-    // which fired because the audit insert referenced an item that had already been
-    // deleted and autocommitted by the previous standalone DELETE.
     client = await pool.connect();
     await client.query('BEGIN');
 
-    // Resolve the title inside the tx so the audit entry can record it, and confirm
-    // the item exists before doing any further work.
     const pre = await client.query('SELECT title FROM items WHERE id = $1', [id]);
     if (pre.rows.length === 0) {
       await client.query('ROLLBACK');
@@ -343,9 +310,6 @@ export const deleteItem = async (req: Request, res: Response): Promise<void> => 
     }
     const title: string = pre.rows[0].title;
 
-    // Audit BEFORE delete while the item is still present (FK satisfied). Wrapped in
-    // a SAVEPOINT so a failed audit (logAudit returns false) only rolls back that one
-    // statement and never blocks the deletion: the audit stays non-blocking by design.
     await client.query('SAVEPOINT audit_sp');
     const auditOk = await logAudit(
       {
@@ -365,10 +329,7 @@ export const deleteItem = async (req: Request, res: Response): Promise<void> => 
       await client.query('ROLLBACK TO SAVEPOINT audit_sp');
     }
 
-    // Delete the item row inside the same transaction. Related claims are removed via
-    // ON DELETE CASCADE; ON DELETE SET NULL clears item_id on the just-written audit row.
     const result = await client.query('DELETE FROM items WHERE id = $1 RETURNING id, title', [id]);
-
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
       res.status(404).json({ error: 'Item not found.' });
@@ -376,12 +337,9 @@ export const deleteItem = async (req: Request, res: Response): Promise<void> => 
     }
 
     const deletedItem = result.rows[0];
-
     await client.query('COMMIT');
 
-    removeItem(deletedItem.id); // Write-through: quitar del store en RAM
-
-    // Broadcast the deletion via SSE
+    removeItem(deletedItem.id);
     broadcastSseEvent('item_deleted', {
       itemId: deletedItem.id,
       title: deletedItem.title
@@ -405,10 +363,35 @@ export const deleteItem = async (req: Request, res: Response): Promise<void> => 
 };
 
 /**
- * GET /api/admin/items/:id
- * Devuelve el registro completo de un objeto (admin only) para poder precargar
- * el editor. Se sirve desde el store en RAM (misma fuente que GET /api/items),
- * sin consultar Neon.
+ * GET /api/items/:id/estado-temporal (v2 — contrato del plan §4.4)
+ *
+ * Responde el `ItemTemporalState` (estado_actual, tiempo restante del turno
+ * activo, línea de tiempo fija congelada V1..V3/ventana/caridad y participantes).
+ * Corre el lazy catch-up antes de responder para que el reloj esté al día
+ * (freeze si T_inicio llegó, expirios/ventana/caridad por reloj).
+ */
+export const getItemTemporalState = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+  try {
+    await ensureHydrated();
+    await runLazyCatchUp();
+
+    const item = getItemById(id);
+    if (!item) {
+      res.status(404).json({ error: 'Item not found.' });
+      return;
+    }
+
+    const event = item.eventId ? getEvent(item.eventId) : undefined;
+    res.status(200).json(temporalStateFromStore(item, event));
+  } catch (error) {
+    console.error('Failed to compute temporal state:', error);
+    res.status(500).json({ error: 'Database processing error computing item temporal state.' });
+  }
+};
+
+/**
+ * GET /api/admin/items/:id — detalle admin (editor). Sirve desde RAM.
  */
 export const getItemDetail = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
@@ -418,7 +401,7 @@ export const getItemDetail = async (req: Request, res: Response): Promise<void> 
     return;
   }
 
-  const item = getItems().find(i => i.id === id);
+  const item = getItemById(id);
   if (!item) {
     res.status(404).json({ error: 'Item not found.' });
     return;
@@ -432,28 +415,39 @@ export const getItemDetail = async (req: Request, res: Response): Promise<void> 
     infoUrl: item.infoUrl,
     imageUrls: item.imageUrls,
     status: item.status,
+    phase: item.phase,
     visibilityLevel: item.visibilityLevel,
     eventId: item.eventId,
-    visibleAt: item.visibleAt,
-    availableFrom: item.availableFrom,
     precioBaseCosto: item.precioBaseCosto,
+    frozenSchedule: item.frozenSchedule,
+    frozenAt: item.frozenAt,
+    freeWindowOpenedAt: item.freeWindowOpenedAt,
+    deliveredClaimId: item.deliveredClaimId,
+    deliveredAt: item.deliveredAt,
+    charityAt: item.charityAt,
     createdAt: item.createdAt,
     queue: item.queue
   });
 };
 
+/** Payload de claim admin (legacy shape simplificada + campos v2). */
+function serializeQueueClaim(q: StoreItem['queue'][number]) {
+  return {
+    id: q.id,
+    userUuid: q.userUuid,
+    username: q.username,
+    claimedAt: q.claimedAt,
+    claimState: q.claimState,
+    roleAtClaim: q.roleAtClaim,
+    fifoPosition: q.fifoPosition,
+    turnVExpiresAt: q.turnVExpiresAt
+  };
+}
+
 /**
- * GET /api/admin/items?statuses=active,closing
- *
- * Listado admin de objetos FILTRADO por estatus de evento (cambio 1 del plan):
- * - NO aplica el gatekeeping del feed público (publicación/visibilidad/lifecycle):
- *   un admin gestiona también objetos de eventos 'draft' o aún no publicados.
- * - Fuente: índice por estatus en RAM (appStore). Solo se sirven los buckets
- *   pedidos → payload acotado; el histórico 'closed' no se arrastra si el
- *   cliente no lo pide.
- * - `statuses` (obligatorio, ≥1, OR): lista separada por comas.
- * - Respuesta: { items, counts } donde `counts` da el total por cada estatus
- *   canónico (para pintar contadores de chips aun de estatus inactivos).
+ * GET /api/admin/items?statuses=active,closing — listado admin filtrado por
+ * estatus de evento. Fuente: índice por estatus en RAM. Incluye phase y la cola
+ * forense v2.
  */
 export const listAllAdminItems = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -483,15 +477,16 @@ export const listAllAdminItems = async (req: Request, res: Response): Promise<vo
         infoUrl: item.infoUrl,
         imageUrls: item.imageUrls,
         status: item.status,
+        phase: item.phase as ItemPhase,
         visibilityLevel: item.visibilityLevel ?? 4,
         eventId: item.eventId ?? null,
-        visibleAt: item.visibleAt ?? null,
-        availableFrom: item.availableFrom ?? null,
+        frozenSchedule: item.frozenSchedule,
         eventSummary: event
           ? {
               id: event.id,
               title: event.title ?? null,
               status: event.status ?? 'draft',
+              published_at: event.published_at,
               available_from: event.available_from,
               claims_close_at: event.claims_close_at ?? null,
               pickup_deadline: event.pickup_deadline ?? null,
@@ -499,13 +494,7 @@ export const listAllAdminItems = async (req: Request, res: Response): Promise<vo
             }
           : null,
         createdAt: item.createdAt,
-        queue: item.queue.map((q) => ({
-          userUuid: q.userUuid,
-          username: q.username,
-          claimedAt: q.claimedAt,
-          pickupDeadline: q.pickupDeadline ?? null,
-          roleAtAssignment: q.roleAtAssignment ?? null
-        }))
+        queue: item.queue.map(serializeQueueClaim)
       };
     });
 

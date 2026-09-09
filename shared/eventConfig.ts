@@ -3,11 +3,19 @@
  *
  * Configuración global de agenda de eventos (fila única en `event_config`)
  * y derivación de las 4 fechas públicas a partir de una única fecha ancla:
- * la fecha de publicación (`published_at`).
+ * la fecha de publicación (`published_at`). Se conserva tal cual (v2 no la
+ * cambia).
  *
- * La plantilla `event_config` NO contiene ventajas por rol: esas viven en
- * `trust_levels_settings` (matriz) y se congelan sobre cada evento al crearlo.
+ * Además define el tipo de la MATRIZ DE CONFIANZA v2 (`trust_levels_settings`):
+ * dos valores de adelanto DINÁMICO por rol (cero columnas por evento):
+ *   - advance_pub_hours_default  → adelanta la VISIBILIDAD desde published_at
+ *   - advance_disp_hours_default → adelanta el INICIO DE CLAIM desde available_from
+ * + multiplicador_precio_default (precio por rol) y max_apartados_simultaneos.
+ * Regla de consistencia "nunca se reclama sin ver": advance_disp <= advance_pub
+ * (CHECK a nivel schema, migración 0004).
  */
+
+import type { Role } from './types.js';
 
 export const HOUR_MS = 60 * 60 * 1000;
 
@@ -49,11 +57,28 @@ export function deriveEventSchedule(
   return { published_at: publishedAt, available_from, claims_close_at, pickup_deadline };
 }
 
-/** Rollos editables en la matriz por rol (advance/bonus/recogida). */
+/**
+ * Fila de la MATRIZ DE CONFIANZA v2 por rol (trust_levels_settings).
+ * `advance_pub_hours_default` adelanta la visibilidad desde published_at;
+ * `advance_disp_hours_default` adelanta el inicio de claim desde available_from.
+ * Invariante por rol: advance_disp_hours_default <= advance_pub_hours_default
+ * (nunca se reclama sin ver).
+ */
 export interface RoleConfigRow {
   /** id de la matriz: familiares | amigos | conocidos | publico. */
-  id: string;
-  advance_hours_default: number;
-  share_bonus_default: number;
-  intervalo_recoleccion_horas_default: number;
+  id: Role;
+  /** Adelanto de VISIBILIDAD desde events.published_at (0..360 h). */
+  advance_pub_hours_default: number;
+  /** Adelanto de INICIO DE CLAIM desde events.available_from (0..360 h). */
+  advance_disp_hours_default: number;
+  /** Precio por rol (multiplicador 0..9.99). */
+  multiplicador_precio_default: number;
+  /** Límite de apartados simultáneos del rol (>= 0). */
+  max_apartados_simultaneos: number;
+  /** Audit: cuándo se actualizó la matriz. */
+  updated_at?: string;
 }
+
+/** Rango válido de horas de adelanto en la matriz (0..360 = máx 15 días). */
+export const ADVANCE_HOURS_MIN = 0;
+export const ADVANCE_HOURS_MAX = 360;

@@ -1,3 +1,10 @@
+/*
+ * ⚠️ LEGACY / OBSOLETO — Estrategia temporal v2 (Fase 5): prueba E2E del modelo ANTERIOR
+ * (el primer claim recibía pickup_deadline, endpoints /api/claims/pickup) que ya no existe
+ * en v2 (entrega por ADMIN + ventana libre + caridad). Conservado solo como referencia
+ * histórica. Verificación E2E vigente:
+ *   npx tsx scripts/test-v2-strategy.ts
+ */
 /**
  * scripts/test-plan2-live.ts
  *

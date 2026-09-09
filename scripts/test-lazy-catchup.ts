@@ -1,3 +1,12 @@
+/*
+ * ⚠️ LEGACY / OBSOLETO — Estrategia temporal v2 (Fase 5): valida el catch-up de deadlines
+ * por claim (claims.pickup_deadline, items sin event_id) del modelo ANTERIOR; en el schema
+ * v2 items.event_id es NOT NULL y el expirio es por turn_v_expires_at (V fijo) → este script
+ * no corre contra el schema actual. El lazy catch-up v2 (freeze + applyDueTransitions) se
+ * verifica en:
+ *   npx tsx scripts/test-v2-strategy.ts   (secciones B.1/B.3/B.6)
+ * Conservado solo como referencia histórica.
+ */
 /**
  * scripts/test-lazy-catchup.ts
  *
@@ -68,10 +77,7 @@ async function main(): Promise<void> {
       status: 'waitlist_open',
       visibilityLevel: 4,
       eventId: null,
-      visibleAt: null,
-      availableFrom: null,
       precioBaseCosto: null,
-      nivelAccesoMinimo: null,
       createdAt: new Date().toISOString(),
       queue: [{ userUuid: uuid, username: 'lazy', claimedAt: new Date().toISOString(), pickupDeadline: pastDeadline }]
     });

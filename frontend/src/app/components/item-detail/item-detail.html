@@ -19,12 +19,9 @@
                      flex items-center justify-center text-sm font-bold transition-colors z-10">
         ✕
       </button>
-      <span [ngClass]="{
-        'text-green-600 bg-green-50 border-green-100': item().status === 'available',
-        'text-amber-600 bg-amber-50 border-amber-100': item().status === 'waitlist_open',
-        'text-red-600 bg-red-50 border-red-100': item().status === 'unavailable'
-      }" class="absolute top-3 left-3 text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full border shadow-sm">
-        {{ (item().status === 'available' ? '🟢 Disponible' : item().status === 'waitlist_open' ? '🟡 Lista de Espera' : '🔴 No disponible') | stripAccents }}
+      <!-- Chip de FASE v2 (fuente de verdad del ciclo de vida) -->
+      <span [class]="'absolute top-3 left-3 text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full border shadow-sm ' + phaseBadge(phase())">
+        {{ phaseLabel(phase()) | stripAccents }}
       </span>
     </div>
 
@@ -120,95 +117,132 @@
           }
 
           @case ('tiempos') {
-            <!-- Tiempos: línea de tiempo del objeto para el usuario actual (Fase 3) -->
-            <div class="space-y-2">
-              <div class="text-xs font-bold text-gray-400 uppercase tracking-wider">{{ 'Tu línea de tiempo:' | stripAccents }}</div>
-
-              <!-- Paso 1: disponibilidad para ti -->
-              <div class="flex items-start gap-2 text-xs text-gray-700">
-                <span class="mt-0.5 shrink-0">{{ isAvailableForMe() ? '✅' : (item().claimsClosed ? '⛔' : '🕐') }}</span>
-                <div>
-                  @if (isAvailableForMe()) {
-                    <b>Ya está disponible para ti.</b>
-                  } @else if (item().claimsClosed) {
-                    <b>El evento ya cerró las separaciones.</b>
-                  } @else if (item().effectiveAvailableFrom) {
-                    <b>Abre para ti el {{ item().effectiveAvailableFrom | dateEs }}</b>
-                    @if (countdown(item().effectiveAvailableFrom)) {
-                      <span class="ml-1 font-mono text-purple-600">({{ countdown(item().effectiveAvailableFrom) }})</span>
-                    }
-                  } @else {
-                    <b>Aún no está disponible para ti.</b>
-                  }
-                </div>
-              </div>
-
-              <!-- Paso 2: eres primero en fila → tu deadline con cuenta regresiva -->
-              @if (esPrimeroEnFila() && item().myPickupDeadline) {
-                <div class="flex items-start gap-2 text-xs rounded-lg bg-amber-50 border border-amber-100 px-2.5 py-2">
-                  <span class="mt-0.5 shrink-0">⏰</span>
-                  <div>
-                    <div><b>Eres primero en fila.</b> Recoge antes de
-                      <b>{{ item().myPickupDeadline | dateEs }}</b>.</div>
-                    @if (countdown(item().myPickupDeadline)) {
-                      <div class="mt-0.5 font-mono font-bold text-amber-700">⏳ Faltan {{ countdown(item().myPickupDeadline) }}</div>
-                    }
-                    <div class="mt-0.5 text-amber-700/80">Si no recoges a tiempo pierdes el objeto y afecta tu confianza en este evento.</div>
-                  </div>
-                </div>
-              }
-
-              <!-- Paso 2b: estás en espera (posición 2+) -->
-              @if (!esPrimeroEnFila() && myWaitPosition(); as pos) {
-                <div class="flex items-start gap-2 text-xs rounded-lg bg-blue-50 border border-blue-100 px-2.5 py-2">
-                  <span class="mt-0.5 shrink-0">⏳</span>
-                  <div>
-                    <div><b>Estás en espera (posición #{{ pos }}).</b></div>
-                    <div class="mt-0.5">
-                      @if (item().myPickupWindowHours) {
-                        Si quien está adelante no recoge, el turno pasa a ti y tendrás hasta
-                        <b>{{ item().myPickupWindowHours }} h</b>
-                        @if (item().eventSummary?.pickup_deadline) {
-                          (antes de {{ item().eventSummary!.pickup_deadline | dateEs }})
-                        } para recogerlo.
-                      } @else {
-                        Si quien está adelante no recoge, el turno pasa a ti.
-                      }
+            <!-- Tiempos: estado actual v2 + línea de tiempo fija (V1..V3/ventana/caridad) -->
+            <div class="space-y-2.5">
+              <!-- Estado actual según fase -->
+              @switch (phase()) {
+                @case ('claim_open') {
+                  <div class="rounded-xl bg-sky-50 border border-sky-100 px-3 py-2 text-xs text-sky-900 space-y-1">
+                    <div class="flex items-center gap-1.5 font-bold">
+                      <span>🙋</span> Apartados abiertos
                     </div>
-                  </div>
-                </div>
-              }
-
-              <!-- Paso 2c: tu ventaja por rol extiende el cierre (timing strategy) -->
-              @if (hasExtendedWindow()) {
-                <div class="flex items-start gap-2 text-xs rounded-lg bg-purple-50 border border-purple-100 px-2.5 py-2">
-                  <span class="mt-0.5 shrink-0">🎁</span>
-                  <div>
-                    <b>Tu rol ({{ roleDisplayName(item().myRoleInEvent) | stripAccents }}) extiende tu ventana:</b>
-                    @if (item().effectiveClaimsCloseAt) {
-                      <div class="mt-0.5">Puedes apartar hasta el <b>{{ item().effectiveClaimsCloseAt | dateEs }}</b>.</div>
+                    @if (claimsCloseAt()) {
+                      <div class="text-sky-800/90">
+                        La lista cierra en
+                        @if (countdown(claimsCloseAt())) {
+                          <b class="font-mono text-sky-700"> {{ countdown(claimsCloseAt()) }}</b>
+                        } @else {
+                          <b> {{ claimsCloseAt() | dateEs }}</b>
+                        } · ({{ claimsCloseAt() | dateEs:'date' }})
+                      </div>
                     }
-                    @if (item().effectivePickupDeadline) {
-                      <div class="mt-0.5">Última recogida para ti el <b>{{ item().effectivePickupDeadline | dateEs }}</b>.</div>
+                    @if (myActiveClaim()) {
+                      <div class="text-emerald-700 font-semibold">✅ Ya estás apuntado (posición #{{ myFifoPosition() }}).</div>
+                    } @else if (notYetOpenForMe()) {
+                      <div>🕐 Tu ventana de apartado abre el <b>{{ claimFromForRole() | dateEs }}</b>@if (countdown(claimFromForRole())) { · <span class="font-mono">({{ countdown(claimFromForRole()) }})</span> }.</div>
+                    } @else if (queueFull()) {
+                      <div>🙅 La lista está llena (3 en espera).</div>
+                    } @else if (canTakeAction()) {
+                      <div class="font-semibold">💪 ¡Puedes apartarlo ahora mismo!</div>
                     }
                   </div>
-                </div>
-              }
-
-              <!-- Paso 3: fin global del evento -->
-              @if (item().eventSummary?.pickup_deadline; as evEnd) {
-                <div class="flex items-start gap-2 text-xs text-gray-600">
-                  <span class="mt-0.5 shrink-0">🏁</span>
-                  <div>
-                    @if (hasExtendedWindow()) {
-                      Para el público, la recolección cierra el <b>{{ evEnd | dateEs }}</b>.
+                }
+                @case ('pickup_turns') {
+                  <div class="rounded-xl border px-3 py-2 text-xs space-y-1.5 {{ esTitularActivo() ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-indigo-50 border-indigo-100 text-indigo-900' }}">
+                    @if (esTitularActivo() && activeHolder(); as holder) {
+                      <div class="flex items-center gap-1.5 font-bold">👑 ¡Te toca recoger!</div>
+                      <div>Tu turno vence en <b class="font-mono">{{ countdown(activeTurnV()) || '0s' }}</b>.</div>
+                    } @else if (activeHolder(); as holder) {
+                      <div class="flex items-center gap-1.5 font-bold">⏰ Turno activo de <span class="font-mono">&#64;{{ holder.username }}</span></div>
+                      @if (activeTurnV()) {
+                        <div>Su turno vence en <b class="font-mono">{{ countdown(activeTurnV()) || '0s' }}</b>.</div>
+                      }
                     } @else {
-                      El evento cierra la recolección el <b>{{ evEnd | dateEs }}</b>.
+                      <div class="font-bold">🎉 La ventana libre está por abrir…</div>
                     }
-                    @if (item().claimsClosed) {
-                      Ya no se aceptan nuevas separaciones.
+                    @if (myActiveClaim() && !esTitularActivo(); as pos) {
+                      <div class="text-blue-700">Estás en la posición #{{ myFifoPosition() }}. Te tocará cuando termine el turno activo.</div>
+                    }
+                    @if (myActiveClaim() && esTitularActivo()) {
+                      <div class="mt-1 text-amber-800/90">Si no recoges a tiempo, tu turno expira y afecta tu confianza en el evento.</div>
+                    }
+                    @if (!myActiveClaim()) {
+                      <div class="mt-1 text-indigo-800/70">Los turnos ya empezaron: no puedes unirte ahora, pero sí podrás reclamarlo en la <b>ventana libre</b> si nadie lo recoge.</div>
                     }
                   </div>
+                }
+                @case ('ventana_libre') {
+                  <div class="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-900 space-y-1">
+                    <div class="flex items-center gap-1.5 font-bold">🔥 ¡Ventana libre!</div>
+                    <div>Cualquiera puede llevárselo: el primero que reclame se lo queda (entrega inmediata).</div>
+                    @if (pickupDeadline()) {
+                      <div>Si nadie lo reclama, irá a <b>caridad</b> en
+                        @if (countdown(pickupDeadline())) {
+                          <b class="font-mono"> {{ countdown(pickupDeadline()) }}</b>
+                        } @else {
+                          <b> {{ pickupDeadline() | dateEs }}</b>
+                        }.
+                      </div>
+                    }
+                  </div>
+                }
+                @case ('entregado') {
+                  <div class="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-900 space-y-1">
+                    <div class="flex items-center gap-1.5 font-bold">✅ Entregado</div>
+                    @if (item().deliveredAt) {
+                      <div>Se entregó el <b>{{ item().deliveredAt | dateEs:'full' }}</b>. Ya no está disponible.</div>
+                    } @else {
+                      <div>Este artículo ya fue entregado.</div>
+                    }
+                  </div>
+                }
+                @case ('enviado_a_caridad') {
+                  <div class="rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-900 space-y-1">
+                    <div class="flex items-center gap-1.5 font-bold">💔 Enviado a caridad</div>
+                    @if (item().charityAt) {
+                      <div>Nadie lo recogió y fue enviado a caridad el <b>{{ item().charityAt | dateEs:'full' }}</b>.</div>
+                    } @else {
+                      <div>Este artículo fue enviado a caridad.</div>
+                    }
+                  </div>
+                }
+              }
+
+              <!-- Calendario fijo congelado (V1..V3 / ventana libre / caridad) -->
+              @if (hasFrozenTimeline()) {
+                <div class="pt-1">
+                  <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ 'Calendario de recogida (fijo):' | stripAccents }}</div>
+                  <div class="space-y-1">
+                    @for (row of fixedTimelineRows(); track row.key) {
+                      <div
+                        [class]="'flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs border ' +
+                          (row.state === 'now' ? 'bg-amber-50 border-amber-200 text-amber-900 font-semibold'
+                           : row.state === 'past' ? 'bg-gray-50 border-gray-100 text-gray-400'
+                           : 'bg-white border-gray-100 text-gray-700')">
+                        <span class="flex items-center gap-1.5 min-w-0">
+                          <span class="shrink-0">{{ row.icon }}</span>
+                          <span class="truncate">{{ row.label }}</span>
+                          @if (row.state === 'now') {
+                            <span class="text-[9px] uppercase font-bold px-1.5 py-px rounded-full bg-amber-200 text-amber-800 shrink-0">activo</span>
+                          }
+                        </span>
+                        <span class="shrink-0 text-right">
+                          <span class="font-mono">{{ row.date | dateEs:'date' }}</span>
+                          @if (row.date && row.state !== 'past') {
+                            <span class="ml-1.5 font-mono font-bold">({{ countdown(row.date) || '0s' }})</span>
+                          }
+                        </span>
+                      </div>
+                    }
+                  </div>
+                  <div class="mt-1.5 text-[10px] text-gray-400 italic">
+                    Cada turno de la fila tiene una ventana fija (V1→V2→V3); si quien va adelante no recoge, el turno pasa al siguiente hasta su V fijo.
+                  </div>
+                </div>
+              } @else {
+                <!-- Pre-congelamiento (claim_open): aún no hay calendario fijo -->
+                <div class="pt-1 text-[10px] text-gray-400 italic">
+                  El calendario de turnos (V1..V3 y ventana libre) se fijará cuando cierre la lista de apartados. Mientras, la recolección del evento termina el <b>{{ pickupDeadline() | dateEs:'date' }}</b>.
                 </div>
               }
             </div>
@@ -231,26 +265,32 @@
         }
       </div>
 
-      <!-- Queue / Waitlist -->
+      <!-- Cola (Línea de Espera / turnos) -->
       <div class="mt-4 pt-4 border-t border-gray-100">
         <div class="flex items-center justify-between gap-2 mb-2">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">{{ 'Línea de Espera:' | stripAccents }}</span>
+          <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">{{ adminMode() ? 'Cola forense (todos los estados):' : 'Línea de Espera:' | stripAccents }}</span>
           @if (adminMode()) {
-            <span class="text-[10px] text-gray-400">toca ✕ sobre un apodo para expulsarlo</span>
+            <span class="text-[10px] text-gray-400">toca ✕ sobre un turno activo para expulsarlo</span>
           } @else {
             <span class="text-[10px] text-gray-400" title="El que se va a la Villa, pierde su silla">si estás en la lista puedes salir con ✕</span>
           }
         </div>
         <div class="flex flex-wrap gap-1.5 items-center">
-          @for (claimer of item().queue; track claimer.userUuid; let idx = $index) {
+          @for (claimer of queueChips(); track claimer.id) {
             <div
-              [title]="queueChipTitle(claimer, idx)"
+              [title]="queueChipTitle(claimer)"
               [class.bg-blue-50]="!adminMode() && claimer.userUuid === userService.currentUuid()"
               [class.border-b-2]="!adminMode() && claimer.userUuid === userService.currentUuid()"
               [class.border-blue-400]="!adminMode() && claimer.userUuid === userService.currentUuid()"
+              [class.opacity-70]="adminMode() && claimer.claimState !== 'active'"
               class="inline-flex items-center gap-1 text-xs font-medium bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-md text-gray-700 font-mono">
-              <span>{{ idx === 0 ? '👑' : '⏳' }} &#64;{{ claimer.username }}</span>
-              @if (canShowQueueX(claimer.userUuid)) {
+              <span>{{ claimStateEmoji(claimer.claimState) }} &#64;{{ claimer.username }}</span>
+              @if (!adminMode() && claimer.fifoPosition; as fp) {
+                <span class="text-[9px] text-gray-400">#{{
+                  fp
+                }}</span>
+              }
+              @if (canShowQueueX(claimer)) {
                 <button
                   type="button"
                   (click)="onQueueX(claimer)"
@@ -290,52 +330,122 @@
         </div>
       }
 
-      <!-- Claim button (inside the vertical card): solo visitante, no en modo admin -->
+      <!-- Botón de acción por fase/rol (dentro del card vertical): solo visitante, no en modo admin -->
       @if (!adminMode()) {
       <div class="mt-6">
-        @if (item().status === 'unavailable') {
-          <button disabled title="Ya no se aceptan más solicitudes para este objeto. La lista de espera está completa."
-                  class="w-full text-center text-sm py-3 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed border border-gray-200">
-            Lista de Espera Llena
-          </button>
-        } @else if (isClaimsClosed()) {
-          <button disabled title="El evento ya no acepta nuevas separaciones."
-                  class="w-full text-center text-sm py-3 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed border border-gray-200">
-            ⛔ Separaciones cerradas
-          </button>
-        } @else if (!isAvailableForMe()) {
-          <button disabled title="Este objeto aún no está disponible para ti según tu rol."
-                  class="w-full text-center text-sm py-3 bg-purple-50 text-purple-600 font-medium rounded-xl cursor-not-allowed border border-purple-100">
-            🕐 Próximamente...
-          </button>
-        } @else {
-          <button
-            (click)="onClaimItem()"
-            [disabled]="!userService.isAuthenticated() || isUserInItemQueue()"
-            [title]="!userService.isAuthenticated()
-              ? 'Primero ingresa tu alias arriba para poder apartar objetos.'
-              : isUserInItemQueue()
-                ? 'Ya estás en la lista de este objeto.'
-                : item().status === 'available'
-                  ? 'Apúntate como interesado. Si nadie más lo pidió antes, es tuyo.'
-                  : 'El objeto ya está apartado, pero quedas en espera por si se libera.'"
-            [class]="
-              isUserInItemQueue()
-                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                : item().status === 'available'
-                  ? 'bg-sky-600 text-white hover:bg-sky-700'
-                  : 'bg-amber-500 text-white hover:bg-amber-600'
-            "
-            class="w-full text-center text-sm py-3 font-medium rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed border-0"
-          >
-            @if (!userService.isAuthenticated()) {
-              Registra tu alias arriba para obtenerlo
-            } @else if (isUserInItemQueue()) {
-              ✅ Ya estás apuntado
+        @switch (phase()) {
+          @case ('claim_open') {
+            @if (isUserInItemQueue()) {
+              <!-- Ya estoy apuntado: estado + "Ya no lo quiero" -->
+              <div class="space-y-2">
+                <div class="w-full text-center text-sm py-3 bg-emerald-50 text-emerald-700 font-semibold rounded-xl border border-emerald-200">
+                  ✅ Ya estás apuntado (posición #{{ myFifoPosition() }})
+                </div>
+                <button
+                  (click)="isConfirmingLeave.set(true)"
+                  title="Sal de la lista voluntariamente (sin sanción). Liberas tu lugar."
+                  class="w-full text-center text-sm py-2.5 border border-red-200 text-red-600 font-medium rounded-xl hover:bg-red-50 transition-colors">
+                  👋 Ya no lo quiero
+                </button>
+              </div>
+            } @else if (isClaimsClosed()) {
+              <button disabled title="La lista de apartados ya cerró; empezaron los turnos."
+                      class="w-full text-center text-sm py-3 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed border border-gray-200">
+                ⛔ Separaciones cerradas
+              </button>
+            } @else if (notYetOpenForMe()) {
+              <button disabled title="Tu ventana de apartado (por rol) abre más tarde."
+                      class="w-full text-center text-sm py-3 bg-purple-50 text-purple-600 font-medium rounded-xl cursor-not-allowed border border-purple-100">
+                🕐 Tu ventana abre {{ claimFromForRole() | dateEs:'short' }}
+              </button>
+            } @else if (queueFull()) {
+              <button disabled title="La lista de este objeto está llena (3 en espera)."
+                      class="w-full text-center text-sm py-3 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed border border-gray-200">
+                🙅 Lista llena (3 en espera)
+              </button>
+            } @else if (canTakeAction()) {
+              <button
+                (click)="onClaimItem()"
+                [disabled]="!userService.isAuthenticated()"
+                [title]="!userService.isAuthenticated()
+                  ? 'Primero ingresa tu alias arriba para poder apartar objetos.'
+                  : wouldBecomeFirst()
+                    ? 'Nadie más lo pidió: te conviertes en el primero de la fila (con turno para recogerlo).'
+                    : 'El objeto ya está apartado, pero quedas en espera por si se libera.'"
+                [class]="wouldBecomeFirst() ? 'bg-sky-600 text-white hover:bg-sky-700' : 'bg-amber-500 text-white hover:bg-amber-600'"
+                class="w-full text-center text-sm py-3 font-medium rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed border-0">
+                @if (!userService.isAuthenticated()) {
+                  Registra tu alias arriba para obtenerlo
+                } @else if (wouldBecomeFirst()) {
+                  🙋‍♂️ ¡Lo quiero! (serás el primero)
+                } @else {
+                  ⏳ Unirse a la Lista de Espera
+                }
+              </button>
             } @else {
-              {{ item().status === 'available' ? '🙋‍♂️ ¡Anótenme, lo quiero!' : '⏳ Unirse a la Lista de Espera' }}
+              <button disabled class="w-full text-center text-sm py-3 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed border border-gray-200">
+                No disponible por ahora
+              </button>
             }
-          </button>
+          }
+
+          @case ('pickup_turns') {
+            <!-- Turnos en curso: no se ofrece claim nuevo -->
+            @if (isUserInItemQueue()) {
+              <button
+                (click)="isConfirmingLeave.set(true)"
+                title="{{ esTitularActivo() ? 'Renuncia a tu turno actual (lo hereda el siguiente en fila; sin sanción).' : 'Sal de la lista voluntariamente (sin sanción).' }}"
+                class="w-full text-center text-sm py-3 border border-red-200 text-red-600 font-medium rounded-xl hover:bg-red-50 transition-colors">
+                👋 Ya no lo quiero{{ esTitularActivo() ? ' (renuncio a mi turno)' : '' }}
+              </button>
+            } @else {
+              <button disabled title="Los turnos ya empezaron: espera la ventana libre para reclamarlo directamente."
+                      class="w-full text-center text-sm py-3 bg-indigo-50 text-indigo-600 font-medium rounded-xl cursor-not-allowed border border-indigo-100">
+                ⏳ Turnos en curso — reclámalo en la ventana libre
+              </button>
+            }
+          }
+
+          @case ('ventana_libre') {
+            @if (canTakeAction()) {
+              <button
+                (click)="onClaimItem()"
+                [disabled]="!userService.isAuthenticated()"
+                [title]="!userService.isAuthenticated()
+                  ? 'Primero ingresa tu alias arriba para llevártelo.'
+                  : 'Captura directa: te lo llevas y el artículo queda entregado.'"
+                class="w-full text-center text-sm py-3 bg-rose-600 text-white font-semibold rounded-xl hover:bg-rose-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed border-0">
+                @if (!userService.isAuthenticated()) {
+                  Registra tu alias para llevártelo
+                } @else {
+                  🔥 ¡Me lo llevo!
+                }
+              </button>
+            } @else if (isClaimsClosed()) {
+              <button disabled title="Este objeto ya no está disponible (enviado a caridad o entregado)."
+                      class="w-full text-center text-sm py-3 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed border border-gray-200">
+                ⛔ Ya no está disponible
+              </button>
+            } @else {
+              <button disabled class="w-full text-center text-sm py-3 bg-gray-100 text-gray-400 font-medium rounded-xl cursor-not-allowed border border-gray-200">
+                No disponible
+              </button>
+            }
+          }
+
+          @case ('entregado') {
+            <button disabled title="Este objeto ya fue entregado."
+                    class="w-full text-center text-sm py-3 bg-emerald-50 text-emerald-700 font-semibold rounded-xl cursor-not-allowed border border-emerald-200">
+              ✅ Entregado
+            </button>
+          }
+
+          @case ('enviado_a_caridad') {
+            <button disabled title="Este objeto fue enviado a caridad."
+                    class="w-full text-center text-sm py-3 bg-red-50 text-red-500 font-semibold rounded-xl cursor-not-allowed border border-red-200">
+              💔 Enviado a caridad
+            </button>
+          }
         }
       </div>
       }
@@ -343,27 +453,29 @@
 
   </div>
 
-  <!-- Confirmación previa al apartado (preflight, Fase 5) — solo visitante -->
+  <!-- Confirmación previa al apartado/captura (v2) — solo visitante -->
   @if (!adminMode() && isConfirmingClaim()) {
     <div class="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50"
          (click)="$event.stopPropagation(); cancelConfirm()">
       <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4"
            (click)="$event.stopPropagation()">
         <div class="text-center">
-          <div class="mx-auto w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mb-3 text-2xl">⏰</div>
-          <h3 class="text-lg font-bold text-gray-900">¿Confirmas el apartado?</h3>
+          <div class="mx-auto w-14 h-14 rounded-full flex items-center justify-center mb-3 text-2xl {{ claimConfirmMode() === 'free_window' ? 'bg-rose-100' : 'bg-amber-100' }}">⏰</div>
+          <h3 class="text-lg font-bold text-gray-900">
+            {{ claimConfirmMode() === 'free_window' ? '¿Te llevas este objeto?' : '¿Confirmas el apartado?' }}
+          </h3>
         </div>
-        <p class="text-sm text-gray-600">
-          Al apartarlo serás <b>primero en la fila</b> y tendrás
-          @if (item().myPickupWindowHours) {
-            hasta <b>{{ item().myPickupWindowHours }} h</b>
-          } @else {
-            un plazo
-          }
-          @if (item().eventSummary?.pickup_deadline) {
-            (antes de {{ item().eventSummary!.pickup_deadline | dateEs }})
-          } para recogerlo.
-        </p>
+        @if (claimConfirmMode() === 'free_window') {
+          <p class="text-sm text-gray-600">
+            Está en <b>ventana libre</b>: al reclamarlo te lo llevas y el artículo queda marcado como
+            <b>entregado</b> (acción inmediata e irreversible).
+          </p>
+        } @else {
+          <p class="text-sm text-gray-600">
+            Nadie más lo ha apartado: serás <b>primero en la fila</b>. Cuando cierre la lista de apartados
+            (@if (claimsCloseAt()) {el <b>{{ claimsCloseAt() | dateEs }}</b>})@if (pickupDeadline()) {, la recolección será hasta el <b>{{ pickupDeadline() | dateEs }}</b>} y tendrás tu turno para recogerlo.
+          </p>
+        }
         @if (item().myRoleInEvent) {
           <div class="text-xs rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 text-gray-600">
             ⚠️ {{ roleExpiryConsequence(item().myRoleInEvent) }}
@@ -375,8 +487,9 @@
             Cancelar
           </button>
           <button (click)="confirmClaim()"
-                  class="flex-1 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl py-3 font-medium transition-colors">
-            Sí, apartar
+                  [class]="claimConfirmMode() === 'free_window' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'"
+                  class="flex-1 text-sm text-white rounded-xl py-3 font-medium transition-colors">
+            {{ claimConfirmMode() === 'free_window' ? 'Sí, me lo llevo' : 'Sí, apartar' }}
           </button>
         </div>
       </div>
@@ -391,13 +504,12 @@
            (click)="$event.stopPropagation()">
         <div class="text-center">
           <div class="mx-auto w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mb-3 text-2xl">🚪</div>
-          <h3 class="text-lg font-bold text-red-700">¿Salir de la Línea de Espera?</h3>
+          <h3 class="text-lg font-bold text-red-700">¿Salir de la lista?</h3>
         </div>
         <p class="text-sm text-gray-600">
           <b>El que se va a la Villa, pierde su silla.</b> Saldrás de la lista de
-          <b>{{ item().title }}</b>: liberarás tu lugar y la fila se recompone.
-          Si vuelves a anotarte <b>no conservarás tu posición</b>.
-          Esta acción no se puede deshacer.
+          <b>{{ item().title }}</b>: liberarás tu lugar y la fila se recompone (sin sanción).
+          Si vuelves a anotarte <b>no conservarás tu posición</b>. Esta acción no se puede deshacer.
         </p>
         <div class="flex gap-2">
           <button (click)="cancelLeave()"
@@ -425,8 +537,8 @@
             <h3 class="text-lg font-bold text-red-700">¿Expulsar a &#64;{{ target.username }}?</h3>
           </div>
           <p class="text-sm text-gray-600">
-            Vas a sacar a <b>&#64;{{ target.username }}</b> de la Línea de Espera de
-            <b>{{ item().title }}</b>. Liberará su lugar y la fila se recompone.
+            Vas a sacar a <b>&#64;{{ target.username }}</b> de la lista de
+            <b>{{ item().title }}</b> ({{ claimStateLabel(target.claimState) }}). Liberará su lugar y la cola se recompone.
             Esta acción no se puede deshacer.
           </p>
           <div class="flex gap-2">

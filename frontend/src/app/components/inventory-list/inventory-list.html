@@ -70,21 +70,27 @@
       </div>
     </div>
 
-    <!-- Renglón 2: Filtro por Disponibilidad -->
+    <!-- Renglón 2: Filtro por Fase v2 -->
     <div class="flex items-center gap-3 flex-wrap border-t border-gray-100 pt-3">
-      <span class="text-xs font-bold text-gray-400 uppercase tracking-wider min-w-[100px]">{{ 'Disponibilidad:' | stripAccents }}</span>
+      <span class="text-xs font-bold text-gray-400 uppercase tracking-wider min-w-[100px]">{{ 'Fase:' | stripAccents }}</span>
       <div class="flex flex-wrap gap-1.5">
-        <button (click)="activeStatus.set('All')" title="Muestra objetos sin importar su estado de disponibilidad" [class]="activeStatus() === 'All' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+        <button (click)="activeStatus.set('All')" title="Muestra objetos en cualquier fase v2" [class]="activeStatus() === 'All' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
           Cualquiera
         </button>
-        <button (click)="activeStatus.set('available')" title="Solo objetos que nadie ha apartado aún — puedes reclamarlos directamente" [class]="activeStatus() === 'available' ? 'bg-green-600 text-white' : 'bg-white border border-gray-200 text-green-600 hover:bg-green-50'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
-          🟢 Disponibles
+        <button (click)="activeStatus.set('claim_open')" title="Objetos con apartados abiertos (puedes unirte a la lista o reclamar)" [class]="activeStatus() === 'claim_open' ? 'bg-sky-600 text-white' : 'bg-white border border-gray-200 text-sky-600 hover:bg-sky-50'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+          🙋 Apartados abiertos
         </button>
-        <button (click)="activeStatus.set('waitlist_open')" title="Objetos ya apartados, pero aún puedes unirte a la lista de espera por si se liberan" [class]="activeStatus() === 'waitlist_open' ? 'bg-amber-500 text-white' : 'bg-white border border-gray-200 text-amber-600 hover:bg-amber-50'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
-          🟡 Con lista de espera
+        <button (click)="activeStatus.set('pickup_turns')" title="Objetos en turnos de recogida (la lista cerró; se recogen por turnos)" [class]="activeStatus() === 'pickup_turns' ? 'bg-amber-500 text-white' : 'bg-white border border-gray-200 text-amber-600 hover:bg-amber-50'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+          ⏰ Turnos en curso
         </button>
-        <button (click)="activeStatus.set('unavailable')" title="Objetos con lista de espera completa — no se aceptan más solicitudes" [class]="activeStatus() === 'unavailable' ? 'bg-gray-500 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
-          🔴 No disponibles
+        <button (click)="activeStatus.set('ventana_libre')" title="Ventana libre: el primero que reclame se lo lleva" [class]="activeStatus() === 'ventana_libre' ? 'bg-rose-500 text-white' : 'bg-white border border-gray-200 text-rose-600 hover:bg-rose-50'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+          🔥 Ventana libre
+        </button>
+        <button (click)="activeStatus.set('entregado')" title="Objetos ya entregados" [class]="activeStatus() === 'entregado' ? 'bg-emerald-600 text-white' : 'bg-white border border-gray-200 text-emerald-600 hover:bg-emerald-50'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+          ✅ Entregado
+        </button>
+        <button (click)="activeStatus.set('enviado_a_caridad')" title="Objetos enviados a caridad" [class]="activeStatus() === 'enviado_a_caridad' ? 'bg-red-600 text-white' : 'bg-white border border-gray-200 text-red-600 hover:bg-red-50'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
+          💔 A caridad
         </button>
       </div>
     </div>
@@ -186,19 +192,16 @@
     @for (item of paginatedItems(); track item.id) {
 
       <!-- Card horizontal: thumbnail left + content right (click to open detail) -->
-      <div [class.opacity-50]="item.status === 'unavailable'" [class.grayscale]="item.status === 'unavailable'"
+      <div [class.opacity-60]="item.phase === 'entregado' || item.phase === 'enviado_a_caridad'"
+           [class.grayscale]="item.phase === 'entregado' || item.phase === 'enviado_a_caridad'"
            class="flex gap-0 bg-gray-50 border border-gray-100 rounded-2xl shadow-sm overflow-hidden transition-all hover:shadow-md cursor-pointer"
            (click)="selectedItem.set(item)">
 
         <!-- Thumbnail (left side) -->
         <div class="relative w-32 sm:w-36 sm:h-36 shrink-0 bg-gray-50">
           <img [src]="item.imageUrls?.[0] || ''" [alt]="item.title" class="w-full object-cover" />
-          <span [ngClass]="{
-            'text-green-600 bg-green-50 border-green-100': item.status === 'available',
-            'text-amber-600 bg-amber-50 border-amber-100': item.status === 'waitlist_open',
-            'text-red-600 bg-red-50 border-red-100': item.status === 'unavailable'
-          }" class="absolute top-2 left-1 text-[8px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border shadow-sm">
-            {{ (item.status === 'available' ? '🟢 Disponible' : item.status === 'waitlist_open' ? '🟡 Lista de Espera' : '🔴 No disponible') | stripAccents }}
+          <span [class]="'absolute top-2 left-1 text-[8px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border shadow-sm ' + phaseBadge(item.phase)">
+            {{ phaseEmoji(item.phase) }} {{ phaseChipText(item.phase) | stripAccents }}
           </span>
         </div>
 
@@ -217,41 +220,71 @@
               <div class="text-sm font-extrabold text-gray-900 mt-0.5">${{ item.precioVisible }}</div>
             }
             <p class="text-xs text-gray-500 mt-1 line-clamp-2">{{ item.description || 'Sin descripción adicional.' }}</p>
-            @if (item.effectiveAvailableFrom && item.canClaim === false) {
-              <div class="text-xs text-purple-600 bg-purple-50 rounded-lg px-3 py-1.5 mt-2">
-                🕐 Disponible para ti a partir del {{ item.effectiveAvailableFrom | dateEs }}
-              </div>
-            }
-            @if (isFirstInLine(item) && item.myPickupDeadline) {
-              <div class="mt-2 inline-block text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5">
-                ⏰ Recoge antes de {{ item.myPickupDeadline | dateEs }}
-              </div>
-            }
-            @if (!isFirstInLine(item) && myQueuePosition(item); as pos) {
-              <div class="mt-2 inline-block text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2.5 py-0.5">
-                ⏳ En espera #{{ pos }} — si el de adelante no recoge, el turno pasa a ti
-              </div>
+
+            <!-- Callouts por fase v2 -->
+            @switch (item.phase) {
+              @case ('claim_open') {
+                @if (isUserInItemQueue(item)) {
+                  <div class="mt-2 inline-block text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-0.5">
+                    ✅ Apuntado (posición #{{ myQueuePosition(item) }})
+                  </div>
+                } @else if (item.canClaim === true) {
+                  <div class="mt-2 inline-block text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200 rounded-full px-2.5 py-0.5">
+                    🙋 Puedes apartarlo
+                  </div>
+                } @else if (notYetOpenForMe(item)) {
+                  <div class="text-xs text-purple-600 bg-purple-50 rounded-lg px-3 py-1.5 mt-2">
+                    🕐 Abre para ti el {{ item.claimFromForRole | dateEs }}
+                  </div>
+                } @else if (isQueueFull(item)) {
+                  <div class="mt-2 inline-block text-[10px] font-bold text-gray-500 bg-gray-50 border border-gray-200 rounded-full px-2.5 py-0.5">
+                    🙅 Lista llena (3 en espera)
+                  </div>
+                }
+              }
+              @case ('pickup_turns') {
+                @if (isFirstInLine(item) && activeTurnVOf(item); as vExp) {
+                  <div class="mt-2 inline-block text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5">
+                    👑 ¡Tu turno! Quedan {{ countdownTo(vExp) }}
+                  </div>
+                } @else if (activeHolderOf(item); as holder) {
+                  <div class="mt-2 inline-block text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5">
+                    ⏰ Turno de &#64;{{ holder.username }}@if (activeTurnVOf(item); as v) { · {{ countdownTo(v) }} }
+                  </div>
+                }
+                @if (!isFirstInLine(item) && myQueuePosition(item); as pos) {
+                  <div class="mt-2 inline-block text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2.5 py-0.5">
+                    ⏳ En espera #{{ pos }} — te toca al terminar el turno activo
+                  </div>
+                }
+              }
+              @case ('ventana_libre') {
+                <div class="mt-2 inline-block text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-full px-2.5 py-0.5">
+                  🔥 ¡Apúrate! Ventana libre@if (item.eventSummary?.pickup_deadline; as d) { · caridad en {{ countdownTo(d) }} }
+                </div>
+              }
+              @case ('entregado') {
+                <div class="mt-2 inline-block text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-0.5">✅ Entregado</div>
+              }
+              @case ('enviado_a_caridad') {
+                <div class="mt-2 inline-block text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 rounded-full px-2.5 py-0.5">💔 Enviado a caridad</div>
+              }
             }
           </div>
 
           <div class="mt-2 pt-2 border-t border-gray-50">
-            <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">{{ 'Línea de Espera:' | stripAccents }}</div>
+            <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">{{ 'En la lista:' | stripAccents }}</div>
             <div class="flex flex-wrap gap-1.5">
-              @for (claimer of item.queue; track claimer.userUuid; let idx = $index) {
-                <span [title]="
-                  idx === 0
-                    ? '👑 Primero en la fila — prioridad para llevarse este objeto.'
-                    : claimer.userUuid === userService.currentUuid()
-                      ? '✅ ¡Eres tú! Estás en la lista de este objeto.'
-                      : '⏳ En espera (posición ' + (idx + 1) + ')'"
-                  [class.bg-blue-50]="claimer.userUuid === userService.currentUuid()"
-                  [class.border-b-2]="claimer.userUuid === userService.currentUuid()"
-                  [class.border-blue-400]="claimer.userUuid === userService.currentUuid()"
-                  class="inline-flex items-center text-[10px] font-medium bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-md text-gray-700 font-mono">
-                  {{ idx === 0 ? '👑' : '⏳' }} &#64;{{ claimer.username }}
+              @for (claimer of activeQueueOf(item); track claimer.id; let idx = $index) {
+                <span [title]="queueTooltip(claimer, idx)"
+                      [class.bg-blue-50]="claimer.userUuid === userService.currentUuid()"
+                      [class.border-b-2]="claimer.userUuid === userService.currentUuid()"
+                      [class.border-blue-400]="claimer.userUuid === userService.currentUuid()"
+                      class="inline-flex items-center text-[10px] font-medium bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-md text-gray-700 font-mono">
+                  {{ claimStateEmoji(claimer.claimState) }} {{ idx === 0 && item.phase === 'pickup_turns' ? '👑' : '' }}&#64;{{ claimer.username }}
                 </span>
               } @empty {
-                <span class="text-[10px] text-gray-500 italic">Nadie se ha anotado aún.</span>
+                <span class="text-[10px] text-gray-500 italic">Nadie en la lista todavía.</span>
               }
             </div>
           </div>

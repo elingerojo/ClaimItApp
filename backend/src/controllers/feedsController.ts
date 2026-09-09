@@ -1,192 +1,165 @@
 import { Request, Response } from 'express';
 import {
+  HOUR_MS,
   ROLE_HIERARCHY,
-  resolveEffectiveRole,
-  resolvePickupHoursField,
-  buildRoleTimeline
+  type ItemPhase,
+  type Role,
+  type FixedTimeline
 } from '@claimitapp/shared';
 import {
   getItems,
   getLedger,
   getUser,
   getEvent,
-  getEventMembership,
   getTrustSetting,
-  ensureHydrated
+  ensureHydrated,
+  type StoreClaim,
+  type StoreEvent,
+  type StoreItem
 } from '../cache/appStore.js';
 import { runLazyCatchUp } from '../services/scheduler.js';
+import { evaluateItemTemporalState, effectiveRoleForUser } from '../services/queueService.js';
 import { rolePrice } from '../utils/pricing.js';
 
-const HOUR_MS = 60 * 60 * 1000;
+const toMs = (v: string | null | undefined): number | null => {
+  if (!v) return null;
+  const d = new Date(v).getTime();
+  return Number.isNaN(d) ? null : d;
+};
 
-/**
- * Role resolution for an item's event: roles are now GLOBAL (single source of
- * truth, relative to the sole admin), so the resolved role is simply the user's
- * global role. Membership only contributes referral bonus hours. This is the
- * ONLY place role is resolved for the feed, so visibility, price and
- * availability always agree.
- */
-function resolveItemRole(
-  item: { eventId: string | null },
-  userUuid: string | undefined,
-  userGlobalRole: string
-): { role: string; bonusHours: number } {
-  let bonusHours = 0;
-
-  if (item.eventId && userUuid) {
-    const membership = getEventMembership(userUuid, item.eventId);
-    if (membership) bonusHours = membership.bonusHours || 0;
-  }
-
-  const role = resolveEffectiveRole(null, userGlobalRole);
-  return { role, bonusHours };
-}
-
-/**
- * Effective availability of an item for a given (already resolved) role:
- *  - Base available_from = item override, else inherited from its event.
- *  - effective = base - A, where A = role advance_hours + membership bonus.
- * Start dates shift EARLIER (−A); end dates shift LATER (+A) elsewhere.
- * Returns { effectiveAvailableFrom, canClaim }.
- */
-function computeAvailability(
-  baseAvailable: string | null,
-  totalAdvanceHours: number
-): { effectiveAvailableFrom: string | null; canClaim: boolean } {
-  if (!baseAvailable) {
-    // No scheduling configured -> always claimable (legacy behavior)
-    return { effectiveAvailableFrom: null, canClaim: true };
-  }
-
-  const effective = new Date(new Date(baseAvailable).getTime() - totalAdvanceHours * HOUR_MS);
-
+/** Estado temporal compacto por item (sin participantes; la cola va aparte). */
+function compactTemporalState(
+  item: StoreItem,
+  event: StoreEvent | undefined
+): {
+  estado_actual: string;
+  tiempo_restante_turno_activo_segundos: number | null;
+  linea_tiempo_fija: FixedTimeline | null;
+} {
+  const full = evaluateItemTemporalState({
+    item,
+    event: event
+      ? {
+          claimsCloseAt: event.claims_close_at,
+          availableFrom: event.available_from,
+          publishedAt: event.published_at,
+          pickupDeadline: event.pickup_deadline
+        }
+      : null,
+    claims: item.queue
+  });
   return {
-    effectiveAvailableFrom: effective.toISOString(),
-    canClaim: effective.getTime() <= Date.now()
+    estado_actual: full.estado_actual,
+    tiempo_restante_turno_activo_segundos: full.tiempo_restante_turno_activo_segundos,
+    linea_tiempo_fija: full.linea_tiempo_fija
   };
 }
 
-/**
- * Resolve the pickup window (hours) that would apply to the user on this item
- * given their (resolved) role. Mirrors queueService.resolvePickupWindow so the
- * number shown to the claimant BEFORE claiming equals the one frozen on the
- * claim: event.<rol>_pickup_hours → trust-matrix default → legacy 24h.
- */
-function resolveUserPickupWindowHours(
-  item: { eventId: string | null },
-  role: string
-): number | null {
-  const event = item.eventId ? getEvent(item.eventId) : null;
-  const field = resolvePickupHoursField(role);
-  if (field && event?.[field] != null) return Number(event[field]);
+function activeClaimOf(item: StoreItem, userUuid: string): StoreClaim | undefined {
+  return item.queue.find((c) => c.userUuid === userUuid && c.claimState === 'active');
+}
 
-  const trustDefault = getTrustSetting(role)?.intervalo_recoleccion_horas_default;
-  if (trustDefault != null) return Number(trustDefault);
-
-  if (event?.pickup_window_hours != null) return Number(event.pickup_window_hours);
-  return 24;
+function activeCount(item: StoreItem): number {
+  let n = 0;
+  for (const c of item.queue) if (c.claimState === 'active') n++;
+  return n;
 }
 
 /**
- * GET /api/items
+ * GET /api/items — feed de inventario v2 (dinámico por rol).
  *
- * Se sirve EXCLUSIVAMENTE desde el store en RAM (appStore). No consulta Neon:
- * los writes (claims, items CRUD, evict, events) ya actualizan el store en el
- * mismo `await` (write-through). Esto permite que Neon se suspenda en inactividad.
- *
- * Filtra por visibility_level (ROL RESUELTO por membresía, con fallback a rol
- * global) y por visible_at (publicación programada); además calcula
- * effectiveAvailableFrom/canClaim por usuario. Los claims se cortan cuando el
- * evento entra en closing/closed (claims_close_at / pickup_deadline).
+ * - Filtrado por visibility_level y por visibilidad temporal del rol:
+ *   visibleAt(rol) = published_at(base) − advance_pub_hours(rol) (matriz).
+ * - "Lo quiero" (canClaim) se habilita por rol cuando
+ *   now ∈ [claimFrom(rol), claims_close_at) y el item sigue en claim_open y la
+ *   cola no está llena (clausura precoz a 3) y el usuario no está ya en cola.
+ *   En ventana_libre canClaim=true = captura directa.
+ * - Expone phase + estado temporal compacto (estado_actual, tiempo restante,
+ *   línea de tiempo fija) y la cola forense v2.
+ * Se sirve desde el store en RAM; el lazy catch-up mantiene el reloj al día.
  */
 export const getInventoryFeed = async (req: Request, res: Response): Promise<void> => {
   try {
-    // Self-heal: si el rehidratado de arranque falló (Neon frío), la primera
-    // lectura recarga el store desde Neon. Sin esto el feed quedaría vacío
-    // hasta el próximo redeploy. En el caso sano NO toca la BD.
     await ensureHydrated();
-
-    // Catch-up perezoso: resolver deadlines vencidos solo si hay actividad.
-    // Con store limpio no toca Neon (preserva el autosuspend).
     await runLazyCatchUp();
 
     const userUuid = req.query.userUuid as string;
-    let userGlobalRole = 'publico'; // Default for unauthenticated users
-
-    // Rol global del usuario desde el store (sin query a Neon)
+    let userGlobalRole = 'publico';
     if (userUuid) {
       const user = getUser(userUuid);
       if (user) userGlobalRole = user.global_role;
     }
+    const role: Role = effectiveRoleForUser(userGlobalRole);
+    const roleLevel = ROLE_HIERARCHY[role] ?? ROLE_HIERARCHY.publico;
+
+    // Matriz de confianza del rol (adelanto pub/disp + límite de apartados).
+    const trust = getTrustSetting(role) ?? {};
+    const advancePubHours = Number(trust.advance_pub_hours_default ?? 0);
+    const advanceDispHours = Number(trust.advance_disp_hours_default ?? 0);
+    const simultaneousLimit = Number(trust.max_apartados_simultaneos ?? 1);
 
     const now = Date.now();
-
     const itemsSnapshot = getItems();
-    // Apartados activos del usuario por evento (items del catálogo cuya cola lo
-    // contiene) — para mostrar los límites simultáneos reales por evento.
+
+    // Apartados activos del usuario por evento (límite simultáneo real).
     const activeApartadosByEvent = new Map<string, number>();
     if (userUuid) {
       for (const it of itemsSnapshot) {
-        if (!it.eventId || !it.queue.some((q) => q.userUuid === userUuid)) continue;
-        activeApartadosByEvent.set(it.eventId, (activeApartadosByEvent.get(it.eventId) ?? 0) + 1);
+        if (!it.eventId) continue;
+        if (it.queue.some((q) => q.userUuid === userUuid && q.claimState === 'active')) {
+          activeApartadosByEvent.set(it.eventId, (activeApartadosByEvent.get(it.eventId) ?? 0) + 1);
+        }
       }
     }
 
     const responsePayload = itemsSnapshot
-      .map(item => {
-        // 1. Resolve the SINGLE effective role for this item+user.
-        const { role, bonusHours } = resolveItemRole(item, userUuid || undefined, userGlobalRole);
-        const roleLevel = ROLE_HIERARCHY[role] || ROLE_HIERARCHY.publico;
-        // Límite de apartados simultáneos del rol en el evento (matriz de confianza).
-        const simultaneousLimit = getTrustSetting(role)?.max_apartados_simultaneos ?? 1;
-
-        // 2. Visibility by RESOLVED role (membership > global fallback).
+      .map((item) => {
+        // 1. Visibilidad por nivel (visibility_level).
         if (item.visibilityLevel !== null && item.visibilityLevel < roleLevel) return null;
 
         const event = item.eventId ? getEvent(item.eventId) : null;
 
-        // Per-role symmetric advantage: A = event <rol>_advance_hours + membership bonus.
-        const advanceHours = event ? Number(event?.[`${role}_advance_hours`] ?? 0) || 0 : 0;
-        const A = advanceHours + (bonusHours || 0);
-        const widenMs = A * HOUR_MS;
-        // Single-source helper for the event's 4 dates (start −A, end +A).
-        const timeline = event
-          ? buildRoleTimeline(
-              {
-                publishedAt: event.published_at ?? null,
-                availableFrom: event.available_from ?? null,
-                claimsCloseAt: event.claims_close_at ?? null,
-                pickupDeadline: event.pickup_deadline ?? null
-              },
-              A
-            )
-          : null;
+        // 1b. Regla v2 "evento como fuente única": evento sin published_at (draft /
+        // no publicado) ⇒ sus items NO son visibles en el feed público.
+        if (!event?.published_at) return null;
 
-        // 3. Role-aware publication: the item becomes visible to this role when its
-        //    effective visible time (item.visible_at, else event.published_at, shifted
-        //    EARLIER by A) has arrived. Higher roles therefore see the catalog before
-        //    the public base publication.
-        const visibleBase = item.visibleAt ?? event?.published_at ?? null;
-        const effVisibleMs = visibleBase ? new Date(visibleBase).getTime() - widenMs : null;
-        if (effVisibleMs !== null && effVisibleMs > now) return null;
+        // 2. Visibilidad temporal por rol (cero columnas por evento — dinámico;
+        // la base SIEMPRE es la del evento).
+        const pubBase = event?.published_at ?? null;
+        const availBase = event?.available_from ?? null;
+        const visibleAtForRoleMs = pubBase ? toMs(pubBase)! - advancePubHours * HOUR_MS : null;
+        const claimFromForRoleMs = availBase ? toMs(availBase)! - advanceDispHours * HOUR_MS : null;
 
-        // 4. Role-aware lifecycle (timing strategy): end dates shift LATER (+A), so a
-        //    higher role may keep claiming/picking up past the public base close.
-        //    Event status is only a global label; per-role cutoffs use role dates.
-        const baseAvailable = item.availableFrom ?? event?.available_from ?? null;
-        const effClaimsCloseMs = timeline?.claimsCloseAt?.getTime() ?? null;
-        const effPickupMs = timeline?.pickupDeadline?.getTime() ?? null;
-        const lifecycleLocked =
-          (effClaimsCloseMs !== null && effClaimsCloseMs <= now) ||
-          (effPickupMs !== null && effPickupMs <= now) ||
-          (event?.status === 'closed' && effClaimsCloseMs === null && effPickupMs === null);
+        if (visibleAtForRoleMs !== null && visibleAtForRoleMs > now) return null;
 
-        const { effectiveAvailableFrom, canClaim } = computeAvailability(baseAvailable, A);
+        const claimsCloseMs = toMs(event?.claims_close_at ?? null);
+        const pickupMs = toMs(event?.pickup_deadline ?? null);
 
-        // Deadline of the requesting user's own claim (for the pickup indicator)
-        const myClaim = userUuid ? item.queue.find(q => q.userUuid === userUuid) : undefined;
+        // 3. Capacidad de reclamar ("Lo quiero") para este rol.
+        const alreadyInQueue = !!userUuid && !!activeClaimOf(item, userUuid);
+        const activeApartadosInEvent =
+          item.eventId && userUuid ? activeApartadosByEvent.get(item.eventId) ?? 0 : 0;
 
-        const myPickupWindowHours = resolveUserPickupWindowHours(item, role);
+        let canClaim = false;
+        let claimsClosed = true;
+        if (item.phase === 'claim_open' && event?.status !== 'closed') {
+          const withinWindow =
+            (claimFromForRoleMs === null || now >= claimFromForRoleMs) &&
+            (claimsCloseMs === null || now < claimsCloseMs);
+          claimsClosed = !withinWindow;
+          canClaim =
+            withinWindow &&
+            !alreadyInQueue &&
+            activeCount(item) < 3 &&
+            activeApartadosInEvent < simultaneousLimit;
+        } else if (item.phase === 'ventana_libre') {
+          claimsClosed = pickupMs !== null && now >= pickupMs;
+          canClaim = !claimsClosed && !alreadyInQueue;
+        }
+
+        const myActive = userUuid ? activeClaimOf(item, userUuid) : undefined;
+        const temporal = compactTemporalState(item, event ?? undefined);
+        const myRoleInEvent = role;
 
         return {
           id: item.id,
@@ -194,46 +167,59 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
           description: item.description,
           category: item.category,
           infoUrl: item.infoUrl,
-          // Arreglo ordenado completo: la lista usa imageUrls[0], el detalle los thumbnails.
           imageUrls: item.imageUrls,
           status: item.status,
-          visibilityLevel: item.visibilityLevel ?? 4, // Default to public
+          phase: item.phase as ItemPhase,
+          visibilityLevel: item.visibilityLevel ?? 4,
           eventId: item.eventId ?? null,
-          visibleAt: item.visibleAt,
-          availableFrom: item.availableFrom,
-          effectiveAvailableFrom,
-          // Effective end of this role's window (base + A), for the UI.
-          effectiveClaimsCloseAt:
-            effClaimsCloseMs !== null ? new Date(effClaimsCloseMs).toISOString() : null,
-          effectivePickupDeadline:
-            effPickupMs !== null ? new Date(effPickupMs).toISOString() : null,
-          // Consistent role/context for the UI (claimant side)
-          myRoleInEvent: role,
-          canClaim: canClaim && !lifecycleLocked,
-          claimsClosed: lifecycleLocked,
-          myPickupWindowHours,
-          myPickupDeadline: myClaim?.pickupDeadline ?? null,
+          frozenAt: item.frozenAt ?? null,
+          freeWindowOpenedAt: item.freeWindowOpenedAt ?? null,
+          deliveredAt: item.deliveredAt ?? null,
+          charityAt: item.charityAt ?? null,
+          // Ventana por rol (dinámico puro, matriz pub/disp).
+          myRoleInEvent,
+          advancePubHours,
+          advanceDispHours,
+          visibleAtForRole: visibleAtForRoleMs !== null ? new Date(visibleAtForRoleMs).toISOString() : null,
+          claimFromForRole: claimFromForRoleMs !== null ? new Date(claimFromForRoleMs).toISOString() : null,
+          // Cortes del contenedor (iguales para todo rol en v2).
+          effectiveClaimsCloseAt: claimsCloseMs !== null ? new Date(claimsCloseMs).toISOString() : null,
+          effectivePickupDeadline: pickupMs !== null ? new Date(pickupMs).toISOString() : null,
+          claimsClosed,
+          canClaim,
+          // Estado temporal compacto (v2).
+          temporalState: temporal,
+          // Límite de apartados simultáneos del rol dentro del evento.
+          activeApartadosInEvent,
+          simultaneousLimit,
+          // Precio por rol (base × multiplicador de la matriz).
+          precioVisible: rolePrice(item.precioBaseCosto, role),
+          createdAt: item.createdAt,
+          // Cola forense v2 (todos los estados) + mi claim activo.
+          queue: item.queue,
+          myClaim:
+            myActive
+              ? {
+                  claimId: myActive.id,
+                  claimState: myActive.claimState,
+                  roleAtClaim: myActive.roleAtClaim,
+                  fifoPosition: myActive.fifoPosition,
+                  turnVExpiresAt: myActive.turnVExpiresAt,
+                  claimedAt: myActive.claimedAt
+                }
+              : null,
           eventSummary: event
             ? {
                 id: event.id,
                 title: event.title ?? null,
                 status: event.status ?? 'draft',
+                published_at: event.published_at,
                 available_from: event.available_from,
                 claims_close_at: event.claims_close_at,
                 pickup_deadline: event.pickup_deadline,
                 pickup_schedule_info: event.pickup_schedule_info ?? null
               }
-            : null,
-          // Límites de apartados simultáneos del rol dentro del evento (B4)
-          activeApartadosInEvent:
-            item.eventId && userUuid ? (activeApartadosByEvent.get(item.eventId) ?? 0) : 0,
-          simultaneousLimit,
-          // Precio del nivel del usuario calculado en tiempo de lectura
-          // (precio_base_costo × multiplicador del rol resuelto, utils/pricing).
-          // El resto de niveles permanece oculto.
-          precioVisible: rolePrice(item.precioBaseCosto, role),
-          createdAt: item.createdAt,
-          queue: item.queue
+            : null
         };
       })
       .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
@@ -246,16 +232,11 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
 };
 
 /**
- * GET /api/ledger
- *
- * Se sirve desde el store en RAM (appStore), sin tocar Neon.
+ * GET /api/ledger — historial de actividad (store en RAM, sin Neon).
  */
 export const getLedgerFeed = async (_req: Request, res: Response): Promise<void> => {
   try {
-    // Mismo self-heal que el feed de items: sin esto el historial quedaría
-    // vacío tras un rehidratado de arranque fallido.
     await ensureHydrated();
-
     res.status(200).json(getLedger());
   } catch (error) {
     console.error('Failed to retrieve activity logs:', error);

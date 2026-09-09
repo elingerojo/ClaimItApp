@@ -1,14 +1,21 @@
 import { Component, signal, computed, inject, effect, OnInit } from '@angular/core';
 import { CommonModule, NgOptimizedImage } from '@angular/common';
-import { InventoryService, ItemWithQueue, EventSummary } from '../../services/inventory';
+import { InventoryService, ItemWithQueue, EventSummary, QueueEntry } from '../../services/inventory';
 import { UserService, StoredUserProfile } from '../../services/user';
 import { ToastService } from '../../services/toast';
 import { InvitationService } from '../../services/invitations';
-import { ItemCategory, ItemStatus } from '@claimitapp/shared';
+import { ItemCategory } from '@claimitapp/shared';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
 import { ItemDetail } from '../item-detail/item-detail';
-import { eventStatusBadge, eventStatusLabel } from '../../utils/event-status';
+import {
+  eventStatusBadge,
+  eventStatusLabel,
+  phaseBadge,
+  phaseEmoji,
+  phaseChipText,
+  claimStateEmoji
+} from '../../utils/event-status';
 
 @Component({
   selector: 'app-inventory-list',
@@ -70,9 +77,13 @@ export class InventoryList implements OnInit {
   });
   /** Evento seleccionado como filtro (null = todos). */
   readonly selectedEventId = signal<string | null>(null);
-  /** Bindings de utilidades de estado de evento para la plantilla. */
+  /** Bindings de utilidades de estado de evento y fase v2 para la plantilla. */
   readonly eventStatusLabel = eventStatusLabel;
   readonly eventStatusBadge = eventStatusBadge;
+  readonly phaseBadge = phaseBadge;
+  readonly phaseEmoji = phaseEmoji;
+  readonly phaseChipText = phaseChipText;
+  readonly claimStateEmoji = claimStateEmoji;
 
   selectEvent(id: string | null): void {
     this.selectedEventId.set(id);
@@ -171,6 +182,15 @@ export class InventoryList implements OnInit {
         this.currentPage.set(max);
       }
     });
+
+    // Mantener el modal de detalle "en vivo": re-apuntar selectedItem al objeto
+    // fresco del feed (tras SSE/refresh) conservando el mismo id.
+    effect(() => {
+      const current = this.selectedItem();
+      if (!current) return;
+      const fresh = this.inventoryService.items().find((it) => it.id === current.id);
+      if (fresh && fresh !== current) this.selectedItem.set(fresh);
+    });
   }
 
   readonly categories: ItemCategory[] = [
@@ -211,11 +231,9 @@ export class InventoryList implements OnInit {
       list = list.filter(item => item.eventSummary?.id === eventFilter);
     }
 
-    // 1. Filtrado Prioritario: Mis elegidos (comparado por userUuid)
+    // 1. Filtrado Prioritario: Mis elegidos (solo claims ACTIVOS v2 — myClaim)
     if (onlyMyClaims && myUuid) {
-      return list.filter(item => 
-        item.queue.some(q => q.userUuid === myUuid)
-      );
+      return list.filter(item => this.myActiveClaimOf(item) != null);
     }
 
     // 2. Filtrado por Categorías
@@ -223,9 +241,9 @@ export class InventoryList implements OnInit {
       list = list.filter(item => item.category === categoryFilter);
     }
 
-    // 3. Filtrado por Disponibilidad (ItemStatus)
+    // 3. Filtrado por Fase v2 (ItemPhase: claim_open/pickup_turns/ventana_libre/...)
     if (statusFilter !== 'All') {
-      list = list.filter(item => item.status === statusFilter);
+      list = list.filter(item => item.phase === statusFilter);
     }
 
     return list;
@@ -262,27 +280,98 @@ export class InventoryList implements OnInit {
   }
 
   /**
-   * Verifica si el usuario autenticado ya está en la cola de un objeto
-   * Compara por userUuid para precisión (el alias puede cambiar)
+   * Verifica si el usuario autenticado tiene un claim ACTIVO en la cola de un
+   * objeto (v2: los claims cancelados/expirados/void ya no cuentan).
+   * Compara por userUuid para precisión (el alias puede cambiar).
    */
-  isUserInItemQueue(item: { queue: Array<{ userUuid: string }> }): boolean {
+  isUserInItemQueue(item: { queue: Array<QueueEntry> }): boolean {
     const myUuid = this.userService.currentUuid();
     if (!myUuid) return false;
-    return item.queue.some(q => q.userUuid === myUuid);
+    return (item.queue ?? []).some(q => q.userUuid === myUuid && q.claimState === 'active');
   }
 
-  /** ¿El usuario autenticado es el primero en la fila de este objeto? */
-  isFirstInLine(item: { queue: Array<{ userUuid: string }> }): boolean {
-    const myUuid = this.userService.currentUuid();
-    return !!myUuid && item.queue.length > 0 && item.queue[0].userUuid === myUuid;
-  }
-
-  /** Posición (1-based) del usuario en la fila, o null si no está en ella. */
-  myQueuePosition(item: { queue: Array<{ userUuid: string }> }): number | null {
+  /** Mi claim activo en el item (o null). */
+  myActiveClaimOf(item: { queue: Array<QueueEntry> }): QueueEntry | null {
     const myUuid = this.userService.currentUuid();
     if (!myUuid) return null;
-    const idx = item.queue.findIndex(q => q.userUuid === myUuid);
+    return (item.queue ?? []).find(q => q.userUuid === myUuid && q.claimState === 'active') ?? null;
+  }
+
+  /** Claims ACTIVOS de la cola, ordenados por posición FIFO (nulls last) y luego claimed_at. */
+  activeQueueOf(item: { queue: Array<QueueEntry> }): QueueEntry[] {
+    const queue = item.queue ?? [];
+    return queue
+      .filter((c) => c.claimState === 'active')
+      .sort((a, b) => {
+        const ap = a.fifoPosition ?? Number.MAX_SAFE_INTEGER;
+        const bp = b.fifoPosition ?? Number.MAX_SAFE_INTEGER;
+        if (ap !== bp) return ap - bp;
+        return new Date(a.claimedAt).getTime() - new Date(b.claimedAt).getTime();
+      });
+  }
+
+  /** Titular del turno activo (posición activa de menor rango). */
+  activeHolderOf(item: { queue: Array<QueueEntry> }): QueueEntry | null {
+    return this.activeQueueOf(item)[0] ?? null;
+  }
+
+  /** ¿El usuario autenticado es el titular activo (turno en curso)? */
+  isFirstInLine(item: { queue: Array<QueueEntry> }): boolean {
+    const holder = this.activeHolderOf(item);
+    const myUuid = this.userService.currentUuid();
+    return !!holder && !!myUuid && holder.userUuid === myUuid;
+  }
+
+  /** Posición FIFO (1-based) del usuario en la cola activa, o null si no está. */
+  myQueuePosition(item: { queue: Array<QueueEntry> }): number | null {
+    const myUuid = this.userService.currentUuid();
+    if (!myUuid) return null;
+    const myClaim = (item.queue ?? []).find(q => q.userUuid === myUuid && q.claimState === 'active');
+    if (!myClaim) return null;
+    if (myClaim.fifoPosition != null) return myClaim.fifoPosition;
+    const idx = this.activeQueueOf(item).findIndex(q => q.id === myClaim.id || q.userUuid === myUuid);
     return idx >= 0 ? idx + 1 : null;
+  }
+
+  /** Vencimiento del turno activo (V del titular) o null. */
+  activeTurnVOf(item: { queue: Array<QueueEntry> }): string | null {
+    return this.activeHolderOf(item)?.turnVExpiresAt ?? null;
+  }
+
+  /** ¿La cola activa está llena (3)? */
+  isQueueFull(item: { queue: Array<QueueEntry> }): boolean {
+    return this.activeQueueOf(item).length >= 3;
+  }
+
+  /** Mi ventana por rol aún no abrió (claim_open, antes de claimFromForRole). */
+  notYetOpenForMe(item: ItemWithQueue): boolean {
+    const from = item.claimFromForRole ?? null;
+    if (item.phase !== 'claim_open' || !this.userService.isAuthenticated()) return false;
+    if (this.myActiveClaimOf(item)) return false;
+    return !!from && new Date(from).getTime() > Date.now();
+  }
+
+  /** Cuenta regresiva estática (render-time) hacia `target`, o '' si no aplica. */
+  countdownTo(target: string | null | undefined): string {
+    if (!target) return '';
+    const diff = new Date(target).getTime() - Date.now();
+    if (diff <= 0) return '';
+    const totalMin = Math.floor(diff / 60000);
+    const hours = Math.floor((totalMin % 1440) / 60);
+    const minutes = totalMin % 60;
+    const seconds = Math.floor((diff % 60000) / 1000);
+    if (totalMin >= 1440) return `${Math.floor(totalMin / 1440)}d ${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+    return `${minutes}m ${seconds}s`;
+  }
+
+  /** Tooltip de un chip de la cola activa en la tarjeta (v2). */
+  queueTooltip(claimer: QueueEntry, idx: number): string {
+    const isMe = claimer.userUuid === this.userService.currentUuid();
+    const pos = claimer.fifoPosition != null ? ` (turno #${claimer.fifoPosition})` : '';
+    if (idx === 0) return `👑 Primero en la lista${pos} — prioridad para recoger.`;
+    if (isMe) return `✅ ¡Eres tú! Estás en la lista${pos}.`;
+    return `En la lista${pos}`;
   }
 
   async onClaimItem(itemId: string): Promise<void> {

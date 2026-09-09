@@ -14,14 +14,20 @@ import {
   tryNativeShare,
   buildWhatsAppInviteUrl
 } from '../../utils/invite-share';
+import { eventStatusLabel } from '../../utils/event-status';
 import { deriveEventSchedule } from '@claimitapp/shared';
 
 export interface EventSummary {
   id: string;
   title: string;
   description: string | null;
+  /** Fechas v2 del evento (contrato del listado GET /api/events). */
+  published_at?: string | null;
   available_from: string;
+  claims_close_at?: string | null;
   pickup_deadline: string;
+  pickup_schedule_info?: string | null;
+  status?: string;
   created_at: string;
   /** Nº de items asignados al evento (0 = se puede borrar). */
   item_count?: number;
@@ -86,6 +92,7 @@ export class AdminEvents implements OnInit, OnDestroy {
   // Form fields (create / edit)
   readonly title = signal('');
   readonly description = signal('');
+  readonly pickupScheduleInfo = signal('');
   readonly availableFrom = signal('');
   readonly pickupDeadline = signal('');
   readonly claimsCloseAt = signal('');
@@ -101,6 +108,9 @@ export class AdminEvents implements OnInit, OnDestroy {
     conocidos: '👋 Conocidos',
     publico: '🌐 Público'
   };
+
+  /** Estatus legible del evento (v2) para el listado. */
+  readonly eventStatusLabel = eventStatusLabel;
 
   ngOnInit(): void {
     // Auto-carga la lista al entrar (antes quedaba vacía hasta pulsar
@@ -162,10 +172,11 @@ export class AdminEvents implements OnInit, OnDestroy {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  /** Limpia el form para crear: la fecha de publicación es la única editable. */
+  /** Limpia el form para crear: las 4 fechas se sugieren desde la publicación. */
   private resetForm(): void {
     this.title.set('');
     this.description.set('');
+    this.pickupScheduleInfo.set('');
     this.editingEventId.set(null);
     // Ancla por defecto = mañana a la misma hora; deriva el resto.
     const pub = this.toLocalInputValue(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
@@ -241,6 +252,60 @@ export class AdminEvents implements OnInit, OnDestroy {
     this.recomputeDerivedFromPublish();
   }
 
+  /**
+   * Validación de UI del form v2 (mismo criterio que el backend):
+   *  - título requerido;
+   *  - las 4 fechas presentes y en orden published <= available <= claims_close <= pickup_deadline;
+   *  - al CREAR, todas deben quedar en el futuro (requireFuture del backend).
+   * Devuelve un mensaje de error o null.
+   */
+  private validateEventForm(requireFuture: boolean): string | null {
+    if (!this.title().trim()) {
+      return 'El título del evento es requerido.';
+    }
+    const parse = (v: string): number | null => {
+      if (!v) return null;
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? null : d.getTime();
+    };
+    const pub = parse(this.publishedAt());
+    const avail = parse(this.availableFrom());
+    const close = parse(this.claimsCloseAt());
+    const dl = parse(this.pickupDeadline());
+    if (pub == null || avail == null || close == null || dl == null) {
+      return 'Las 4 fechas son requeridas: publicación, apertura de apartados, corte de apartados y límite de recogida.';
+    }
+    if (!(pub <= avail && avail <= close && close <= dl)) {
+      return 'Orden inválido de fechas: publicación ≤ apertura ≤ corte de apartados ≤ límite de recogida.';
+    }
+    if (requireFuture && dl <= Date.now()) {
+      return 'Al crear, las fechas deben estar en el futuro (el límite de recogida no puede ser pasado).';
+    }
+    return null;
+  }
+
+  /**
+   * Error de fechas en vivo bajo el formulario (solo orden; no molesta con
+   * campos vacíos a medio llenar ni exige el título). Devuelve null si no hay
+   * problema o si aún faltan fechas por elegir.
+   */
+  inlineDateError(): string | null {
+    const parse = (v: string): number | null => {
+      if (!v) return null;
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? null : d.getTime();
+    };
+    const pub = parse(this.publishedAt());
+    const avail = parse(this.availableFrom());
+    const close = parse(this.claimsCloseAt());
+    const dl = parse(this.pickupDeadline());
+    if (pub == null || avail == null || close == null || dl == null) return null;
+    if (!(pub <= avail && avail <= close && close <= dl)) {
+      return 'Orden inválido de fechas: publicación ≤ apertura ≤ corte de apartados ≤ límite de recogida.';
+    }
+    return null;
+  }
+
   /** Abre el formulario precargado con los datos del evento para editarlo. */
   async editEvent(id: string): Promise<void> {
     try {
@@ -253,6 +318,7 @@ export class AdminEvents implements OnInit, OnDestroy {
 
       this.title.set(ev.title ?? '');
       this.description.set(ev.description ?? '');
+      this.pickupScheduleInfo.set(ev.pickup_schedule_info ?? '');
       this.availableFrom.set(this.toLocalInputValue(ev.available_from));
       this.pickupDeadline.set(this.toLocalInputValue(ev.pickup_deadline));
       this.claimsCloseAt.set(this.toLocalInputValue(ev.claims_close_at));
@@ -267,36 +333,28 @@ export class AdminEvents implements OnInit, OnDestroy {
   }
 
   private buildPayload(): Record<string, any> {
-    // Las ventajas por rol (advance/bonus/pickup) NO se envían: el backend las
-    // congela desde la matriz de confianza al crear y el PATCH las conserva.
+    // Payload v2: SOLO las 4 fechas + title/description/pickup_schedule_info.
+    // CERO columnas por rol: las ventajas se leen en tiempo real de la matriz
+    // (advance_pub/disp) y no se congelan en el evento.
     return {
       title: this.title(),
       description: this.description() || null,
+      pickup_schedule_info: this.pickupScheduleInfo().trim() || null,
+      published_at: this.toUtcIsoOrNull(this.publishedAt()),
       available_from: this.toUtcIsoOrNull(this.availableFrom()),
-      pickup_deadline: this.toUtcIsoOrNull(this.pickupDeadline()),
       claims_close_at: this.toUtcIsoOrNull(this.claimsCloseAt()),
-      published_at: this.toUtcIsoOrNull(this.publishedAt())
+      pickup_deadline: this.toUtcIsoOrNull(this.pickupDeadline())
     };
   }
 
   /** Crea (POST) o actualiza (PATCH) un evento según `editingEventId`. */
   async submit(): Promise<void> {
     const editingId = this.editingEventId();
-    if (!this.title()) {
-      this.toastService.error('El título del evento es requerido.');
+    // Validación v2 en UI: título + orden de las 4 fechas + futuro al crear.
+    const validationError = this.validateEventForm(!editingId);
+    if (validationError) {
+      this.toastService.error(validationError);
       return;
-    }
-    if (editingId) {
-      if (!this.availableFrom() || !this.pickupDeadline()) {
-        this.toastService.error('Fecha disponible y fecha límite de recogida son requeridas.');
-        return;
-      }
-    } else {
-      // Modo crear: la fecha de publicación es la ancla; el resto se calcula.
-      if (!this.publishedAt() || !this.availableFrom() || !this.pickupDeadline()) {
-        this.toastService.error('Elige la fecha de publicación (las demás se calculan).');
-        return;
-      }
     }
     this.saving.set(true);
     try {

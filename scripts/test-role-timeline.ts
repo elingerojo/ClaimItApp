@@ -1,3 +1,10 @@
+/*
+ * ⚠️ LEGACY / OBSOLETO — Estrategia temporal v2 (Fase 5): importa buildRoleTimeline
+ * (ventanas simétricas por rol) que fue ELIMINADO de shared (D8: cero columnas por evento;
+ * la línea de tiempo ahora es el contenedor rígido V1..V3 del motor). No compila/corre.
+ * Conservado solo como referencia histórica. Verificación E2E vigente:
+ *   npx tsx scripts/test-v2-strategy.ts
+ */
 /**
  * scripts/test-role-timeline.ts
  *
