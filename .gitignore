@@ -125,6 +125,11 @@ coverage
 .env.*
 license.txt
 database/.db-snapshot.json
+# Versionar schema y migraciones: se anula el `*.sql` general SOLO para estas
+# rutas (los dumps/exportaciones .sql sueltos siguen ignorados).
+!database/init.sql
+!database/migrations/
+!database/migrations/*.sql
 exports
 .strapi
 dist
@@ -138,3 +143,6 @@ build
 
 ai-plans
 plans
+
+# Archivo temporal de preservación de items en reset+seed (db-reset.js/db-seed.js)
+scripts/.db-preserved-items.json
