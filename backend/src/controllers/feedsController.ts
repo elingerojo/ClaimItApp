@@ -217,7 +217,9 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
                 available_from: event.available_from,
                 claims_close_at: event.claims_close_at,
                 pickup_deadline: event.pickup_deadline,
-                pickup_schedule_info: event.pickup_schedule_info ?? null
+                pickup_schedule_info: event.pickup_schedule_info ?? null,
+                times_notes: event.times_notes ?? null,
+                conditions_notes: event.conditions_notes ?? null
               }
             : null
         };

@@ -3,7 +3,9 @@
  *
  * Crear/actualizar un evento v2 = SOLO las 4 marcas de tiempo
  * (published_at <= available_from <= claims_close_at <= pickup_deadline) +
- * status + título/descripción + pickup_schedule_info. CERO columnas por rol
+ * status + título/descripción + pickup_schedule_info + notas markdown de
+ * términos/condiciones (times_notes/conditions_notes, solo informativas).
+ * CERO columnas por rol
  * (D8): las ventajas de publicación/"Lo quiero" se leen en tiempo real de la
  * matriz trust_levels_settings (advance_pub/disp_hours_default) con la regla
  * "nunca se reclama sin ver" (CHECK disp <= pub).
@@ -77,7 +79,9 @@ function toStoreEvent(row: any): StoreEvent {
     claims_close_at: row.claims_close_at ?? null,
     pickup_deadline: row.pickup_deadline,
     status: row.status ?? 'draft',
-    pickup_schedule_info: row.pickup_schedule_info ?? null
+    pickup_schedule_info: row.pickup_schedule_info ?? null,
+    times_notes: row.times_notes ?? null,
+    conditions_notes: row.conditions_notes ?? null
   };
 }
 
@@ -97,7 +101,9 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     claims_close_at,
     pickup_deadline,
     status,
-    pickup_schedule_info
+    pickup_schedule_info,
+    times_notes,
+    conditions_notes
   } = req.body;
   const adminCode = (req as any).adminCode || 'system';
 
@@ -133,7 +139,9 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     available_from: availableFrom,
     claims_close_at: claimsCloseAt,
     pickup_deadline: pickupDeadline,
-    pickup_schedule_info
+    pickup_schedule_info,
+    times_notes,
+    conditions_notes
   };
 
   // 2. Validación v2 (orden + fechas futuras al crear).
@@ -164,8 +172,8 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
     const eventResult = await client.query(
       `INSERT INTO events
        (title, description, published_at, available_from, claims_close_at,
-        pickup_deadline, status, pickup_schedule_info)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        pickup_deadline, status, pickup_schedule_info, times_notes, conditions_notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         title,
@@ -175,7 +183,9 @@ export const createEvent = async (req: Request, res: Response): Promise<void> =>
         claimsCloseAt || null,
         pickupDeadline,
         eventStatus,
-        pickup_schedule_info || null
+        pickup_schedule_info || null,
+        times_notes || null,
+        conditions_notes || null
       ]
     );
 
@@ -365,7 +375,9 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
     claims_close_at,
     pickup_deadline,
     status,
-    pickup_schedule_info
+    pickup_schedule_info,
+    times_notes,
+    conditions_notes
   } = req.body;
   const adminCode = (req as any).adminCode || 'system';
 
@@ -423,8 +435,10 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
          pickup_deadline = COALESCE($6, pickup_deadline),
          status = COALESCE($7, status),
          pickup_schedule_info = COALESCE($8, pickup_schedule_info),
+         times_notes = COALESCE($9, times_notes),
+         conditions_notes = COALESCE($10, conditions_notes),
          updated_at = NOW()
-       WHERE id = $9
+       WHERE id = $11
        RETURNING *`,
       [
         title ?? null,
@@ -435,6 +449,8 @@ export const updateEvent = async (req: Request, res: Response): Promise<void> =>
         pickup_deadline !== undefined ? pickup_deadline : null,
         status ?? null,
         pickup_schedule_info ?? null,
+        times_notes !== undefined ? times_notes : null,
+        conditions_notes !== undefined ? conditions_notes : null,
         id
       ]
     );

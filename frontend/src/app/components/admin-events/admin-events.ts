@@ -27,6 +27,10 @@ export interface EventSummary {
   claims_close_at?: string | null;
   pickup_deadline: string;
   pickup_schedule_info?: string | null;
+  /** Nota markdown de tiempos (solo términos/condiciones; nunca en cálculos). */
+  times_notes?: string | null;
+  /** Nota markdown de condiciones (solo términos/condiciones; nunca en cálculos). */
+  conditions_notes?: string | null;
   status?: string;
   created_at: string;
   /** Nº de items asignados al evento (0 = se puede borrar). */
@@ -93,6 +97,10 @@ export class AdminEvents implements OnInit, OnDestroy {
   readonly title = signal('');
   readonly description = signal('');
   readonly pickupScheduleInfo = signal('');
+  /** Nota markdown de tiempos (se renderiza en la pestaña Tiempos del detalle). */
+  readonly timesNotes = signal('');
+  /** Nota markdown de condiciones (se renderiza en la pestaña Condiciones del detalle). */
+  readonly conditionsNotes = signal('');
   readonly availableFrom = signal('');
   readonly pickupDeadline = signal('');
   readonly claimsCloseAt = signal('');
@@ -177,6 +185,8 @@ export class AdminEvents implements OnInit, OnDestroy {
     this.title.set('');
     this.description.set('');
     this.pickupScheduleInfo.set('');
+    this.timesNotes.set('');
+    this.conditionsNotes.set('');
     this.editingEventId.set(null);
     // Ancla por defecto = mañana a la misma hora; deriva el resto.
     const pub = this.toLocalInputValue(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
@@ -319,6 +329,8 @@ export class AdminEvents implements OnInit, OnDestroy {
       this.title.set(ev.title ?? '');
       this.description.set(ev.description ?? '');
       this.pickupScheduleInfo.set(ev.pickup_schedule_info ?? '');
+      this.timesNotes.set(ev.times_notes ?? '');
+      this.conditionsNotes.set(ev.conditions_notes ?? '');
       this.availableFrom.set(this.toLocalInputValue(ev.available_from));
       this.pickupDeadline.set(this.toLocalInputValue(ev.pickup_deadline));
       this.claimsCloseAt.set(this.toLocalInputValue(ev.claims_close_at));
@@ -333,13 +345,18 @@ export class AdminEvents implements OnInit, OnDestroy {
   }
 
   private buildPayload(): Record<string, any> {
-    // Payload v2: SOLO las 4 fechas + title/description/pickup_schedule_info.
-    // CERO columnas por rol: las ventajas se leen en tiempo real de la matriz
-    // (advance_pub/disp) y no se congelan en el evento.
+    // Payload v2: SOLO las 4 fechas + title/description/pickup_schedule_info +
+    // notas markdown de términos/condiciones. CERO columnas por rol: las
+    // ventajas se leen en tiempo real de la matriz (advance_pub/disp) y no se
+    // congelan en el evento.
     return {
       title: this.title(),
       description: this.description() || null,
       pickup_schedule_info: this.pickupScheduleInfo().trim() || null,
+      // Se envían como string (aunque sea '') para que el backend pueda limpiar
+      // la nota vía COALESCE; '' oculta el recuadro en el detalle.
+      times_notes: this.timesNotes().trim(),
+      conditions_notes: this.conditionsNotes().trim(),
       published_at: this.toUtcIsoOrNull(this.publishedAt()),
       available_from: this.toUtcIsoOrNull(this.availableFrom()),
       claims_close_at: this.toUtcIsoOrNull(this.claimsCloseAt()),

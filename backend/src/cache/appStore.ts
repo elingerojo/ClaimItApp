@@ -89,6 +89,10 @@ export interface StoreEvent {
   pickup_deadline: string | null;
   status: string;
   pickup_schedule_info?: string | null;
+  /** Nota markdown de tiempos (solo términos/condiciones; nunca en cálculos). */
+  times_notes?: string | null;
+  /** Nota markdown de condiciones (solo términos/condiciones; nunca en cálculos). */
+  conditions_notes?: string | null;
 }
 
 export interface LedgerEntry {
@@ -274,10 +278,11 @@ export async function rehydrateAll(): Promise<boolean> {
     );
     trustSettings = new Map(trustResult.rows.map((r: any) => [r.id, r]));
 
-    // 7. Eventos v2 (solo 4 fechas + status + nota)
+    // 7. Eventos v2 (solo 4 fechas + status + notas informativas)
     const eventsResult = await pool.query(
       `SELECT id, title, description, available_from, published_at,
-              claims_close_at, pickup_deadline, status, pickup_schedule_info
+              claims_close_at, pickup_deadline, status, pickup_schedule_info,
+              times_notes, conditions_notes
        FROM events`
     );
     events = new Map(eventsResult.rows.map((e: any) => [e.id, e as StoreEvent]));

@@ -65,6 +65,10 @@ export interface EventSummary {
   claims_close_at: string | null;
   pickup_deadline: string | null;
   pickup_schedule_info?: string | null;
+  /** Nota markdown de tiempos del evento (términos/condiciones; se renderiza en la pestaña Tiempos). */
+  times_notes?: string | null;
+  /** Nota markdown de condiciones del evento (términos/condiciones; se renderiza en la pestaña Condiciones). */
+  conditions_notes?: string | null;
 }
 
 /**

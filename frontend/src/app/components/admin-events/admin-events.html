@@ -81,6 +81,20 @@
                     class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg"></textarea>
         </label>
 
+        <label class="block mt-3">
+          <span class="text-[10px] font-medium text-gray-400">📝 Notas de Tiempos (términos y condiciones, opcional)</span>
+          <textarea [(ngModel)]="timesNotes" rows="3" placeholder="Ej.: La recolección será en horario de 10:00 a 14:00. Si no puedes a esa hora, avisa con anticipación."
+                    class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg font-mono"></textarea>
+          <span class="text-[10px] text-gray-400 mt-1 block">Markdown permitido (se renderiza al final de la pestaña "Tiempos" del detalle de cada objeto del evento).</span>
+        </label>
+
+        <label class="block mt-3">
+          <span class="text-[10px] font-medium text-gray-400">📝 Notas de Condiciones (términos y condiciones, opcional)</span>
+          <textarea [(ngModel)]="conditionsNotes" rows="3" placeholder="Ej.: Los objetos se entregan tal cual se muestran. Si no recoges a tiempo, el objeto pasa al siguiente en fila."
+                    class="w-full mt-1 text-xs px-3 py-2 border border-gray-200 rounded-lg font-mono"></textarea>
+          <span class="text-[10px] text-gray-400 mt-1 block">Markdown permitido (se renderiza al final de la pestaña "Condiciones" del detalle de cada objeto del evento).</span>
+        </label>
+
         <p class="text-[10px] text-gray-400">
           El evento v2 se define SOLO por estas 4 fechas + título/descripción + nota. Las ventajas por rol
           (publicación/separación) se leen en <b>tiempo real</b> de la matriz de Configuración: ya no se

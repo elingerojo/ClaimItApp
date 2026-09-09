@@ -102,6 +102,8 @@ CREATE TABLE events (
   pickup_deadline TIMESTAMPTZ NOT NULL,     -- T_final (caridad)
   status event_status NOT NULL DEFAULT 'draft',
   pickup_schedule_info TEXT,                -- nota informativa (nunca en cálculos)
+  times_notes TEXT,                         -- nota markdown de tiempos (solo términos/condiciones, nunca en cálculos)
+  conditions_notes TEXT,                    -- nota markdown de condiciones (solo términos/condiciones, nunca en cálculos)
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT events_available_after_publish

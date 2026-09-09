@@ -16,6 +16,7 @@ import { CommonModule } from '@angular/common';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
 import { CategoryEsPipe } from '../../pipes/category-es.pipe';
+import { MarkdownPipe } from '../../pipes/markdown.pipe';
 import { InventoryService, ItemWithQueue, QueueEntry } from '../../services/inventory';
 import { UserService } from '../../services/user';
 import { AdminTokenService } from '../../services/admin-token';
@@ -49,7 +50,7 @@ interface FixedTimelineRow {
 @Component({
   selector: 'app-item-detail',
   standalone: true,
-  imports: [CommonModule, StripAccentsPipe, DateEsPipe, CategoryEsPipe],
+  imports: [CommonModule, StripAccentsPipe, DateEsPipe, CategoryEsPipe, MarkdownPipe],
   templateUrl: './item-detail.html'
 })
 export class ItemDetail implements OnInit, OnDestroy {
@@ -305,6 +306,16 @@ export class ItemDetail implements OnInit, OnDestroy {
   /** pickup_deadline (T_final / caridad) del evento. */
   pickupDeadline(): string | null {
     return this.item().eventSummary?.pickup_deadline ?? null;
+  }
+
+  /** Nota markdown de tiempos del evento ('' si vacía): pestaña Tiempos. */
+  timesNotes(): string {
+    return this.item().eventSummary?.times_notes?.trim() ?? '';
+  }
+
+  /** Nota markdown de condiciones del evento ('' si vacía): pestaña Condiciones. */
+  conditionsNotes(): string {
+    return this.item().eventSummary?.conditions_notes?.trim() ?? '';
   }
 
   /** Instante en que el rol puede empezar a reclamar (o null). */

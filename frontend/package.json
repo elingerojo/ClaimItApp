@@ -18,6 +18,8 @@
     "@angular/router": "^22.0.0",
     "@claimitapp/shared": "*",
     "@vercel/blob": "^0.23.4",
+    "dompurify": "^3.4.15",
+    "marked": "^18.0.12",
     "tslib": "^2.3.0"
   },
   "devDependencies": {
