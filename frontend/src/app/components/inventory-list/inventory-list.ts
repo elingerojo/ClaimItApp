@@ -18,6 +18,7 @@ import {
   phaseChipText,
   claimStateEmoji
 } from '../../utils/event-status';
+import { faseSectionVisible } from '../../utils/fase-reveal';
 
 @Component({
   selector: 'app-inventory-list',
@@ -63,6 +64,13 @@ export class InventoryList implements OnInit {
   readonly activeCategory = signal<string>('All');
   readonly activeStatus = signal<string>('All');
   readonly showOnlyMyClaims = signal<boolean>(false);
+
+  /**
+   * Revelado progresivo del renglón de filtro 'Fase:'. true = mostrar el renglón.
+   * Se calcula una vez al montar (ngOnInit) a partir de la clave de localStorage
+   * claimit_fase_contador (lógica invertida: contador en 0 => visible para siempre).
+   */
+  readonly faseSectionVisible = signal<boolean>(false);
 
   // ---- Contexto de evento (Fase 1): derivado del feed (eventSummary por item) ----
   /** Eventos presentes en el catálogo con su resumen y nº de objetos. */
@@ -127,6 +135,11 @@ export class InventoryList implements OnInit {
   readonly isEditingIdentity = signal(false);
 
   ngOnInit(): void {
+    // Revelado progresivo del renglón de filtro 'Fase:' (contador en localStorage).
+    // Se ejecuta una vez por carga: puede restar 1 si hoy es un día calendario
+    // distinto al último registrado, o escribir el contador en dispositivos nuevos.
+    this.faseSectionVisible.set(faseSectionVisible());
+
     // Visitante que YA tiene sesión guardada y llega con ?invite=TOKEN:
     // la invitación se acepta automáticamente (el home no cambia su aspecto).
     if (this.userService.isAuthenticated()) {

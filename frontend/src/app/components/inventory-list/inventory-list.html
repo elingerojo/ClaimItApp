@@ -70,7 +70,10 @@
       </div>
     </div>
 
-    <!-- Renglón 2: Filtro por Fase v2 -->
+    <!-- Renglón 2: Filtro por Fase v2 (revelado progresivo: visible cuando el
+         contador de localStorage claimit_fase_contador llega a 0 / dispositivo
+         sin contador lo inicia en 4 → oculto hasta usar 5 días distintos). -->
+    @if (faseSectionVisible()) {
     <div class="flex items-center gap-3 flex-wrap border-t border-gray-100 pt-3">
       <span class="text-xs font-bold text-gray-400 uppercase tracking-wider min-w-[100px]">{{ 'Fase:' | stripAccents }}</span>
       <div class="flex flex-wrap gap-1.5">
@@ -94,6 +97,7 @@
         </button>
       </div>
     </div>
+    }
 
     <!-- Botón de Utilidad: Mis Elegidos -->
     @if (userService.isAuthenticated()) {
