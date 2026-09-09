@@ -314,13 +314,29 @@ export function validateRoleDefaultsUpdate(data: any): ValidationResult {
     const r = roles[role];
     if (r === undefined || r === null) continue;
 
-    const pubErr = validateMatrixAdvanceHours(r.advance_pub_hours_default, `${role}.advance_pub_hours_default`);
-    if (pubErr) errors.push(pubErr);
+    // Actualización PARCIAL por diseño: el cliente puede enviar SOLO precio o
+    // apartados (permitido incluso con eventos live) sin los adelantos. Solo se
+    // validan los campos presentes en el payload (guía `!== undefined`), igual
+    // que el UPDATE del controller — un campo ausente (undefined) no debe
+    // fallar como "must be an integer".
+    const hasPub = r.advance_pub_hours_default !== undefined;
+    const hasDisp = r.advance_disp_hours_default !== undefined;
 
-    const dispErr = validateMatrixAdvanceHours(r.advance_disp_hours_default, `${role}.advance_disp_hours_default`);
-    if (dispErr) errors.push(dispErr);
+    if (hasPub) {
+      const pubErr = validateMatrixAdvanceHours(r.advance_pub_hours_default, `${role}.advance_pub_hours_default`);
+      if (pubErr) errors.push(pubErr);
+    }
 
+    if (hasDisp) {
+      const dispErr = validateMatrixAdvanceHours(r.advance_disp_hours_default, `${role}.advance_disp_hours_default`);
+      if (dispErr) errors.push(dispErr);
+    }
+
+    // Regla de consistencia (nunca se reclama sin ver): solo tiene sentido
+    // cuando AMBOS adelantos vienen en el payload.
     if (
+      hasPub &&
+      hasDisp &&
       Number.isInteger(r.advance_pub_hours_default) &&
       Number.isInteger(r.advance_disp_hours_default) &&
       r.advance_disp_hours_default > r.advance_pub_hours_default
