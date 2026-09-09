@@ -424,6 +424,11 @@ export class AdminEvents implements OnInit, OnDestroy {
     return d.invitations.find(i => i.role === role) ?? null;
   }
 
+  /** Token (código críptico real) de la invitación del rol seleccionado. */
+  selectedInvitationCode(): string {
+    return this.selectedInvitation()?.code ?? '';
+  }
+
   /** Habilita compartir solo cuando hay rol elegido con invitación activa. */
   canShareSelected(): boolean {
     const inv = this.selectedInvitation();
