@@ -40,9 +40,6 @@
           <div>
             <span class="text-gray-500">Identificado como:</span>
             <span class="font-bold text-gray-900 font-mono ml-1">&#64;{{ userService.currentUsername() }}</span>
-            <span [class]="'ml-2 inline-block text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ' + roleBadgeClass()">
-              {{ userService.currentRole() }}
-            </span>
           </div>
           <button (click)="beginAliasEdit()" title="Cambia a un alias diferente o actualiza tus datos de contacto. Tus apartados anteriores se conservan." class="text-[10px] text-red-500 hover:underline font-medium">
             Cambiar Alias
@@ -115,7 +112,7 @@
     <div class="rounded-2xl border p-4 space-y-1.5"
          [class]="eventContexts()[0].status === 'closing' ? 'border-amber-200 bg-amber-50' : eventContexts()[0].status === 'closed' ? 'border-red-200 bg-red-50' : 'border-indigo-100 bg-indigo-50/70'">
       <div class="flex items-center justify-between gap-2">
-        <span class="text-lg" aria-hidden="true">📅</span>
+        <span class="text-lg text-gray-600" aria-hidden="true">📅 EVENTO: </span>
         <span class="flex-1 font-bold text-gray-900 truncate">{{ eventContexts()[0].title }}</span>
         <span [class]="'shrink-0 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ' + eventStatusBadge(eventContexts()[0].status)">{{ eventStatusLabel(eventContexts()[0].status) }}</span>
       </div>
