@@ -22,6 +22,7 @@
  */
 
 import type {
+  BarcodeType,
   ClaimState,
   FifoPosition,
   FrozenSchedule,
@@ -67,6 +68,16 @@ export interface StoreItem {
   visibilityLevel: number | null;
   // Precio base del item (fuente); el precio por rol se calcula en lectura.
   precioBaseCosto: number | null;
+  // Análisis de precio de mercado por código de barras (captura + UPCitemdb).
+  // Valores INFORMATIVOS (min/max/avg); NO participan en el precio por rol.
+  barcode: string | null;
+  barcodeType: BarcodeType | null;
+  marketCurrency: string | null;
+  marketMinPrice: number | null;
+  marketMaxPrice: number | null;
+  marketAvgPrice: number | null;
+  marketOffersCount: number | null;
+  marketAnalyzedAt: string | null;
   // Snapshot congelado del calendario (jsonb parseado) o null si no congelado.
   frozenSchedule: FrozenSchedule | null;
   frozenAt: string | null;
@@ -176,6 +187,9 @@ export async function rehydrateAll(): Promise<boolean> {
     const itemsResult = await pool.query(
       `SELECT id, event_id, title, description, category, info_url, image_urls,
               status, phase, visibility_level, precio_base_costo,
+              barcode, barcode_type, market_currency,
+              market_min_price, market_max_price, market_avg_price,
+              market_offers_count, market_analyzed_at,
               frozen_schedule, frozen_at, free_window_opened_at,
               delivered_claim_id, delivered_at, charity_at, created_at
        FROM items ORDER BY created_at DESC`
@@ -224,6 +238,14 @@ export async function rehydrateAll(): Promise<boolean> {
         phase: item.phase,
         visibilityLevel: item.visibility_level,
         precioBaseCosto: item.precio_base_costo,
+        barcode: item.barcode ?? null,
+        barcodeType: (item.barcode_type as BarcodeType) ?? null,
+        marketCurrency: item.market_currency ?? null,
+        marketMinPrice: item.market_min_price != null ? Number(item.market_min_price) : null,
+        marketMaxPrice: item.market_max_price != null ? Number(item.market_max_price) : null,
+        marketAvgPrice: item.market_avg_price != null ? Number(item.market_avg_price) : null,
+        marketOffersCount: item.market_offers_count != null ? Number(item.market_offers_count) : null,
+        marketAnalyzedAt: item.market_analyzed_at ?? null,
         frozenSchedule: item.frozen_schedule ? (item.frozen_schedule as FrozenSchedule) : null,
         frozenAt: item.frozen_at ?? null,
         freeWindowOpenedAt: item.free_window_opened_at ?? null,

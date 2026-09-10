@@ -144,6 +144,66 @@ export function validateVisibilityLevel(level: any): boolean {
 }
 
 /**
+ * Valida los campos OPCIONALES del análisis de mercado por código de barras que
+ * puede enviar el admin al crear/editar un item (create/update). Solo se valida
+ * lo que venga definido (`!== undefined`), igual que el UPDATE parcial:
+ *  - barcode: cadena alfanumérica acotada (<= 40).
+ *  - barcode_type: uno de UPC/EAN/ISBN/ASIN (o null para limpiar).
+ *  - market_currency: código ISO de 3 letras (o null).
+ *  - market_min/max/avg_price: número finito >= 0 (o null para limpiar).
+ *  - market_offers_count: entero >= 0 (o null).
+ *  - market_analyzed_at: ISO válido (o null).
+ * Devuelve los errores encontrados; [] si todo es válido/ausente.
+ */
+export function validateMarketFields(data: any): string[] {
+  const errors: string[] = [];
+
+  if (data.barcode !== undefined && data.barcode !== null) {
+    if (typeof data.barcode !== 'string' || !data.barcode.trim() || data.barcode.length > 40) {
+      errors.push('barcode: must be a string of at most 40 chars (or null)');
+    }
+  }
+
+  if (data.barcode_type !== undefined && data.barcode_type !== null) {
+    if (!['UPC', 'EAN', 'ISBN', 'ASIN'].includes(data.barcode_type)) {
+      errors.push('barcode_type: must be one of UPC/EAN/ISBN/ASIN (or null)');
+    }
+  }
+
+  if (data.market_currency !== undefined && data.market_currency !== null) {
+    if (typeof data.market_currency !== 'string' || !/^[A-Z]{3}$/.test(data.market_currency)) {
+      errors.push('market_currency: must be a 3-letter ISO currency code (or null)');
+    }
+  }
+
+  const nullableNumber = (key: string, label: string): void => {
+    const v = data[key];
+    if (v === undefined || v === null) return;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) {
+      errors.push(`${label}: must be a finite number >= 0 (or null)`);
+    }
+  };
+  nullableNumber('market_min_price', 'market_min_price');
+  nullableNumber('market_max_price', 'market_max_price');
+  nullableNumber('market_avg_price', 'market_avg_price');
+
+  if (data.market_offers_count !== undefined && data.market_offers_count !== null) {
+    if (!Number.isInteger(Number(data.market_offers_count)) || Number(data.market_offers_count) < 0) {
+      errors.push('market_offers_count: must be a non-negative integer (or null)');
+    }
+  }
+
+  if (data.market_analyzed_at !== undefined && data.market_analyzed_at !== null) {
+    if (typeof data.market_analyzed_at !== 'string' || Number.isNaN(new Date(data.market_analyzed_at).getTime())) {
+      errors.push('market_analyzed_at: must be a valid ISO timestamp (or null)');
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Validate role level (familiares/amigos/conocidos/publico)
  */
 export function validateRoleLevel(role: unknown): boolean {

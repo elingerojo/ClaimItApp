@@ -112,6 +112,39 @@
               <div class="mt-1 text-xl font-extrabold text-gray-900">${{ item().precioVisible | precioEs }}</div>
             }
 
+            <!-- Precio de mercado (análisis por código de barras; informativo, no altera el precio por rol) -->
+            @if (hasMarketAnalysis()) {
+              <div class="mt-2 rounded-xl border border-teal-100 bg-teal-50/70 px-3 py-2 text-xs text-teal-900 space-y-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-[10px] font-bold uppercase tracking-wider text-teal-600">📊 Precio de mercado</span>
+                  @if (item().marketCurrency) {
+                    <span class="shrink-0 text-[9px] font-mono font-bold px-1.5 py-px rounded-full bg-teal-100 text-teal-700"
+                          title="Moneda de la fuente de ofertas (no es el precio de venta en MXN)">{{ item().marketCurrency }}</span>
+                  }
+                </div>
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-medium">
+                  <span>Mín <b class="font-mono">{{ item().marketMinPrice | marketEs }}</b></span>
+                  <span class="text-teal-300">·</span>
+                  <span>Máx <b class="font-mono">{{ item().marketMaxPrice | marketEs }}</b></span>
+                  <span class="text-teal-300">·</span>
+                  <span>Prom <b class="font-mono">{{ item().marketAvgPrice | marketEs }}</b></span>
+                </div>
+                <div class="text-[10px] text-teal-700/70">
+                  @if (marketOffersInfo()) {
+                    <span>{{ marketOffersInfo() }}</span>
+                    <span class="mx-0.5">·</span>
+                  }
+                  @if (item().marketAnalyzedAt) {
+                    <span>Actualizado {{ item().marketAnalyzedAt | dateEs:'short' }}</span>
+                  }
+                  @if (marketBarcodeLabel()) {
+                    <span class="mx-0.5">·</span>
+                    <span class="font-mono">{{ item().barcodeType }} {{ marketBarcodeLabel() }}</span>
+                  }
+                </div>
+              </div>
+            }
+
             <!-- Descripción completa (sin truncar) -->
             <p class="mt-3 text-sm text-gray-600">{{ item().description || 'Sin descripción adicional.' }}</p>
           }

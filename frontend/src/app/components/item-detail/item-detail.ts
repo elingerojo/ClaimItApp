@@ -18,6 +18,7 @@ import { DateEsPipe } from '../../pipes/date-es.pipe';
 import { CategoryEsPipe } from '../../pipes/category-es.pipe';
 import { MarkdownPipe } from '../../pipes/markdown.pipe';
 import { PrecioEsPipe } from '../../pipes/precio-es.pipe';
+import { MarketEsPipe } from '../../pipes/market-es.pipe';
 import { InventoryService, ItemWithQueue, QueueEntry } from '../../services/inventory';
 import { UserService } from '../../services/user';
 import { AdminTokenService } from '../../services/admin-token';
@@ -51,7 +52,7 @@ interface FixedTimelineRow {
 @Component({
   selector: 'app-item-detail',
   standalone: true,
-  imports: [CommonModule, StripAccentsPipe, DateEsPipe, CategoryEsPipe, MarkdownPipe, PrecioEsPipe],
+  imports: [CommonModule, StripAccentsPipe, DateEsPipe, CategoryEsPipe, MarkdownPipe, PrecioEsPipe, MarketEsPipe],
   templateUrl: './item-detail.html'
 })
 export class ItemDetail implements OnInit, OnDestroy {
@@ -635,5 +636,26 @@ export class ItemDetail implements OnInit, OnDestroy {
    */
   queueChips(): QueueEntry[] {
     return this.adminMode() ? (this.item().queue ?? []) : this.activeClaims();
+  }
+
+  // ---- Análisis de precio de mercado (min/max/avg por código de barras) ----
+
+  /** ¿El item tiene análisis de mercado persistido (min presente)? */
+  hasMarketAnalysis(): boolean {
+    return this.item().marketMinPrice != null;
+  }
+
+  /** Texto legible del nº de ofertas usadas en el análisis ('' si no hay). */
+  marketOffersInfo(): string {
+    const n = this.item().marketOffersCount;
+    if (n == null) return '';
+    return `${n} oferta${n === 1 ? '' : 's'} analizada${n === 1 ? '' : 's'}`;
+  }
+
+  /** Etiqueta corta del código (barcode) para el detalle. */
+  marketBarcodeLabel(): string {
+    const code = this.item().barcode;
+    if (!code) return '';
+    return code;
   }
 }

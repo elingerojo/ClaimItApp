@@ -33,7 +33,8 @@ export {
   validateEventConfig,
   validateRoleDefaultsUpdate,
   validateMatrixAdvanceHours,
-  validateFrozenSchedule
+  validateFrozenSchedule,
+  validateMarketFields
 } from './validators.js';
 
 export type { ValidationResult, ValidateEventInputOptions } from './validators.js';

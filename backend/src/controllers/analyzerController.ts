@@ -1,5 +1,10 @@
 import { Request, Response } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
+import {
+  analyzeBarcodeMarket,
+  normalizeBarcode,
+  barcodeTypeOf
+} from '../services/marketPrice.js';
 
 // Initialize the Google Gen AI client with your API key
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -46,6 +51,18 @@ export const analyzeItem = async (req: Request, res: Response): Promise<void> =>
           description: 'Un enlace de búsqueda basado en el siguiente formato de búsqueda `https://www.google.com.mx/search?q=term1+term2+more+terms`. Donde los términos de búsqueda sean en español. Devuelve null si no aplica.',
           nullable: true,
         },
+        barcode: {
+          type: Type.STRING,
+          description:
+            'El código de barras legible impreso en el objeto: etiqueta, caja, empaque, lomo de libro o tag. Puede ser UPC (12 dígitos), EAN (13 dígitos), ISBN (13 dígitos que empiezan en 978/979) o ASIN de Amazon (10 caracteres alfanuméricos, típicamente empieza con B). Si el código es ilegible o no existe, devuelve null. NO inventes ni adivines un código.',
+          nullable: true,
+        },
+        barcodeType: {
+          type: Type.STRING,
+          description:
+            'Tipo del código devuelto en barcode. Solo uno de estos valores exactos: "UPC", "EAN", "ISBN" o "ASIN". Devuelve null si barcode es null.',
+          nullable: true,
+        },
       },
       required: ['title', 'category', 'description'],
     };
@@ -75,6 +92,9 @@ export const analyzeItem = async (req: Request, res: Response): Promise<void> =>
       'Analiza el objeto que se muestra en las imágenes adjuntas. Si hay más de una imagen, ' +
       'son vistas del mismo objeto: úsalas como contexto complementario (detalles, etiquetas, ' +
       'estado, ángulos, daños). Devuelve un solo JSON con los datos del objeto. ' +
+      'Si el objeto muestra un código de barras legible (UPC/EAN/ISBN/ASIN) en una etiqueta, ' +
+      'caja, empaque, lomo o tag, léelo con cuidado y regrésalo en barcode/barcodeType. Si es ' +
+      'ilegible o no hay código, devuelve null (no lo adivines). ' +
       'Verifica que el link infoURL sea actual, válido y relevante. Responde siempre en español.';
 
     // Call the Gemini model with a structured system instruction
@@ -99,9 +119,29 @@ export const analyzeItem = async (req: Request, res: Response): Promise<void> =>
     // Parse the safe JSON string straight out of the response block
     const parsedData = JSON.parse(responseText);
 
+    // Código de barras detectado por Gemini (UPC/EAN/ISBN/ASIN): normalizar tipo
+    // y, si es consultable (numérico), analizar el precio de mercado contra
+    // UPCitemdb. El fallo degrada a market:null (nunca rompe la captura).
+    const rawBarcode =
+      typeof parsedData?.barcode === 'string' && parsedData.barcode.trim()
+        ? parsedData.barcode.trim()
+        : null;
+    const numericCode = rawBarcode ? normalizeBarcode(rawBarcode) : null;
+    const barcodeType = numericCode
+      ? barcodeTypeOf(numericCode)
+      : rawBarcode && parsedData?.barcodeType === 'ASIN'
+        ? 'ASIN'
+        : null;
+    const market = rawBarcode ? await analyzeBarcodeMarket(rawBarcode) : null;
+
     res.status(200).json({
       success: true,
-      data: parsedData,
+      data: {
+        ...parsedData,
+        barcode: rawBarcode,
+        barcodeType,
+        market,
+      },
     });
 
   } catch (error) {

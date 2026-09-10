@@ -137,6 +137,18 @@ CREATE TABLE items (
   -- visibilidad/apertura se deriva de events.published_at / events.available_from
   -- (cálculo por rol en tiempo de lectura). Sin columnas de calendario por item.
   precio_base_costo NUMERIC(10, 2),  -- precio base; por rol se calcula en lectura
+  -- Análisis de precio de mercado por código de barras (captura + Gemini →
+  -- UPCitemdb). Valores INFORMATIVOS min/max/avg; NO participan en el precio de
+  -- venta por rol (base × multiplicador). Ver migración 0007.
+  barcode VARCHAR(40),               -- UPC/EAN/ISBN/ASIN detectado (o NULL)
+  barcode_type VARCHAR(10)
+    CHECK (barcode_type IS NULL OR barcode_type IN ('UPC', 'EAN', 'ISBN', 'ASIN')),
+  market_currency CHAR(3),           -- moneda de la fuente de ofertas (p. ej. USD)
+  market_min_price NUMERIC(10, 2),   -- oferta más baja
+  market_max_price NUMERIC(10, 2),   -- oferta más alta
+  market_avg_price NUMERIC(10, 2),   -- promedio de las ofertas válidas
+  market_offers_count INTEGER,       -- nº de ofertas usadas para el cálculo
+  market_analyzed_at TIMESTAMPTZ,    -- cuándo se calculó el análisis
   -- Snapshot del calendario congelado IDEMPOTENTE (D4/D6). Se persiste UNA vez al
   -- llegar a T_inicio (o en la primera lectura con now >= claims_close_at) y no se
   -- recoloca tras cancelaciones/expirios (el dominó hereda el V fijo siguiente).

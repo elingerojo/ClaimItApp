@@ -9,6 +9,8 @@ import { ItemCategory } from '@claimitapp/shared';
 import { upload } from '@vercel/blob/client';
 import { railwayApiUrl } from '../../app.config';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
+import { DateEsPipe } from '../../pipes/date-es.pipe';
+import { MarketEsPipe } from '../../pipes/market-es.pipe';
 import { AdminAuth } from '../admin-auth/admin-auth';
 
 /** Opción de evento para los selectores (GET /api/events). */
@@ -17,6 +19,24 @@ export interface EventOption {
   title: string;
   /** Estado del evento (draft|scheduled|active|closing|closed). */
   status?: string;
+}
+
+/**
+ * Resultado del análisis de mercado calculado por el backend (UPCitemdb) a
+ * partir del código de barras que detectó Gemini. Espejo de `data.market` de
+ * POST /api/admin/analyze-item y de los campos `market*` del item.
+ */
+export interface MarketResult {
+  /** Código numérico consultado (UPC/EAN/ISBN). */
+  code: string;
+  type: string;
+  /** Moneda de la fuente de ofertas (p. ej. USD). */
+  currency: string | null;
+  minPrice: number | null;
+  maxPrice: number | null;
+  averagePrice: number | null;
+  offersCount: number;
+  analyzedAt: string;
 }
 
 /** Máximo de fotos que se envían a Gemini en una sola llamada (índices 0..2). */
@@ -38,7 +58,7 @@ function moveInArray<T>(list: T[], index: number, dir: -1 | 1): T[] {
 @Component({
   selector: 'app-admin-ingest',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, StripAccentsPipe, AdminAuth],
+  imports: [CommonModule, FormsModule, RouterModule, StripAccentsPipe, DateEsPipe, MarketEsPipe, AdminAuth],
   templateUrl: './admin-ingest.html'
 })
 export class AdminIngest implements OnInit {
@@ -73,6 +93,18 @@ export class AdminIngest implements OnInit {
   readonly formCategory = signal<ItemCategory>('Misc.');
   readonly formInfoUrl = signal<string>('');
   readonly formPrecioBase = signal<number | null>(null);
+
+  // ---- Análisis de mercado (barcode detectado → UPCitemdb) de la CAPTURA ----
+  /** Código de barras detectado por Gemini (UPC/EAN/ISBN/ASIN) o null. */
+  readonly formBarcode = signal<string | null>(null);
+  readonly formBarcodeType = signal<string | null>(null);
+  /** Resultado calculado por el backend (min/max/avg) o null si no aplica. */
+  readonly marketResult = signal<MarketResult | null>(null);
+
+  // ---- Análisis de mercado del EDITOR (item existente) ----
+  readonly editBarcode = signal<string | null>(null);
+  readonly editBarcodeType = signal<string | null>(null);
+  readonly editMarketResult = signal<MarketResult | null>(null);
 
   // Vertical editor state for the last-added item
   readonly editingItem = signal<ItemWithQueue | null>(null);
@@ -203,6 +235,25 @@ export class AdminIngest implements OnInit {
       this.editPriceBase.set(item.precioBaseCosto != null ? Number(item.precioBaseCosto) : null);
       this.editVisibilityLevel.set(item.visibilityLevel ?? 4);
       this.isPreloadedEdit.set(fromManage);
+
+      // Pre-cargar el análisis de mercado persistido (si existe) para que el
+      // editor no lo pierda al guardar y pueda re-analizarlo con nuevas fotos.
+      this.editBarcode.set(item.barcode ?? null);
+      this.editBarcodeType.set(item.barcodeType ?? null);
+      this.editMarketResult.set(
+        item.marketMinPrice != null
+          ? {
+              code: item.barcode ?? '',
+              type: item.barcodeType ?? '',
+              currency: item.marketCurrency ?? null,
+              minPrice: item.marketMinPrice,
+              maxPrice: item.marketMaxPrice ?? null,
+              averagePrice: item.marketAvgPrice ?? null,
+              offersCount: item.marketOffersCount ?? 0,
+              analyzedAt: item.marketAnalyzedAt ?? new Date().toISOString()
+            }
+          : null
+      );
 
       this.scrollToEditor();
       return true;
@@ -403,6 +454,86 @@ export class AdminIngest implements OnInit {
     return aiResult.data;
   }
 
+  // ---------------------------------------------------------------------------
+  //  ANÁLISIS DE MERCADO (barcode → UPCitemdb) — evaluación antes de guardar
+  // ---------------------------------------------------------------------------
+
+  /** Aplica los campos de mercado que devuelve el backend a la CAPTURA. */
+  private applyMarketToCapture(aiData: any): void {
+    this.formBarcode.set(aiData?.barcode ?? null);
+    this.formBarcodeType.set(aiData?.barcodeType ?? null);
+    this.marketResult.set(aiData?.market ?? null);
+  }
+
+  /** Aplica los campos de mercado que devuelve el backend al EDITOR. */
+  private applyMarketToEdit(aiData: any): void {
+    this.editBarcode.set(aiData?.barcode ?? null);
+    this.editBarcodeType.set(aiData?.barcodeType ?? null);
+    this.editMarketResult.set(aiData?.market ?? null);
+  }
+
+  /** Payload de mercado para el guardado de la CAPTURA (nulls si se limpió). */
+  private marketPayloadForCapture(): Record<string, unknown> {
+    const r = this.marketResult();
+    return {
+      barcode: this.formBarcode(),
+      barcode_type: this.formBarcodeType(),
+      market_currency: r?.currency ?? null,
+      market_min_price: r?.minPrice ?? null,
+      market_max_price: r?.maxPrice ?? null,
+      market_avg_price: r?.averagePrice ?? null,
+      market_offers_count: r?.offersCount ?? null,
+      market_analyzed_at: r?.analyzedAt ?? null
+    };
+  }
+
+  /** Payload de mercado para el guardado del EDITOR (nulls si se limpió). */
+  private marketPayloadForEdit(): Record<string, unknown> {
+    const r = this.editMarketResult();
+    return {
+      barcode: this.editBarcode(),
+      barcode_type: this.editBarcodeType(),
+      market_currency: r?.currency ?? null,
+      market_min_price: r?.minPrice ?? null,
+      market_max_price: r?.maxPrice ?? null,
+      market_avg_price: r?.averagePrice ?? null,
+      market_offers_count: r?.offersCount ?? null,
+      market_analyzed_at: r?.analyzedAt ?? null
+    };
+  }
+
+  /** Usa el promedio de mercado como precio base de la CAPTURA. */
+  useAverageAsBase(): void {
+    const r = this.marketResult();
+    if (r?.averagePrice != null) this.formPrecioBase.set(r.averagePrice);
+  }
+
+  /** Quita el análisis de mercado de la CAPTURA (se persistirá sin él). */
+  clearMarketOnCapture(): void {
+    this.formBarcode.set(null);
+    this.formBarcodeType.set(null);
+    this.marketResult.set(null);
+  }
+
+  /** Usa el promedio de mercado como precio base del EDITOR. */
+  useEditAverageAsBase(): void {
+    const r = this.editMarketResult();
+    if (r?.averagePrice != null) this.editPriceBase.set(r.averagePrice);
+  }
+
+  /** Quita el análisis de mercado del EDITOR (se persistirá sin él). */
+  clearEditMarket(): void {
+    this.editBarcode.set(null);
+    this.editBarcodeType.set(null);
+    this.editMarketResult.set(null);
+  }
+
+  /** Etiqueta "N ofertas analizadas" legible de un resultado ('' si no hay). */
+  marketOffersInfo(r: MarketResult | null): string {
+    if (!r || r.offersCount == null) return '';
+    return `${r.offersCount} oferta${r.offersCount === 1 ? '' : 's'}`;
+  }
+
   /** Botón "Analizar con IA" de la CAPTURA: rellena el formulario de creación. */
   async analyzeCapture(): Promise<void> {
     const urls = this.captureImages();
@@ -417,6 +548,7 @@ export class AdminIngest implements OnInit {
       this.formDescription.set(aiData.description || '');
       this.formCategory.set(aiData.category || 'Misc.');
       this.formInfoUrl.set(aiData.infoUrl || '');
+      this.applyMarketToCapture(aiData);
     } catch (err: any) {
       this.toastService.error(`Error en el análisis IA: ${err.message}`);
     } finally {
@@ -437,6 +569,7 @@ export class AdminIngest implements OnInit {
       if (aiData.title) this.editTitle.set(aiData.title);
       if (aiData.description) this.editDescription.set(aiData.description);
       if (aiData.infoUrl) this.editInfoUrl.set(aiData.infoUrl);
+      this.applyMarketToEdit(aiData);
     } catch (err: any) {
       this.toastService.error(`Error en el análisis IA: ${err.message}`);
     } finally {
@@ -479,7 +612,8 @@ export class AdminIngest implements OnInit {
           infoUrl: this.formInfoUrl(),
           imageUrls: images,
           precio_base_costo: this.formPrecioBase(),
-          event_id: this.selectedEventId() || null
+          event_id: this.selectedEventId() || null,
+          ...this.marketPayloadForCapture()
         })
       });
 
@@ -502,6 +636,7 @@ export class AdminIngest implements OnInit {
       this.formCategory.set('Misc.');
       this.formInfoUrl.set('');
       this.formPrecioBase.set(null);
+      this.clearMarketOnCapture();
 
     } catch (err: any) {
       this.toastService.error(`Error al guardar: ${err.message}`);
@@ -535,7 +670,8 @@ export class AdminIngest implements OnInit {
       imageUrls: this.editImages(),
       event_id: this.editEventId() || null,
       precio_base_costo: this.editPriceBase(),
-      visibility_level: this.editVisibilityLevel()
+      visibility_level: this.editVisibilityLevel(),
+      ...this.marketPayloadForEdit()
     };
 
     try {
@@ -581,5 +717,8 @@ export class AdminIngest implements OnInit {
     this.editPriceBase.set(null);
     this.editVisibilityLevel.set(4);
     this.isPreloadedEdit.set(false);
+    this.editBarcode.set(null);
+    this.editBarcodeType.set(null);
+    this.editMarketResult.set(null);
   }
 }

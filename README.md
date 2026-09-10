@@ -35,6 +35,27 @@ Here is the complete, consolidated master plan for your Virtual Moving Giveaway 
 
 ---
 
+### Análisis de precio de mercado (código de barras → UPCitemdb)
+
+En la **captura** con IA, si Gemini detecta un código UPC/EAN/ISBN (y lo reporta en
+`barcode`/`barcodeType`), el backend consulta **UPCitemdb** y calcula
+`minPrice`/`maxPrice`/`averagePrice` de las ofertas. El admin los **revisa antes de
+guardar** (igual que los campos de Gemini) y al persistir el item se escriben en las
+columnas `items.barcode / barcode_type / market_*` (informativo; no altera
+`precio_base_costo`). El card de item-detail (admin y visitante) los muestra. La fuente
+de precios vive detrás de un adaptador intercambiable
+([`backend/src/services/marketPrice.ts`](backend/src/services/marketPrice.ts:1)).
+
+**Variables de entorno (backend/`.env`):**
+- `UPCITEMDB_API_KEY` — API key del plan de UPCitemdb (obligatoria; el trial se da por correo).
+- `UPCITEMDB_API_URL` — opcional; endpoint de lookup (default `https://api.upcitemdb.com/prod/trial/lookup`).
+- `MARKET_LOOKBACK_MONTHS` — opcional; ventana de ofertas en meses (default `6`).
+
+Aplicar la migración sobre una BD viva:
+`node scripts/run-migration.js database/migrations/0007_item_market_price_analysis.sql`
+
+---
+
 ### Phase 1: The Database Schema & Concurrency Design ( Neon[^neon-term] PostgreSQL[^PostgreSQL-term] )
 
 The foundation of the app is a relational database designed to handle high concurrency and prevent race conditions for high-value items.

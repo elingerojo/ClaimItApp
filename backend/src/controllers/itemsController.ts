@@ -3,7 +3,7 @@ import pool from '../config/db.js';
 import type { PoolClient } from 'pg';
 import type { ItemPhase } from '@claimitapp/shared';
 import { broadcastSseEvent } from '../config/sse.js';
-import { validateItemInput, validateImageUrls } from '@claimitapp/shared';
+import { validateItemInput, validateImageUrls, validateMarketFields } from '@claimitapp/shared';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 import {
   getItemById,
@@ -19,6 +19,49 @@ import {
 import { temporalStateFromStore } from '../services/queueService.js';
 import { runLazyCatchUp } from '../services/scheduler.js';
 
+/**
+ * Normaliza los campos OPCIONALES del análisis de mercado enviados por el admin
+ * (create/update). Devuelve un objeto con las mismas llaves solo cuando vinieron
+ * definidos en el body; `null` explicito sirve para LIMPIAR el análisis.
+ * - barcode: string recortado (<= 40) o null.
+ * - barcode_type / market_currency: en mayúsculas.
+ * - market_*_price / offers_count: número (o null); '' también = null.
+ */
+function normalizeMarketPayload(body: any): Record<string, any> {
+  const present = (v: unknown): boolean => v !== undefined;
+  const out: Record<string, any> = {};
+
+  if (present(body.barcode)) {
+    const s = body.barcode == null ? null : String(body.barcode).trim();
+    out.barcode = s ? s.slice(0, 40) : null;
+  }
+  if (present(body.barcode_type)) {
+    out.barcode_type =
+      body.barcode_type == null ? null : String(body.barcode_type).trim().toUpperCase();
+  }
+  if (present(body.market_currency)) {
+    out.market_currency =
+      body.market_currency == null ? null : String(body.market_currency).trim().toUpperCase();
+  }
+  const toNumber = (v: unknown): number | null => {
+    if (v == null || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : Number.NaN;
+  };
+  for (const key of [
+    'market_min_price',
+    'market_max_price',
+    'market_avg_price',
+    'market_offers_count'
+  ]) {
+    if (present(body[key])) out[key] = toNumber(body[key]);
+  }
+  if (present(body.market_analyzed_at)) {
+    out.market_analyzed_at = body.market_analyzed_at == null ? null : body.market_analyzed_at;
+  }
+  return out;
+}
+
 /** Convierte una fila de `items` (RETURNING) a un StoreItem con la cola dada. */
 function toStoreItem(item: any, queue: StoreItem['queue']): StoreItem {
   return {
@@ -33,6 +76,14 @@ function toStoreItem(item: any, queue: StoreItem['queue']): StoreItem {
     phase: item.phase,
     visibilityLevel: item.visibility_level,
     precioBaseCosto: item.precio_base_costo,
+    barcode: item.barcode ?? null,
+    barcodeType: item.barcode_type ?? null,
+    marketCurrency: item.market_currency ?? null,
+    marketMinPrice: item.market_min_price != null ? Number(item.market_min_price) : null,
+    marketMaxPrice: item.market_max_price != null ? Number(item.market_max_price) : null,
+    marketAvgPrice: item.market_avg_price != null ? Number(item.market_avg_price) : null,
+    marketOffersCount: item.market_offers_count != null ? Number(item.market_offers_count) : null,
+    marketAnalyzedAt: item.market_analyzed_at ?? null,
     frozenSchedule: item.frozen_schedule ? item.frozen_schedule : null,
     frozenAt: item.frozen_at ?? null,
     freeWindowOpenedAt: item.free_window_opened_at ?? null,
@@ -76,6 +127,19 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
+  // Análisis de mercado opcional (captura + UPCitemdb): normalizar y validar
+  // antes de insertar. Ausente ⇒ columnas null.
+  const market = normalizeMarketPayload(req.body);
+  const marketErrors = validateMarketFields(market);
+  if (marketErrors.length > 0) {
+    res.status(400).json({
+      error: 'Validation failed',
+      details: marketErrors,
+      timestamp: new Date().toISOString()
+    });
+    return;
+  }
+
   try {
     const evCheck = await pool.query('SELECT id FROM events WHERE id = $1', [event_id]);
     if (evCheck.rows.length === 0) {
@@ -89,11 +153,18 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     const insertQuery = `
       INSERT INTO items
         (title, description, category, info_url, image_urls,
-         visibility_level, event_id, precio_base_costo)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         visibility_level, event_id, precio_base_costo,
+         barcode, barcode_type, market_currency,
+         market_min_price, market_max_price, market_avg_price,
+         market_offers_count, market_analyzed_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING id, title, description, category, info_url, image_urls, status, phase,
                 visibility_level, event_id,
-                precio_base_costo, created_at
+                precio_base_costo,
+                barcode, barcode_type, market_currency,
+                market_min_price, market_max_price, market_avg_price,
+                market_offers_count, market_analyzed_at,
+                created_at
     `;
     const result = await pool.query(insertQuery, [
       title,
@@ -103,7 +174,15 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
       JSON.stringify(imageUrls),
       visibility_level ?? 4,
       event_id,
-      precio_base_costo ?? null
+      precio_base_costo ?? null,
+      market.barcode ?? null,
+      market.barcode_type ?? null,
+      market.market_currency ?? null,
+      market.market_min_price ?? null,
+      market.market_max_price ?? null,
+      market.market_avg_price ?? null,
+      market.market_offers_count ?? null,
+      market.market_analyzed_at ?? null
     ]);
 
     const item = result.rows[0];
@@ -133,6 +212,14 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
         imageUrls: item.image_urls ?? [],
         status: item.status,
         phase: item.phase,
+        barcode: item.barcode ?? null,
+        barcodeType: item.barcode_type ?? null,
+        marketCurrency: item.market_currency ?? null,
+        marketMinPrice: item.market_min_price != null ? Number(item.market_min_price) : null,
+        marketMaxPrice: item.market_max_price != null ? Number(item.market_max_price) : null,
+        marketAvgPrice: item.market_avg_price != null ? Number(item.market_avg_price) : null,
+        marketOffersCount: item.market_offers_count != null ? Number(item.market_offers_count) : null,
+        marketAnalyzedAt: item.market_analyzed_at ?? null,
         createdAt: item.created_at
       }
     });
@@ -157,6 +244,9 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     event_id,
     precio_base_costo
   } = req.body;
+  // Análisis de mercado opcional: normaliza y distingue "no enviado" (no tocar)
+  // de "enviado null" (limpiar).
+  const market = normalizeMarketPayload(req.body);
 
   if (!id) {
     res.status(400).json({ error: 'Missing item id parameter.' });
@@ -178,6 +268,13 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       res.status(400).json({ error: 'Validation failed', details: photoErrors });
       return;
     }
+  }
+
+  // Validar campos de mercado cuando vienen definidos (null es válido = limpiar).
+  const marketErrors = validateMarketFields(market);
+  if (marketErrors.length > 0) {
+    res.status(400).json({ error: 'Validation failed', details: marketErrors });
+    return;
   }
 
   const assignments: string[] = [];
@@ -208,6 +305,28 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     set('precio_base_costo', precio_base_costo, 'precio_base_costo');
   }
 
+  // Análisis de mercado (solo cuando viene definido; null explícito = limpiar).
+  if (market.barcode !== undefined) set('barcode', market.barcode, 'barcode');
+  if (market.barcode_type !== undefined) set('barcode_type', market.barcode_type, 'barcode_type');
+  if (market.market_currency !== undefined) {
+    set('market_currency', market.market_currency, 'market_currency');
+  }
+  if (market.market_min_price !== undefined) {
+    set('market_min_price', market.market_min_price, 'market_min_price');
+  }
+  if (market.market_max_price !== undefined) {
+    set('market_max_price', market.market_max_price, 'market_max_price');
+  }
+  if (market.market_avg_price !== undefined) {
+    set('market_avg_price', market.market_avg_price, 'market_avg_price');
+  }
+  if (market.market_offers_count !== undefined) {
+    set('market_offers_count', market.market_offers_count, 'market_offers_count');
+  }
+  if (market.market_analyzed_at !== undefined) {
+    set('market_analyzed_at', market.market_analyzed_at, 'market_analyzed_at');
+  }
+
   if (assignments.length === 0) {
     res.status(400).json({
       error: 'At least one editable field must be provided.'
@@ -234,7 +353,11 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       WHERE id = $${params.length}
       RETURNING id, title, description, category, info_url, image_urls, status, phase,
                 visibility_level, event_id,
-                precio_base_costo, created_at
+                precio_base_costo,
+                barcode, barcode_type, market_currency,
+                market_min_price, market_max_price, market_avg_price,
+                market_offers_count, market_analyzed_at,
+                created_at
     `;
     const result = await pool.query(updateQuery, params);
 
@@ -279,6 +402,14 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
         imageUrls: updatedItem.image_urls ?? [],
         status: updatedItem.status,
         phase: updatedItem.phase,
+        barcode: updatedItem.barcode ?? null,
+        barcodeType: updatedItem.barcode_type ?? null,
+        marketCurrency: updatedItem.market_currency ?? null,
+        marketMinPrice: updatedItem.market_min_price != null ? Number(updatedItem.market_min_price) : null,
+        marketMaxPrice: updatedItem.market_max_price != null ? Number(updatedItem.market_max_price) : null,
+        marketAvgPrice: updatedItem.market_avg_price != null ? Number(updatedItem.market_avg_price) : null,
+        marketOffersCount: updatedItem.market_offers_count != null ? Number(updatedItem.market_offers_count) : null,
+        marketAnalyzedAt: updatedItem.market_analyzed_at ?? null,
         createdAt: updatedItem.created_at
       }
     });
@@ -419,6 +550,14 @@ export const getItemDetail = async (req: Request, res: Response): Promise<void> 
     visibilityLevel: item.visibilityLevel,
     eventId: item.eventId,
     precioBaseCosto: item.precioBaseCosto,
+    barcode: item.barcode ?? null,
+    barcodeType: item.barcodeType ?? null,
+    marketCurrency: item.marketCurrency ?? null,
+    marketMinPrice: item.marketMinPrice ?? null,
+    marketMaxPrice: item.marketMaxPrice ?? null,
+    marketAvgPrice: item.marketAvgPrice ?? null,
+    marketOffersCount: item.marketOffersCount ?? null,
+    marketAnalyzedAt: item.marketAnalyzedAt ?? null,
     frozenSchedule: item.frozenSchedule,
     frozenAt: item.frozenAt,
     freeWindowOpenedAt: item.freeWindowOpenedAt,
@@ -480,6 +619,14 @@ export const listAllAdminItems = async (req: Request, res: Response): Promise<vo
         phase: item.phase as ItemPhase,
         visibilityLevel: item.visibilityLevel ?? 4,
         eventId: item.eventId ?? null,
+        barcode: item.barcode ?? null,
+        barcodeType: item.barcodeType ?? null,
+        marketCurrency: item.marketCurrency ?? null,
+        marketMinPrice: item.marketMinPrice ?? null,
+        marketMaxPrice: item.marketMaxPrice ?? null,
+        marketAvgPrice: item.marketAvgPrice ?? null,
+        marketOffersCount: item.marketOffersCount ?? null,
+        marketAnalyzedAt: item.marketAnalyzedAt ?? null,
         frozenSchedule: item.frozenSchedule,
         eventSummary: event
           ? {

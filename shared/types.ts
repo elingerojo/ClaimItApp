@@ -32,6 +32,13 @@ export type ItemCategory =
   | 'Misc.';
 
 /**
+ * Tipo de código de barras detectado por Gemini en la captura.
+ * UPC/EAN/ISBN se consultan a la API de precios; ASIN solo se persiste
+ * (UPCitemdb no indexa códigos de Amazon).
+ */
+export type BarcodeType = 'UPC' | 'EAN' | 'ASIN' | 'ISBN';
+
+/**
  * Estado LEGACY `items.status` (available | waitlist_open | unavailable).
  * Se conserva como columna de lectura para no romper contratos actuales; el
  * ciclo de vida v2 lo maneja `items.phase` (ItemPhase).
@@ -103,6 +110,20 @@ export interface Item {
   /** Fase v2 (agregado informativo; el ciclo de vida lo lee el backend v2). */
   phase?: ItemPhase;
   createdAt: string;
+
+  // ---- Análisis de precio de mercado por código de barras (captura + UPCitemdb).
+  // Espejo camelCase de las columnas items.barcode / market_*. Valores
+  // INFORMATIVOS (min/max/avg) que no participan en el precio por rol
+  // (base × multiplicador). Todos opcionales: null cuando no hay análisis.
+  barcode?: string | null;
+  barcodeType?: BarcodeType | null;
+  marketCurrency?: string | null;
+  marketMinPrice?: number | null;
+  marketMaxPrice?: number | null;
+  marketAvgPrice?: number | null;
+  marketOffersCount?: number | null;
+  /** Instante del análisis (ISO) o null si no hay. */
+  marketAnalyzedAt?: string | null;
 }
 
 /** Claim legacy (contrato histórico; la Fase 3 migra a ClaimV2). */
