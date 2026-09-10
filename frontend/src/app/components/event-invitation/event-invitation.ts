@@ -2,9 +2,12 @@ import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { UserService } from '../../services/user';
+import { UserService, StoredUserProfile } from '../../services/user';
 import { ToastService } from '../../services/toast';
 import { InventoryService } from '../../services/inventory';
+import { InviteRecovery } from '../invite-recovery/invite-recovery';
+import type { RecoveryChoice } from '../invite-recovery/invite-recovery';
+import { isInAppWebview } from '../../utils/browser-context';
 import { railwayApiUrl } from '../../app.config';
 
 type InviteState = 'loading' | 'ready' | 'error' | 'joined';
@@ -12,7 +15,7 @@ type InviteState = 'loading' | 'ready' | 'error' | 'joined';
 @Component({
   selector: 'app-event-invitation',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule],
+  imports: [CommonModule, FormsModule, RouterModule, InviteRecovery],
   templateUrl: './event-invitation.html'
 })
 export class EventInvitation implements OnInit {
@@ -30,6 +33,14 @@ export class EventInvitation implements OnInit {
   readonly errorMsg = signal('');
   readonly alias = signal('');
   readonly joining = signal(false);
+
+  // Tercera pantalla: recuperación de identidad ante conflicto de apodo.
+  readonly recoveryVisible = signal(false);
+  readonly recoveryAlias = signal('');
+  readonly recoveryEmphasized = signal<RecoveryChoice>('new');
+  readonly showWebviewHint = signal(false);
+
+  private pendingStoredUser: StoredUserProfile | null = null;
 
   readonly roleLabels: Record<string, string> = {
     familiares: '👨‍👩‍👧‍👦 Familiares',
@@ -71,13 +82,12 @@ export class EventInvitation implements OnInit {
         const alias = this.alias().trim();
         if (!alias) {
           this.toastService.error('Ingresa un apodo o alias para continuar.');
-          this.joining.set(false);
           return;
         }
         const result = await this.userService.resolveSession(alias, null, null);
         if (result.conflict) {
-          this.toastService.error('Ese alias ya está en uso. Elige otro.');
-          this.joining.set(false);
+          // 409: abrir la tercera pantalla de recuperación en lugar de solo avisar.
+          this.openRecovery(alias, result.storedAlias ?? alias, result.storedUser ?? null);
           return;
         }
         uuid = this.userService.currentUuid();
@@ -99,8 +109,51 @@ export class EventInvitation implements OnInit {
       this.router.navigate(['/']);
     } catch (err: any) {
       this.toastService.error(`Error: ${err.message}`);
+    } finally {
       this.joining.set(false);
     }
+  }
+
+  /** Abre la tercera pantalla contra el apodo en conflicto. */
+  private openRecovery(
+    ingresado: string,
+    storedAlias: string,
+    storedUser: StoredUserProfile | null
+  ): void {
+    this.pendingStoredUser = storedUser;
+    this.recoveryAlias.set(storedAlias || ingresado);
+    // Énfasis guiado por contexto: en webview in-app es probable que la
+    // identidad se haya creado por separado → enfatizar "ese apodo es mío".
+    const emphasized: RecoveryChoice = isInAppWebview() ? 'existing' : 'new';
+    this.recoveryEmphasized.set(emphasized);
+    this.showWebviewHint.set(emphasized === 'existing');
+    this.recoveryVisible.set(true);
+  }
+
+  /** Rama A: es su primera vez → volver al alias con foco y sugerir tocayo-2. */
+  onRecoveryChooseNew(): void {
+    this.recoveryVisible.set(false);
+    this.pendingStoredUser = null;
+    const base = this.recoveryAlias();
+    this.alias.set(base ? `${base}-tocayo-2` : '');
+    setTimeout(() => {
+      const el = document.querySelector<HTMLInputElement>('#event-invite-alias');
+      el?.focus();
+      el?.select();
+    }, 0);
+  }
+
+  /** Rama B: el apodo es suyo → adoptar el perfil existente y reintentar. */
+  async onRecoveryClaimExisting(): Promise<void> {
+    const stored = this.pendingStoredUser;
+    if (!stored) {
+      this.onRecoveryChooseNew();
+      return;
+    }
+    this.userService.adoptStoredUser(stored);
+    this.pendingStoredUser = null;
+    this.recoveryVisible.set(false);
+    await this.onJoin();
   }
 
   /** Verdadero si la invitación trae el alias real de quién invita (handle @alias).

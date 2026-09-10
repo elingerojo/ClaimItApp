@@ -16,32 +16,43 @@
     }
 
     @if (state() === 'ready') {
-      <div class="text-center">
-        <div class="text-4xl mb-3">🎟️</div>
-        <h1 class="text-lg font-bold text-gray-900">Invitación a "{{ eventTitle() }}"</h1>
-        <p class="text-xs text-gray-500 mt-1">Invitado por
-          @if (inviterIsHandle()) {
-            <span class="font-semibold text-gray-700">&#64;{{ inviterAlias() }}</span>
-          } @else {
-            <span class="font-semibold text-gray-700">el anfitrión</span>
+      @if (recoveryVisible()) {
+        <!-- Tercera pantalla: recuperación de identidad (apodo ya ocupado). -->
+        <app-invite-recovery
+          [alias]="recoveryAlias()"
+          [emphasized]="recoveryEmphasized()"
+          [showWebviewHint]="showWebviewHint()"
+          (chooseNew)="onRecoveryChooseNew()"
+          (claimExisting)="onRecoveryClaimExisting()"
+        />
+      } @else {
+        <div class="text-center">
+          <div class="text-4xl mb-3">🎟️</div>
+          <h1 class="text-lg font-bold text-gray-900">Invitación a "{{ eventTitle() }}"</h1>
+          <p class="text-xs text-gray-500 mt-1">Invitado por
+            @if (inviterIsHandle()) {
+              <span class="font-semibold text-gray-700">&#64;{{ inviterAlias() }}</span>
+            } @else {
+              <span class="font-semibold text-gray-700">el anfitrión</span>
+            }
+          </p>
+
+          <div class="mt-4 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-gray-100 text-gray-700 font-medium">
+            Recibirás el rol: <span class="font-bold">{{ roleLabels[role()] ?? role() }}</span>
+          </div>
+
+          @if (!userService.isAuthenticated()) {
+            <input id="event-invite-alias" [(ngModel)]="alias" type="text" placeholder="Tu apodo o alias"
+                   class="mt-5 w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
           }
-        </p>
 
-        <div class="mt-4 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-gray-100 text-gray-700 font-medium">
-          Recibirás el rol: <span class="font-bold">{{ roleLabels[role()] ?? role() }}</span>
+          <button (click)="onJoin()" [disabled]="joining()"
+                  class="mt-5 w-full text-sm py-3 rounded-xl font-semibold transition-all bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
+            {{ joining() ? 'Uniéndote...' : '🚀 Unirme al evento' }}
+          </button>
+          <p class="text-[10px] text-gray-400 mt-3">La invitación es de un solo uso por rol.</p>
         </div>
-
-        @if (!userService.isAuthenticated()) {
-          <input [(ngModel)]="alias" type="text" placeholder="Tu apodo o alias"
-                 class="mt-5 w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono" />
-        }
-
-        <button (click)="onJoin()" [disabled]="joining()"
-                class="mt-5 w-full text-sm py-3 rounded-xl font-semibold transition-all bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50">
-          {{ joining() ? 'Uniéndote...' : '🚀 Unirme al evento' }}
-        </button>
-        <p class="text-[10px] text-gray-400 mt-3">La invitación es de un solo uso por rol.</p>
-      </div>
+      }
     }
 
   </div>
