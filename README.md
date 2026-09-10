@@ -47,7 +47,8 @@ de precios vive detrás de un adaptador intercambiable
 ([`backend/src/services/marketPrice.ts`](backend/src/services/marketPrice.ts:1)).
 
 **Variables de entorno (backend/`.env`):**
-- `UPCITEMDB_API_KEY` — API key del plan de UPCitemdb (obligatoria; el trial se da por correo).
+- `UPCITEMDB_API_KEY` — OPCIONAL. El plan gratuito `/prod` de UPCitemdb NO requiere API key
+  (100 peticiones combinadas/día); solo se envía como header `key` si se configura un plan superior.
 - `UPCITEMDB_API_URL` — opcional; endpoint de lookup (default `https://api.upcitemdb.com/prod/trial/lookup`).
 - `MARKET_LOOKBACK_MONTHS` — opcional; ventana de ofertas en meses (default `6`).
 

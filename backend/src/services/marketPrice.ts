@@ -94,25 +94,27 @@ export function barcodeTypeOf(
 
 /**
  * Lee la lista de ofertas de la fuente para un código UPC/EAN/ISBN.
- * Devuelve `null` si la fuente no tiene datos (no encontrado / error de red /
- * sin API key configurada). El caller trata null como "sin análisis".
+ * Devuelve `null` si la fuente no tiene datos (no encontrado / error de red).
+ * El caller trata null como "sin análisis".
+ *
+ * Autenticación: el plan gratuito `/prod` de UPCitemdb NO requiere API key
+ * (100 peticiones combinadas/día). La key es OPCIONAL (planes superiores) y
+ * solo se envía en el header `key` cuando UPCITEMDB_API_KEY está configurada.
  */
 async function upcitemdbLookup(code: string): Promise<PriceOffer[] | null> {
   const apiKey = process.env.UPCITEMDB_API_KEY;
-  if (!apiKey) {
-    console.warn('[MARKETPRICE] UPCITEMDB_API_KEY no configurada; se omite el análisis de mercado.');
-    return null;
-  }
 
   try {
     const url = `${UPCITEMDB_API_URL}?upc=${encodeURIComponent(code)}`;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      // User-Agent para identificarse ante la API.
+      'User-Agent': 'claimitapp/1.0 (inventory price analysis)'
+    };
+    if (apiKey) headers.key = apiKey;
+
     const response = await fetch(url, {
-      headers: {
-        'Content-Type': 'application/json',
-        key: apiKey,
-        // El trial exige este user-agent para identificarse.
-        'User-Agent': 'claimitapp/1.0 (inventory price analysis)'
-      },
+      headers,
       signal: AbortSignal.timeout(10_000)
     });
 
