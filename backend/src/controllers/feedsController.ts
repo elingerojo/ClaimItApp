@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import {
+  dailyClaimStatus,
   HOUR_MS,
   ROLE_HIERARCHY,
   type ItemPhase,
@@ -26,6 +27,22 @@ const toMs = (v: string | null | undefined): number | null => {
   const d = new Date(v).getTime();
   return Number.isNaN(d) ? null : d;
 };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Desfase fijo UTC-6 (America/Mexico_City, sin DST desde 2022). */
+const MEXICO_UTC_OFFSET_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * ¿`claimedAt` (ISO) cae dentro del día calendario UTC-6 de `nowMs`? Réplica en
+ * RAM del corte usado en SQL por el límite diario (solo lectura del feed).
+ */
+function isWithinMexicoClaimDay(claimedAt: string, nowMs: number): boolean {
+  const claimedMs = new Date(claimedAt).getTime();
+  if (Number.isNaN(claimedMs)) return false;
+  const localMs = nowMs - MEXICO_UTC_OFFSET_MS;
+  const startMs = Math.floor(localMs / DAY_MS) * DAY_MS + MEXICO_UTC_OFFSET_MS;
+  return claimedMs >= startMs && claimedMs < startMs + DAY_MS;
+}
 
 /** Estado temporal compacto por item (sin participantes; la cola va aparte). */
 function compactTemporalState(
@@ -97,20 +114,31 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
     const advancePubHours = Number(trust.advance_pub_hours_default ?? 0);
     const advanceDispHours = Number(trust.advance_disp_hours_default ?? 0);
     const simultaneousLimit = Number(trust.max_apartados_simultaneos ?? 1);
+    const dailyLimit = Number(trust.max_apartados_diarios ?? 0);
 
     const now = Date.now();
     const itemsSnapshot = getItems();
 
     // Apartados activos del usuario por evento (límite simultáneo real).
     const activeApartadosByEvent = new Map<string, number>();
+    // Apartados diarios del usuario (UTC-6, GLOBAL entre eventos): cuentan los
+    // claims de hoy que no sean cancelación voluntaria (expirio/void SÍ cuentan).
+    let dailyUsedInDay = 0;
     if (userUuid) {
       for (const it of itemsSnapshot) {
+        for (const q of it.queue) {
+          if (q.userUuid !== userUuid) continue;
+          if (q.claimState === 'cancelado_voluntario') continue;
+          if (!q.claimedAt) continue;
+          if (isWithinMexicoClaimDay(q.claimedAt, now)) dailyUsedInDay++;
+        }
         if (!it.eventId) continue;
         if (it.queue.some((q) => q.userUuid === userUuid && q.claimState === 'active')) {
           activeApartadosByEvent.set(it.eventId, (activeApartadosByEvent.get(it.eventId) ?? 0) + 1);
         }
       }
     }
+    const daily = dailyClaimStatus(dailyLimit, dailyUsedInDay);
 
     const responsePayload = itemsSnapshot
       .map((item) => {
@@ -151,7 +179,8 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
             withinWindow &&
             !alreadyInQueue &&
             activeCount(item) < 3 &&
-            activeApartadosInEvent < simultaneousLimit;
+            activeApartadosInEvent < simultaneousLimit &&
+            !daily.atLimit;
         } else if (item.phase === 'ventana_libre') {
           claimsClosed = pickupMs !== null && now >= pickupMs;
           canClaim = !claimsClosed && !alreadyInQueue;
@@ -201,6 +230,13 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
           // Límite de apartados simultáneos del rol dentro del evento.
           activeApartadosInEvent,
           simultaneousLimit,
+          // Límite diario por rol (UTC-6, global entre eventos).
+          dailyLimit: daily.limit,
+          dailyUsedInDay: daily.used,
+          dailyRemaining: daily.remaining,
+          dailyWarningThreshold: daily.warningThreshold,
+          dailyAtLimit: daily.atLimit,
+          dailyWarning: daily.warn,
           // Precio por rol (base × multiplicador de la matriz).
           precioVisible: rolePrice(item.precioBaseCosto, role),
           createdAt: item.createdAt,

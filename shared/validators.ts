@@ -417,6 +417,11 @@ export function validateRoleDefaultsUpdate(data: any): ValidationResult {
         errors.push(`${role}.max_apartados_simultaneos: must be a non-negative integer`);
       }
     }
+    if (r.max_apartados_diarios !== undefined) {
+      if (!Number.isInteger(r.max_apartados_diarios) || r.max_apartados_diarios < 0) {
+        errors.push(`${role}.max_apartados_diarios: must be a non-negative integer`);
+      }
+    }
   }
   return { valid: errors.length === 0, errors };
 }

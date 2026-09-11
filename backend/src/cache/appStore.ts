@@ -295,7 +295,8 @@ export async function rehydrateAll(): Promise<boolean> {
     // 6. Matriz de confianza v2 (advance pub/disp + precio + apartados)
     const trustResult = await pool.query(
       `SELECT id, advance_pub_hours_default, advance_disp_hours_default,
-              multiplicador_precio_default, max_apartados_simultaneos, updated_at
+              multiplicador_precio_default, max_apartados_simultaneos,
+              max_apartados_diarios, updated_at
        FROM trust_levels_settings`
     );
     trustSettings = new Map(trustResult.rows.map((r: any) => [r.id, r]));

@@ -23,6 +23,7 @@ Here is the complete, consolidated master plan for your Virtual Moving Giveaway 
 - **Fases de artículo** (`items.phase`): `claim_open → pickup_turns → ventana_libre | entregado | enviado_a_caridad`. `items.status` (available / waitlist_open / unavailable) se conserva solo como derivado legacy de lectura.
 - **Cancelación activa** "Ya no lo quiero" = dominó **neutral** (sin sanción). **Expirio** de turno = `expirado` + sanción de confianza (`expiraciones_acumuladas`, `bloqueado_invitar`, degradación a `publico`, blacklist `bloqueado_apartar`).
 - **Ventana libre**: tras agotarse posiciones, cualquiera reclama directo (sin FIFO); el primero se lo lleva (captura inmediata; no cuenta en `max_apartados_simultaneos`).
+- **Límite diario por rol** (`trust_levels_settings.max_apartados_diarios`): además del simultáneo, cada rol tiene un tope **por usuario y por día calendario UTC-6**, **global entre eventos**. Cuenta los claims de hoy que NO sean `cancelado_voluntario` (expirio/void/caridad **sí** cuentan); liberar "Ya no lo quiero" devuelve el cupo del día. Aviso suave cuando `remaining <= ceil(0.25·límite)` (cap 5 → avisa al 3º con "Te quedan 2/5"), letrero de estado sobre el botón de claim y bloqueo al agotarse (código `daily_limit_exceeded`); la ventana libre queda exenta. Migración `0008_daily_claim_limit.sql` (seed 5/4/3/2 por rol).
 - **Entrega por ADMIN**: 'item recogido' cierra el artículo (`entregado` con `delivered_claim_id`/`delivered_at`), void de los demás activos (cola conservada como registro forense) y detiene los workflows.
 - **Caridad**: si al llegar `pickup_deadline` no hubo entrega → `enviado_a_caridad` (`charity_at`), irreversable; purga tras la gracia.
 
@@ -30,6 +31,7 @@ Here is the complete, consolidated master plan for your Virtual Moving Giveaway 
 - Reset + re-seed v2 (preserva items vía `scripts/.db-preserved-items.json`, **gitignored**): `node scripts/db-reset.js --yes [--seed]`.
 - Verificación read-only del schema v2: `node scripts/db-verify-v2.js`.
 - **Verificación E2E del motor v2** (unit del motor puro + integración contra la BD con limpieza, 112 aserciones): `npm --prefix shared run build && npx tsx scripts/test-v2-strategy.ts`.
+- **Límite diario de apartados** (helpers puros + integración opcional): `npx tsx scripts/test-daily-limit.ts` (agrega `--db` para la parte contra la BD).
 - Migraciones legacy archivadas (solo referencia, no se aplican): `database/migrations/_legacy/`.
 - Los tests .ts del modelo legacy (`scripts/test-plan*.ts`, `test-plan2-live.ts`, `test-lazy-catchup.ts`, `test-role-timeline.ts`, `smoke-role-feed.ts`) quedan marcados como **LEGACY / OBSOLETO** en su cabecera.
 

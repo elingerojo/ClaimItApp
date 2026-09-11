@@ -70,6 +70,9 @@
                 <th class="py-2 pr-3 font-medium" title="Límite de apartados simultáneos del rol en un evento">
                   📦 Apartados máx.
                 </th>
+                <th class="py-2 pr-3 font-medium" title="Límite DIARIO de apartados por usuario (día calendario UTC-6, global entre eventos)">
+                  📅 Apartados / día
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -100,9 +103,14 @@
                            title="Máximo de apartados simultáneos del rol en un evento."
                            class="w-20 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" />
                   </td>
+                  <td class="py-2 pr-3">
+                    <input [(ngModel)]="row.maxApartadosDias" type="number" min="0" max="100" step="1"
+                           title="Máximo de apartados por usuario por día (UTC-6, global entre eventos). 0 = no puede apartar ese día."
+                           class="w-20 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" />
+                  </td>
                 </tr>
               } @empty {
-                <tr><td class="py-3 text-gray-400 italic" colspan="5">Sin filas de rol.</td></tr>
+                <tr><td class="py-3 text-gray-400 italic" colspan="6">Sin filas de rol.</td></tr>
               }
             </tbody>
           </table>
@@ -115,9 +123,10 @@
           </div>
         }
         <p class="text-[10px] text-gray-400 mt-2">
-          Se guarda solo lo que cambiaste. Editar <b>precio/apartados</b> se permite siempre; editar
-          <b>adelantos</b> queda <b>bloqueado (409)</b> mientras exista un evento publicado o en curso
-          (scheduled/active/closing), porque esos cambios solo aplican a eventos futuros/no iniciados.
+          Se guarda solo lo que cambiaste. Editar <b>precio/apartados</b> (incluido el límite diario) se
+          permite siempre; editar <b>adelantos</b> queda <b>bloqueado (409)</b> mientras exista un evento
+          publicado o en curso (scheduled/active/closing), porque esos cambios solo aplican a eventos
+          futuros/no iniciados.
         </p>
       </div>
 

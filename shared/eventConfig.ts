@@ -10,7 +10,8 @@
  * dos valores de adelanto DINÁMICO por rol (cero columnas por evento):
  *   - advance_pub_hours_default  → adelanta la VISIBILIDAD desde published_at
  *   - advance_disp_hours_default → adelanta el INICIO DE CLAIM desde available_from
- * + multiplicador_precio_default (precio por rol) y max_apartados_simultaneos.
+ * + multiplicador_precio_default (precio por rol), max_apartados_simultaneos y
+ * max_apartados_diarios (límite diario por usuario, día calendario UTC-6).
  * Regla de consistencia "nunca se reclama sin ver": advance_disp <= advance_pub
  * (CHECK a nivel schema, migración 0004).
  */
@@ -75,6 +76,12 @@ export interface RoleConfigRow {
   multiplicador_precio_default: number;
   /** Límite de apartados simultáneos del rol (>= 0). */
   max_apartados_simultaneos: number;
+  /**
+   * Límite DIARIO de apartados del rol por usuario (>= 0), contado en el día
+   * calendario UTC-6 (America/Mexico_City) y global entre todos los eventos.
+   * 0 = el rol no puede apartar ese día.
+   */
+  max_apartados_diarios: number;
   /** Audit: cuándo se actualizó la matriz. */
   updated_at?: string;
 }
@@ -82,3 +89,57 @@ export interface RoleConfigRow {
 /** Rango válido de horas de adelanto en la matriz (0..360 = máx 15 días). */
 export const ADVANCE_HOURS_MIN = 0;
 export const ADVANCE_HOURS_MAX = 360;
+
+/**
+ * Zona horaria de negocio para el corte del día del límite diario de apartados
+ * (UTC-6). El backend la usa en SQL (`AT TIME ZONE`) y el frontend solo la
+ * referencia para documentar el corte.
+ */
+export const CLAIM_DAY_TIMEZONE = 'America/Mexico_City';
+
+/** Fracción del límite diario que dispara el aviso suave (25%). */
+export const DAILY_WARNING_FRACTION = 0.25;
+
+/**
+ * Umbral de aviso del límite diario: `ceil(0.25 * límite)`.
+ * Cap 5 -> 2 (avisa al registrar el 3º, "Te quedan 2/5"); cap 0 -> 0.
+ */
+export function dailyWarningThreshold(dailyLimit: number): number {
+  if (!Number.isFinite(dailyLimit) || dailyLimit <= 0) return 0;
+  return Math.ceil(dailyLimit * DAILY_WARNING_FRACTION);
+}
+
+/** Estado calculado del cupo diario de un usuario para su rol. */
+export interface DailyClaimStatus {
+  /** Límite diario del rol (`max_apartados_diarios`). */
+  limit: number;
+  /** Apartados del usuario hoy (excluye cancelaciones voluntarias). */
+  used: number;
+  /** Cupo restante hoy (nunca negativo). */
+  remaining: number;
+  /** Umbral a partir del cual se muestra el aviso (ceil 25%). */
+  warningThreshold: number;
+  /** true cuando ya no queda cupo (remaining === 0). */
+  atLimit: boolean;
+  /** true cuando hay cupo pero ya está en la zona de aviso. */
+  warn: boolean;
+}
+
+/**
+ * Cálculo PURO y único del cupo diario (compartido backend/frontend) para que
+ * el rechazo, el letrero de estado y el toast estén siempre de acuerdo.
+ */
+export function dailyClaimStatus(dailyLimit: number, dailyUsed: number): DailyClaimStatus {
+  const limit = Number.isFinite(dailyLimit) && dailyLimit > 0 ? Math.floor(dailyLimit) : 0;
+  const used = Number.isFinite(dailyUsed) && dailyUsed > 0 ? Math.floor(dailyUsed) : 0;
+  const remaining = Math.max(0, limit - used);
+  const warningThreshold = dailyWarningThreshold(limit);
+  return {
+    limit,
+    used,
+    remaining,
+    warningThreshold,
+    atLimit: remaining === 0,
+    warn: remaining > 0 && remaining <= warningThreshold
+  };
+}

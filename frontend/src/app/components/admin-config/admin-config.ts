@@ -29,6 +29,8 @@ export interface RoleRow {
   advanceDisp: number;
   multiplier: number | null;
   maxApartados: number | null;
+  /** Límite DIARIO de apartados por usuario (día calendario UTC-6). */
+  maxApartadosDias: number | null;
 }
 
 /** Plantilla de agenda global (event_config id=1). */
@@ -117,7 +119,9 @@ export class AdminConfig {
         multiplier:
           r.multiplicador_precio_default != null ? Number(r.multiplicador_precio_default) : null,
         maxApartados:
-          r.max_apartados_simultaneos != null ? Number(r.max_apartados_simultaneos) : null
+          r.max_apartados_simultaneos != null ? Number(r.max_apartados_simultaneos) : null,
+        maxApartadosDias:
+          r.max_apartados_diarios != null ? Number(r.max_apartados_diarios) : null
       }));
       this.roles.set(mapped);
       // Snapshot de referencia para detectar cambios campo a campo al guardar.
@@ -184,6 +188,9 @@ export class AdminConfig {
       }
       if (row.maxApartados !== orig.maxApartados && row.maxApartados != null) {
         patch['max_apartados_simultaneos'] = Number(row.maxApartados);
+      }
+      if (row.maxApartadosDias !== orig.maxApartadosDias && row.maxApartadosDias != null) {
+        patch['max_apartados_diarios'] = Number(row.maxApartadosDias);
       }
       if (Object.keys(patch).length > 0) {
         rolesPayload[row.id] = patch;

@@ -136,6 +136,7 @@ export const getRoleConfig = async (_req: Request, res: Response): Promise<void>
               advance_disp_hours_default,
               multiplicador_precio_default,
               max_apartados_simultaneos,
+              max_apartados_diarios,
               updated_at
        FROM trust_levels_settings
        ORDER BY array_position(ARRAY['familiares','amigos','conocidos','publico'], id)`
@@ -208,6 +209,7 @@ export const updateRoleConfig = async (req: Request, res: Response): Promise<voi
       if (r.advance_disp_hours_default !== undefined) set('advance_disp_hours_default', Number(r.advance_disp_hours_default));
       if (r.multiplicador_precio_default !== undefined) set('multiplicador_precio_default', Number(r.multiplicador_precio_default));
       if (r.max_apartados_simultaneos !== undefined) set('max_apartados_simultaneos', Number(r.max_apartados_simultaneos));
+      if (r.max_apartados_diarios !== undefined) set('max_apartados_diarios', Number(r.max_apartados_diarios));
       if (assignments.length === 0) continue;
 
       params.push(role);
@@ -223,6 +225,7 @@ export const updateRoleConfig = async (req: Request, res: Response): Promise<voi
       if (r.advance_disp_hours_default !== undefined) patch.advance_disp_hours_default = Number(r.advance_disp_hours_default);
       if (r.multiplicador_precio_default !== undefined) patch.multiplicador_precio_default = Number(r.multiplicador_precio_default);
       if (r.max_apartados_simultaneos !== undefined) patch.max_apartados_simultaneos = Number(r.max_apartados_simultaneos);
+      if (r.max_apartados_diarios !== undefined) patch.max_apartados_diarios = Number(r.max_apartados_diarios);
       upsertTrustSetting(role, patch);
     }
 
@@ -230,7 +233,8 @@ export const updateRoleConfig = async (req: Request, res: Response): Promise<voi
 
     const after = await pool.query(
       `SELECT id, advance_pub_hours_default, advance_disp_hours_default,
-              multiplicador_precio_default, max_apartados_simultaneos, updated_at
+              multiplicador_precio_default, max_apartados_simultaneos,
+              max_apartados_diarios, updated_at
        FROM trust_levels_settings
        ORDER BY array_position(ARRAY['familiares','amigos','conocidos','publico'], id)`
     );

@@ -109,7 +109,13 @@ export const createClaim = async (req: Request, res: Response): Promise<void> =>
         fifoPosition: outcome.fifoPosition,
         claimId: outcome.claimId,
         phase: outcome.phase,
-        status: outcome.status
+        status: outcome.status,
+        // Cupo diario del rol (UTC-6, global entre eventos) para el toast/banner.
+        dailyLimit: outcome.dailyLimit,
+        dailyUsed: outcome.dailyUsed,
+        dailyRemaining: outcome.dailyRemaining,
+        dailyWarningThreshold: outcome.dailyWarningThreshold,
+        dailyWarning: outcome.dailyWarning
       });
       return;
     }

@@ -174,6 +174,50 @@ export class ItemDetail implements OnInit, OnDestroy {
     );
   }
 
+  // ---- Cupo DIARIO por rol (UTC-6, global entre eventos) ----
+
+  /** Límite diario del rol para el usuario (0 si el feed no lo trae). */
+  dailyLimit(): number {
+    return Number(this.item().dailyLimit ?? 0);
+  }
+
+  /** Apartados del usuario hoy (excluye cancelaciones voluntarias). */
+  dailyUsed(): number {
+    return Number(this.item().dailyUsedInDay ?? 0);
+  }
+
+  /** Cupo restante hoy (>= 0). */
+  dailyRemaining(): number {
+    return Number(this.item().dailyRemaining ?? 0);
+  }
+
+  /** true si ya no queda cupo diario (el botón de claim se deshabilita). */
+  dailyAtLimit(): boolean {
+    return this.item().dailyAtLimit === true;
+  }
+
+  /** true si está en la zona de aviso (cupo bajo pero aún > 0). */
+  dailyWarning(): boolean {
+    return this.item().dailyWarning === true;
+  }
+
+  /**
+   * ¿Mostrar el letrero de cupo diario? Solo en claim_open (la ventana libre NO
+   * está sujeta al límite) y cuando estamos en la zona de aviso o agotados.
+   */
+  showDailyBanner(): boolean {
+    if (this.adminMode() || this.phase() !== 'claim_open') return false;
+    return this.dailyWarning() || this.dailyAtLimit();
+  }
+
+  /** Texto del letrero de cupo diario. */
+  dailyBannerText(): string {
+    if (this.dailyAtLimit()) {
+      return `Alcanzaste tu límite diario: ${this.dailyUsed()}/${this.dailyLimit()} apartados hoy. Podrás volver a apartar mañana.`;
+    }
+    return `Te quedan ${this.dailyRemaining()}/${this.dailyLimit()} apartados hoy.`;
+  }
+
   /**
    * Fija la altura del área de tabs al alto natural de la pestaña 'Datos'
    * (con un mínimo cómodo). Así el card no cambia de tamaño al alternar
@@ -427,9 +471,21 @@ export class ItemDetail implements OnInit, OnDestroy {
           response?.message || `¡Apuntado! Quedaste en espera #${response?.queuePosition ?? ''}`.trim()
         );
       }
+      // Aviso de cupo diario (solo FIFO; la ventana libre no está limitada).
+      if (mode !== 'free_window' && response?.dailyWarning && (response?.dailyRemaining ?? 0) > 0) {
+        this.toastService.info(
+          `⏳ Te quedan ${response.dailyRemaining}/${response.dailyLimit} apartados hoy.`
+        );
+      }
       this.close();
     } catch (err: any) {
-      this.toastService.error(`Error al reclamar: ${err.message}`);
+      if (err?.code === 'daily_limit_exceeded') {
+        this.toastService.error(
+          err.message || 'Alcanzaste tu límite diario de apartados. Vuelve mañana o libera uno de hoy.'
+        );
+      } else {
+        this.toastService.error(`Error al reclamar: ${err.message}`);
+      }
     }
   }
 

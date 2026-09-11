@@ -44,13 +44,18 @@ export {
   HOUR_MS,
   ADVANCE_HOURS_MIN,
   ADVANCE_HOURS_MAX,
+  CLAIM_DAY_TIMEZONE,
+  DAILY_WARNING_FRACTION,
+  dailyWarningThreshold,
+  dailyClaimStatus,
   deriveEventSchedule
 } from './eventConfig.js';
 
 export type {
   EventConfig,
   DerivedEventSchedule,
-  RoleConfigRow
+  RoleConfigRow,
+  DailyClaimStatus
 } from './eventConfig.js';
 
 // Event Helpers & Types (motor v2)

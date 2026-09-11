@@ -34,6 +34,26 @@ export interface QueueEntry {
   claimantPhone?: string | null;
 }
 
+/** Respuesta de POST /api/claims (FIFO o captura de ventana libre). */
+export interface ClaimSubmitResult {
+  success?: boolean;
+  message?: string;
+  queuePosition?: number;
+  fifoPosition?: number;
+  claimId?: string;
+  phase?: ItemPhase;
+  status?: ItemStatus;
+  delivered?: boolean;
+  deliveredClaimId?: string;
+  deliveredAt?: string;
+  /** Cupo diario del rol (presente en claims FIFO, día calendario UTC-6). */
+  dailyLimit?: number;
+  dailyUsed?: number;
+  dailyRemaining?: number;
+  dailyWarningThreshold?: number;
+  dailyWarning?: boolean;
+}
+
 /** Mi claim ACTIVO del usuario en un item (payload `myClaim` del feed v2). */
 export interface MyClaim {
   claimId: string;
@@ -120,6 +140,18 @@ export interface ItemWithQueue extends Item {
   activeApartadosInEvent?: number;
   /** Límite de apartados simultáneos del rol en el evento. */
   simultaneousLimit?: number;
+  /** Límite diario de apartados del rol (UTC-6, global entre eventos). */
+  dailyLimit?: number;
+  /** Apartados del usuario hoy (excluye cancelaciones voluntarias). */
+  dailyUsedInDay?: number;
+  /** Cupo restante hoy (>= 0). */
+  dailyRemaining?: number;
+  /** Umbral de aviso (ceil 25% del límite diario). */
+  dailyWarningThreshold?: number;
+  /** true cuando ya no queda cupo diario (botón de claim deshabilitado). */
+  dailyAtLimit?: boolean;
+  /** true cuando hay que mostrar el aviso de cupo bajo. */
+  dailyWarning?: boolean;
   /** Precio por rol (base × multiplicador de la matriz). */
   precioVisible?: number | null;
   eventSummary?: EventSummary | null;
@@ -629,7 +661,7 @@ export class InventoryService implements OnDestroy {
     userUuid: string,
     email: string | null,
     phone: string | null
-  ): Promise<any> {
+  ): Promise<ClaimSubmitResult> {
     // Check cooldown: prevent multiple claims within 2 seconds
     const lastTime = this.lastClaimTime.get(userUuid) || 0;
     const timeSinceLastClaim = Date.now() - lastTime;
@@ -651,7 +683,12 @@ export class InventoryService implements OnDestroy {
 
       const result = await response.json();
       if (!response.ok) {
-        throw new Error(result.error || 'The system was unable to register your claim request.');
+        // Conservar el `code` del backend (p. ej. daily_limit_exceeded) para que
+        // la UI muestre el mensaje distinto del límite diario.
+        const err: any = new Error(result.error || 'The system was unable to register your claim request.');
+        err.code = result.code;
+        err.status = response.status;
+        throw err;
       }
       // Refrescar para reflejar la nueva fase / posición FIFO / captura.
       this.refresh().catch(() => {});

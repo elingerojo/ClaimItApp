@@ -35,6 +35,8 @@
 import pool from '../config/db.js';
 import {
   buildFrozenSchedule,
+  CLAIM_DAY_TIMEZONE,
+  dailyClaimStatus,
   MAX_QUEUE_POSITIONS,
   resolveEffectiveRole,
   type ClaimState,
@@ -159,6 +161,25 @@ async function activeClaimsOfItem(itemId: string, client: DbClient): Promise<any
     [itemId]
   );
   return res.rows;
+}
+
+/**
+ * Cuenta los apartados del usuario dentro del DÍA CALENDARIO en UTC-6
+ * (`CLAIM_DAY_TIMEZONE`), GLOBAL entre todos los eventos, para el límite diario
+ * por rol. Excluye cancelaciones voluntarias ("Ya no lo quiero" devuelve cupo);
+ * los expirios / voids / caridad SÍ cuentan. Debe correr dentro de una tx.
+ */
+async function countDailyClaims(userUuid: string, client: DbClient): Promise<number> {
+  const res = await client.query(
+    `SELECT COUNT(*)::int AS n
+     FROM claims
+     WHERE user_uuid = $1
+       AND claim_state <> 'cancelado_voluntario'
+       AND claimed_at >= (date_trunc('day', now() AT TIME ZONE $2::text) AT TIME ZONE $2::text)
+       AND claimed_at <  (date_trunc('day', now() AT TIME ZONE $2::text) AT TIME ZONE $2::text) + INTERVAL '1 day'`,
+    [userUuid, CLAIM_DAY_TIMEZONE]
+  );
+  return Number(res.rows[0]?.n ?? 0);
 }
 
 function roleOrDefault(role: string | null | undefined): Role {
@@ -658,6 +679,16 @@ export type ClaimOutcome =
       eventId: string | null;
       title: string | null;
       category: string | null;
+      /** Límite diario del rol (`max_apartados_diarios`). */
+      dailyLimit: number;
+      /** Apartados del usuario hoy tras este claim (UTC-6, sin cancelados). */
+      dailyUsed: number;
+      /** Cupo restante hoy (>= 0). */
+      dailyRemaining: number;
+      /** Umbral de aviso (ceil 25% del límite). */
+      dailyWarningThreshold: number;
+      /** true si hay que avisar al usuario (cupo bajo pero > 0). */
+      dailyWarning: boolean;
     }
   | {
       ok: true;
@@ -683,6 +714,7 @@ export type ClaimOutcome =
         | 'queue_full'
         | 'already_in_queue'
         | 'limit_exceeded'
+        | 'daily_limit_exceeded'
         | 'event_closed'
         | 'event_not_published';
       message: string;
@@ -763,6 +795,7 @@ export async function claimItem(
     );
     const advanceDispHours = Number(trust.rows[0]?.advance_disp_hours_default ?? 0);
     const maxApartados = Number(trust.rows[0]?.max_apartados_simultaneos ?? 1);
+    const maxApartadosDiarios = Number(trust.rows[0]?.max_apartados_diarios ?? 0);
 
     const nowMs = Date.now();
 
@@ -861,6 +894,17 @@ export async function claimItem(
       return { ok: false, code: 'already_closed', message: 'La lista de este objeto ya está cerrada.' } as ClaimOutcome;
     }
 
+    // Límite DIARIO por rol: día calendario UTC-6, GLOBAL entre eventos.
+    // La ventana libre retorna antes (arriba), así que no queda sujeta a esto.
+    const dailyUsedBefore = await countDailyClaims(userUuid, c);
+    if (dailyUsedBefore >= maxApartadosDiarios) {
+      return {
+        ok: false,
+        code: 'daily_limit_exceeded',
+        message: `Alcanzaste tu límite diario de apartados (${maxApartadosDiarios} por día para tu rol). Libera un apartado de hoy o vuelve mañana.`
+      } as ClaimOutcome;
+    }
+
     // Límite de apartados simultáneos por rol dentro del evento.
     if (row.event_id) {
       const activeInEvent = await c.query(
@@ -921,6 +965,8 @@ export async function claimItem(
     });
     patchItem(itemId, { status: legacyStatus });
 
+    const daily = dailyClaimStatus(maxApartadosDiarios, dailyUsedBefore + 1);
+
     return {
       ok: true,
       kind: 'fifo',
@@ -931,7 +977,12 @@ export async function claimItem(
       status: legacyStatus,
       eventId: row.event_id,
       title: null,
-      category: null
+      category: null,
+      dailyLimit: daily.limit,
+      dailyUsed: daily.used,
+      dailyRemaining: daily.remaining,
+      dailyWarningThreshold: daily.warningThreshold,
+      dailyWarning: daily.warn
     } as ClaimOutcome;
   }, client);
 }
