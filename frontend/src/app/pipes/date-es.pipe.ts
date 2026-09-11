@@ -1,5 +1,5 @@
 import { Pipe, PipeTransform } from '@angular/core';
-import { formatDateEs } from '../utils/date-es';
+import { formatDateEs, formatTimeWithDayEs } from '../utils/date-es';
 
 /**
  * Modos de formato:
@@ -7,8 +7,9 @@ import { formatDateEs } from '../utils/date-es';
  * - 'full':            "mié 3 sep 2026, 1:05 p. m."
  * - 'date':            "3 sep 2026"
  * - 'time':            "1:05 p. m."
+ * - 'timeDay':         "5:04 p. m. del jueves 10 de nov."
  */
-export type DateEsMode = 'short' | 'full' | 'date' | 'time';
+export type DateEsMode = 'short' | 'full' | 'date' | 'time' | 'timeDay';
 
 @Pipe({
   name: 'dateEs',
@@ -23,6 +24,8 @@ export class DateEsPipe implements PipeTransform {
         return formatDateEs(value, { withWeekday: false, withYear: true, withDay: true, withTime: false });
       case 'time':
         return formatDateEs(value, { withWeekday: false, withYear: false, withDay: false, withTime: true });
+      case 'timeDay':
+        return formatTimeWithDayEs(value);
       case 'short':
       default:
         return formatDateEs(value, { withWeekday: true, withYear: false, withTime: true });

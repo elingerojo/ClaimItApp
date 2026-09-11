@@ -32,6 +32,7 @@ export interface FormatDateEsOptions {
 }
 
 const weekdayFormatter = new Intl.DateTimeFormat('es-MX', { weekday: 'short' });
+const weekdayLongFormatter = new Intl.DateTimeFormat('es-MX', { weekday: 'long' });
 const timeFormatter = new Intl.DateTimeFormat('es-MX', { hour: 'numeric', minute: '2-digit' });
 
 /**
@@ -68,4 +69,21 @@ export function formatDateEs(
     return datePart ? `${datePart}, ${timePart}` : timePart;
   }
   return datePart;
+}
+
+/**
+ * Formatea la hora seguida del día de la semana completo y la fecha sin año,
+ * en es-MX y con el mes de 3 letras exactas. Devuelve '' si el valor es
+ * null/undefined/vacío/no válido.
+ *
+ * Ejemplo de salida: "5:04 p. m. del jueves 10 de nov."
+ */
+export function formatTimeWithDayEs(
+  value: string | number | Date | null | undefined
+): string {
+  if (value == null || value === '') return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  return `${timeFormatter.format(date)} del ${weekdayLongFormatter.format(date)} ${date.getDate()} de ${MESES_CORTOS[date.getMonth()]}.`;
 }
