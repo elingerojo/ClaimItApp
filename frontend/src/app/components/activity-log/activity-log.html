@@ -2,7 +2,7 @@
   <h3 class="text-sm font-semibold tracking-wider text-gray-400 uppercase mb-4">{{ 'Actividad Anotaciones en Vivo' | stripAccents }}</h3>
   
   <div class="space-y-4">
-    @for (log of activityLogs(); track log.claimed_at) {
+    @for (log of activityLogs(); track log.kind + '|' + log.username + '|' + log.claimed_at) {
       <div class="text-xs text-gray-600 border-b border-gray-50 pb-3 last:border-0 last:pb-0">
         <span class="font-medium text-gray-900 font-mono">&#64;{{ log.username }}</span>
         {{ log.kind === 'release' ? 'liberó' : 'apartó' }}
