@@ -107,6 +107,10 @@ export class ItemDetail implements OnInit, OnDestroy {
   private tickTimer: number | null = null;
   readonly now = signal(Date.now());
 
+  // ---- Scroll lock del documento mientras el modal está montado ----
+  /** Posición vertical de la página al abrir el modal, para restaurarla al cerrar. */
+  private scrollLockY = 0;
+
   constructor() {
     // Reinicia la primera pestaña (y reprograma la medición) al abrir el card, o
     // defensivamente si `item` cambiara dentro de la misma instancia del modal.
@@ -127,6 +131,7 @@ export class ItemDetail implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     if (typeof window === 'undefined') return;
+    this.lockBodyScroll();
     this.tickTimer = window.setInterval(() => this.now.set(Date.now()), 1000);
   }
 
@@ -135,6 +140,31 @@ export class ItemDetail implements OnInit, OnDestroy {
       window.clearInterval(this.tickTimer);
       this.tickTimer = null;
     }
+    this.unlockBodyScroll();
+  }
+
+  /**
+   * Fija el documento para que el fondo no scrollee detrás del modal.
+   * Idempotente por la clase en <html>: si ya está bloqueado no vuelve a
+   * guardar la posición (evita corromper el valor a restaurar).
+   */
+  private lockBodyScroll(): void {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    if (root.classList.contains('scroll-locked')) return;
+    this.scrollLockY = window.scrollY ?? 0;
+    root.style.setProperty('--scroll-lock-y', `${this.scrollLockY}px`);
+    root.classList.add('scroll-locked');
+  }
+
+  /** Quita el bloqueo y devuelve la página exactamente a donde estaba. */
+  private unlockBodyScroll(): void {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    if (!root.classList.contains('scroll-locked')) return;
+    root.classList.remove('scroll-locked');
+    root.style.removeProperty('--scroll-lock-y');
+    window.scrollTo({ top: this.scrollLockY, left: 0, behavior: 'instant' as ScrollBehavior });
   }
 
   /** Cambia la pestaña activa del detalle. */

@@ -111,3 +111,23 @@
   padding: 0.15rem 0.4rem;
 }
 
+/* ----------------------------------------------------------------------------
+ * Scroll lock del documento mientras un modal está abierto.
+ * `html.scroll-locked` saca el body del flujo con position:fixed (técnica con
+ * soporte universal, no depende de overscroll-behavior, que iOS < 16 y las
+ * webviews in-app de WhatsApp/Instagram ignoran). El componente dueño del modal
+ * fija `--scroll-lock-y` con la posición actual de la página para restaurarla.
+ * -------------------------------------------------------------------------- */
+html.scroll-locked {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+html.scroll-locked body {
+  position: fixed;
+  top: calc(-1 * var(--scroll-lock-y, 0px));
+  left: 0;
+  right: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
