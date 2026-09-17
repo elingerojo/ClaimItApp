@@ -1,11 +1,65 @@
 <!doctype html>
-<html lang="en">
+<html lang="es-MX">
   <head>
     <meta charset="utf-8" />
-    <title>Frontend</title>
+    <title>Limpia x Mudanza — El primero que llega, se lo lleva</title>
     <base href="/" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- SEO básico -->
+    <meta
+      name="description"
+      content="Antes de mudarte, comparte tu catálogo con amigos y familiares: separa lo que te guste y el primero que llega se lo lleva."
+    />
+    <meta name="theme-color" content="#111827" />
+
+    <!--
+      Open Graph / Twitter: etiquetas ESTÁTICAS de alcance global.
+      Los rastreadores de WhatsApp, Facebook, iMessage y Telegram NO ejecutan JS:
+      estas etiquetas deben vivir en el HTML servido (Angular no las inyecta).
+      Al ser un SPA con rewrites, este bloque aplica a todas las rutas, así que los
+      enlaces compartidos (/?invite=TOKEN) heredan esta misma vista previa.
+      og:image debe ser absoluta y pública. El banner es 1200×628 (1.91:1) y pesa
+      ~143 KB, por debajo del límite práctico de ~300 KB de WhatsApp.
+      La ruta distingue mayúsculas: el nombre del archivo debe coincidir tal cual.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Limpia x Mudanza" />
+    <meta property="og:url" content="https://claimitapp.vercel.app/" />
+    <meta property="og:title" content="Limpia x Mudanza — El primero que llega, se lo lleva" />
+    <meta
+      property="og:description"
+      content="Antes de mudarte, comparte tu catálogo con amigos y familiares: separa lo que te guste y el primero que llega se lo lleva."
+    />
+    <meta
+      property="og:image"
+      content="https://claimitapp.vercel.app/images/ClaimItApp_OG-banner-1200x628-02.png"
+    />
+    <meta
+      property="og:image:secure_url"
+      content="https://claimitapp.vercel.app/images/ClaimItApp_OG-banner-1200x628-02.png"
+    />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="628" />
+    <meta property="og:image:alt" content="Limpia x Mudanza — el primero que llega, se lo lleva" />
+    <meta property="og:locale" content="es_MX" />
+
+    <!-- Twitter/X: el banner es apaisado (1.91:1) → tarjeta grande, sin recorte. -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Limpia x Mudanza — El primero que llega, se lo lleva" />
+    <meta
+      name="twitter:description"
+      content="Antes de mudarte, comparte tu catálogo con amigos y familiares: separa lo que te guste y el primero que llega se lo lleva."
+    />
+    <meta
+      name="twitter:image"
+      content="https://claimitapp.vercel.app/images/ClaimItApp_OG-banner-1200x628-02.png"
+    />
+    <meta name="twitter:image:alt" content="Limpia x Mudanza — el primero que llega, se lo lleva" />
+
     <link rel="icon" type="image/x-icon" href="favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="images/logo-180x180-01.png" />
   </head>
   <body>
     <app-root></app-root>
