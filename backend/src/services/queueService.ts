@@ -787,9 +787,14 @@ export async function claimItem(
       return { ok: false, code: 'already_in_queue', message: 'Ya estás en la lista de este objeto.' } as ClaimOutcome;
     }
 
-    // Matriz de confianza: adelanto de disponibilidad + límite de apartados.
+    // Matriz de confianza: adelanto de disponibilidad + límite de apartados
+    // (simultáneo por evento y diario por usuario, global entre eventos).
+    // IMPORTANTE: `max_apartados_diarios` DEBE ir en la proyección; si se omite,
+    // el `?? 0` de abajo lo coerciona a 0 y todo claim FIFO se rechaza con
+    // "0 por día para tu rol".
     const trust = await c.query(
-      `SELECT advance_disp_hours_default, max_apartados_simultaneos
+      `SELECT advance_disp_hours_default, max_apartados_simultaneos,
+              max_apartados_diarios
        FROM trust_levels_settings WHERE id = $1`,
       [roleAtClaim]
     );
