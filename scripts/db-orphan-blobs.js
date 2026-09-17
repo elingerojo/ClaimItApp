@@ -2,11 +2,24 @@
 /**
  * scripts/db-orphan-blobs.js
  *
+ * ⚠️ DEPRECATED / NOT A GARBAGE COLLECTOR — do not use this to decide what to
+ * delete from Vercel Blob. It runs the comparison in the OPPOSITE direction:
+ * it lists image_urls that ARE present in the DB (minus the 5 seed items) and
+ * labels them "orphans", so following its output would delete images that
+ * items are actively using.
+ *
+ * For real Blob garbage collection — blobs that exist in the store but are NOT
+ * referenced by Neon — use scripts/blob-gc.js (npm run blob:gc), which is a
+ * dry-run by default and only deletes with --delete.
+ *
+ * This file is kept only because the reset/seed flow (Etapa 1: reset+seed)
+ * documents its output as plans/orphan-blobs.txt. It reads the snapshot from
+ * scripts/db-snapshot.js (database/.db-snapshot.json) and never touches Blob.
+ *
  * Etapa 1 — generates the Vercel Blob orphan list: every image_url currently
  * in the DB that is NOT one of the 5 seed items (whose images are reused).
  * Output: plans/orphan-blobs.txt
  *
- * Reads the snapshot produced by scripts/db-snapshot.js (database/.db-snapshot.json).
  * Usage: node scripts/db-orphan-blobs.js [snapshot.json] [output.txt]
  */
 const fs = require('fs');

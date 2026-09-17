@@ -84,6 +84,49 @@ This phase eliminates manual data entry and catalog fatigue while you are busy p
 
 - **Instant Admin Review:** This AI-generated data instantly populates the form fields on your phone screen. You quickly review the text, make any quick manual adjustments, and hit "Save" to push the item live into your Neon database.
 
+#### Blob garbage collection (`scripts/blob-gc.js`)
+
+Because the phone uploads straight to Vercel Blob before the item is ever saved, a blob can exist
+in the store without any row in Neon referencing it (an abandoned form, a re-uploaded photo, a
+deleted item). This script reclaims that space by comparing the two sides:
+
+1. every `items.image_urls` entry in Neon, normalized to a Blob pathname;
+2. every blob in the store, read with the server SDK `list()`.
+
+Anything in the store but not in Neon is an orphan candidate. The default run is a **dry run**, so
+nothing is ever deleted without `--delete`:
+
+```bash
+npm run blob:gc                 # dry run: report only
+npm run blob:gc -- --verbose    # dry run with a per-blob classification
+npm run blob:gc --prefix=uploads/
+npm run blob:gc:delete          # review the report first, then delete
+```
+
+Each run writes `plans/blob-gc-report.json` (full machine-readable detail) and
+`plans/blob-gc-orphans.txt` (the candidate list), and both are written **before** any deletion.
+
+Recommended sequence: run `blob:gc`, read the report, confirm the "Kept by Neon" count matches the
+store you expect, then run `blob:gc:delete` and re-run `blob:gc` to confirm zero orphans remain.
+
+Safety rules baked into the script:
+
+- **24h grace window** (`--grace-hours=N`). Blobs uploaded recently may belong to a form that is
+  still open, so they are reported as *skipped-recent* and never deleted.
+- **Fails fast** when `DATABASE_*` or `BLOB_READ_WRITE_TOKEN` are missing, and when the token is a
+  placeholder such as `vercel_blob_rw_your_secret_token_here`, which the SDK otherwise reports as
+  the misleading `This store does not exist`.
+- **Store mismatch guard:** if the token's store id differs from the store the Neon URLs point at,
+  the run aborts instead of labelling the whole store as orphaned.
+- **Empty-reference guard:** if Neon returns zero image URLs, the run aborts unless
+  `--allow-empty-db` is passed, so a bad connection can never wipe the store.
+- Blobs are matched by pathname, and deletions run in batches of 50 with a rate-limit retry and a
+  per-blob fallback.
+
+Prerequisites: `DATABASE_*` and a real `BLOB_READ_WRITE_TOKEN` in `backend/.env` (override with
+`--env=.env.production`). Do not confuse this with `scripts/db-orphan-blobs.js`, which runs the
+comparison in the opposite direction and is deprecated for this purpose.
+
 ### Phase 3: The Backend API & Real-Time Sync (Railway[^Railway-term])
 A minimalistic, high-performance Node.js/TypeScript or Bun backend running on Railway handles the logic and live communication.
 - **Lightweight REST Endpoints:**

@@ -12,6 +12,8 @@
     "db:orphans": "node scripts/db-orphan-blobs.js database/.db-snapshot.json plans/orphan-blobs.txt",
     "db:reset": "node scripts/db-reset.js --yes",
     "db:seed": "node scripts/db-seed.js",
-    "db:validate": "node scripts/db-validate.js"
+    "db:validate": "node scripts/db-validate.js",
+    "blob:gc": "node scripts/blob-gc.js",
+    "blob:gc:delete": "node scripts/blob-gc.js --delete"
   }
 }
