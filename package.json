@@ -14,6 +14,7 @@
     "db:seed": "node scripts/db-seed.js",
     "db:validate": "node scripts/db-validate.js",
     "blob:gc": "node scripts/blob-gc.js",
-    "blob:gc:delete": "node scripts/blob-gc.js --delete"
+    "blob:gc:delete": "node scripts/blob-gc.js --delete",
+    "blob:sizes": "node scripts/blob-sizes.js"
   }
 }

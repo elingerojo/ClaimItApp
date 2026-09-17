@@ -127,6 +127,38 @@ Prerequisites: `DATABASE_*` and a real `BLOB_READ_WRITE_TOKEN` in `backend/.env`
 `--env=.env.production`). Do not confuse this with `scripts/db-orphan-blobs.js`, which runs the
 comparison in the opposite direction and is deprecated for this purpose.
 
+#### Optimización de fotos (subida desde el celular)
+
+Cada foto se comprime **en el teléfono** antes de la subida firmada, así que el store guarda WebP
+optimizados y no los JPEG crudos de la cámara (~1.9 MB cada uno).
+
+- **Pipeline**: [`image-compress.worker.ts`](frontend/src/app/utils/image-compress.worker.ts:1)
+  decodifica con `createImageBitmap` (aplica la orientación EXIF), dibuja en un `OffscreenCanvas` y
+  codifica a **WebP** bajando la calidad hasta el objetivo (~200 KB), con **1280 px** de lado mayor
+  y un escalón único a 1024 px si hiciera falta. El re-encode descarta además EXIF/GPS.
+- **Degradación ordenada** ([`image-compress.ts`](frontend/src/app/utils/image-compress.ts:1)):
+  Web Worker → canvas del hilo principal → archivo original. Nunca bloquea la captura; si una foto
+  se sube sin optimizar el admin ve un aviso.
+- **Destino en el store**: `event-AAAAMMDD/{timestamp}-{aleatorio}.webp`, con la fecha de **creación
+  del evento** en Neon (`events.created_at`, tomada en UTC). Sin evento (items legacy) o evento no
+  listado: `event-sin-fecha/`.
+- **Límites del servidor** ([`uploadController.ts`](backend/src/controllers/uploadController.ts:1)):
+  2 MB por archivo, solo `image/jpeg|png|webp`, solo pathnames bajo `event-`, `addRandomSuffix`
+  activo y caché de un año (los pathnames son inmutables).
+
+Verificación en cualquier momento (read-only, no necesita la base de datos):
+
+```bash
+npm run blob:sizes                    # totales, promedio, histograma y desglose por carpeta
+npm run blob:sizes --prefix=event-    # solo las fotos subidas con la política nueva
+npm run blob:sizes --details          # tamaño de cada blob, ordenado de mayor a menor
+```
+
+Estado al adoptar la política: **380 fotos = 33.3 MB** (promedio 89.7 KB, máximo 208 KB), todas ya
+optimizadas *in place* con `sharp` desde otro workspace, referenciadas por Neon y con **0 huérfanas**
+según [`plans/blob-gc-report.json`](plans/blob-gc-report.json:1). Las fotos viejas viven en la raíz
+del store (sin prefijo); las nuevas llegan bajo `event-AAAAMMDD/`.
+
 ### Phase 3: The Backend API & Real-Time Sync (Railway[^Railway-term])
 A minimalistic, high-performance Node.js/TypeScript or Bun backend running on Railway handles the logic and live communication.
 - **Lightweight REST Endpoints:**

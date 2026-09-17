@@ -104,10 +104,15 @@
           <p class="text-[10px] text-gray-400">
             Toma las fotos una a una con la cámara y luego pulsa "Analizar con IA" (usa las primeras 3).
           </p>
+          <p class="text-[10px] text-gray-400">
+            📉 Cada foto se optimiza en tu teléfono antes de subirse (WebP ~200 KB).
+          </p>
         }
 
         @if (isUploading()) {
-          <div class="text-[11px] text-blue-600 animate-pulse">⬆️ Subiendo foto(s)...</div>
+          <div class="text-[11px] text-blue-600 animate-pulse">
+            ⬆️ {{ uploadNotice() || 'Subiendo foto(s)...' }}
+          </div>
         }
       </div>
 
@@ -353,7 +358,9 @@
             }
 
             @if (isUploading()) {
-              <div class="text-[11px] text-blue-600 animate-pulse">⬆️ Subiendo foto(s)...</div>
+              <div class="text-[11px] text-blue-600 animate-pulse">
+                ⬆️ {{ uploadNotice() || 'Subiendo foto(s)...' }}
+              </div>
             }
 
             <button

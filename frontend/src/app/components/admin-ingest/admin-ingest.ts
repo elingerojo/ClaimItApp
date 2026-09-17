@@ -8,6 +8,7 @@ import { ToastService } from '../../services/toast';
 import { ItemCategory } from '@claimitapp/shared';
 import { upload } from '@vercel/blob/client';
 import { railwayApiUrl } from '../../app.config';
+import { comprimirFoto, extensionParaMime, type FotoComprimida } from '../../utils/image-compress';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
 import { MarketEsPipe } from '../../pipes/market-es.pipe';
@@ -19,6 +20,11 @@ export interface EventOption {
   title: string;
   /** Estado del evento (draft|scheduled|active|closing|closed). */
   status?: string;
+  /**
+   * Fecha de creación del evento en Neon (`events.created_at`). Se usa para la
+   * carpeta destino de las fotos en Vercel Blob (`event-AAAAMMDD`).
+   */
+  createdAt?: string;
 }
 
 /**
@@ -41,6 +47,13 @@ export interface MarketResult {
 
 /** Máximo de fotos que se envían a Gemini en una sola llamada (índices 0..2). */
 const MAX_IMAGES_TO_ANALYZE = 3;
+
+/**
+ * Carpeta destino cuando no hay evento (items legacy con event_id null) o cuando
+ * el evento no aparece en el listado cargado. Mantiene el prefijo `event-` para
+ * que el GC pueda filtrar con `--prefix=event-`.
+ */
+const CARPETA_SIN_FECHA = 'event-sin-fecha';
 
 /**
  * Mueve un elemento de un arreglo una posición (dir = -1 izquierda | +1 derecha).
@@ -71,6 +84,8 @@ export class AdminIngest implements OnInit {
   // ---- Estado de subida / análisis IA ----
   /** Subiendo una o más fotos a Vercel Blob. */
   readonly isUploading = signal<boolean>(false);
+  /** Aviso de la subida en curso: optimización/subida de la foto N de M. */
+  readonly uploadNotice = signal<string>('');
   /** Análisis IA en curso para la captura (nuevo Item). */
   readonly isAiProcessing = signal<boolean>(false);
   /** Análisis IA en curso para el editor (Item existente). */
@@ -291,7 +306,8 @@ export class AdminIngest implements OnInit {
       const events: EventOption[] = (data.events ?? []).map((ev: any) => ({
         id: ev.id,
         title: ev.title ?? 'Evento sin título',
-        status: ev.status ?? ''
+        status: ev.status ?? '',
+        createdAt: ev.created_at ?? ''
       }));
       this.events.set(events);
 
@@ -354,20 +370,67 @@ export class AdminIngest implements OnInit {
   // ==========================================================================
 
   /**
-   * Sube cada archivo a Vercel Blob y devuelve sus URLs públicas. Cada foto se
-   * sube de inmediato (el editor acumula las URLs en memoria hasta guardar).
+   * Carpeta destino de las fotos de un evento: `event-AAAAMMDD` con la fecha de
+   * **creación** del evento tomada de Neon (UTC, compacta y determinista).
+   * Sin evento o evento no listado → `event-sin-fecha`.
    */
-  private async uploadFiles(files: File[]): Promise<string[]> {
+  private carpetaEvento(eventId: string): string {
+    if (!eventId) return CARPETA_SIN_FECHA;
+
+    const creado = this.events().find(ev => ev.id === eventId)?.createdAt;
+    if (!creado) return CARPETA_SIN_FECHA;
+
+    const fecha = new Date(creado);
+    if (Number.isNaN(fecha.getTime())) return CARPETA_SIN_FECHA;
+
+    return `event-${fecha.toISOString().slice(0, 10).replace(/-/g, '')}`;
+  }
+
+  /** Pathname final en el store: `event-AAAAMMDD/{timestamp}-{aleatorio}.{ext}`. */
+  private buildFotoPathname(foto: FotoComprimida, eventId: string): string {
+    const aleatorio = Math.random().toString(36).slice(2, 8);
+    const extension = extensionParaMime(foto.mimeType);
+    return `${this.carpetaEvento(eventId)}/${Date.now()}-${aleatorio}.${extension}`;
+  }
+
+  /**
+   * Optimiza cada foto **en el celular** (WebP ≤ 1280 px, ~200 KB) y la sube a
+   * Vercel Blob. Proceso secuencial, una foto a la vez, para no agotar memoria en
+   * gama baja. Si el navegador no puede comprimir se sube el original (el mismo
+   * comportamiento que antes de este cambio) y se avisa al admin.
+   */
+  private async uploadFiles(files: File[], eventId: string): Promise<string[]> {
     const urls: string[] = [];
-    for (const file of files) {
-      const blob = await upload(file.name, file, {
-        access: 'public',
-        handleUploadUrl: `${this.apiUrl}/admin/blob-token`,
-        clientPayload: JSON.stringify({ token: this.adminTokenService.token() })
-      });
-      urls.push(blob.url);
+    let sinOptimizar = 0;
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        this.uploadNotice.set(`Optimizando foto ${i + 1}/${files.length}…`);
+
+        const foto = await comprimirFoto(files[i]);
+        if (foto.strategy === 'original' && !foto.skipped) sinOptimizar += 1;
+
+        this.uploadNotice.set(`Subiendo foto ${i + 1}/${files.length}…`);
+
+        const blob = await upload(this.buildFotoPathname(foto, eventId), foto.file, {
+          access: 'public',
+          handleUploadUrl: `${this.apiUrl}/admin/blob-token`,
+          contentType: foto.mimeType,
+          clientPayload: JSON.stringify({ token: this.adminTokenService.token() })
+        });
+        urls.push(blob.url);
+      }
+
+      if (sinOptimizar > 0) {
+        this.toastService.error(
+          `${sinOptimizar} foto(s) se subieron sin optimizar: el navegador no pudo procesarlas.`
+        );
+      }
+
+      return urls;
+    } finally {
+      this.uploadNotice.set('');
     }
-    return urls;
   }
 
   /** Agrega las fotos elegidas (cámara/galería) a la lista de la CAPTURA. */
@@ -380,7 +443,7 @@ export class AdminIngest implements OnInit {
 
     this.isUploading.set(true);
     try {
-      const urls = await this.uploadFiles(files);
+      const urls = await this.uploadFiles(files, this.selectedEventId());
       this.captureImages.update(list => [...list, ...urls]);
     } catch (err: any) {
       this.toastService.error(`Error al subir la(s) foto(s): ${err.message}`);
@@ -399,7 +462,7 @@ export class AdminIngest implements OnInit {
 
     this.isUploading.set(true);
     try {
-      const urls = await this.uploadFiles(files);
+      const urls = await this.uploadFiles(files, this.editEventId());
       this.editImages.update(list => [...list, ...urls]);
     } catch (err: any) {
       this.toastService.error(`Error al subir la(s) foto(s): ${err.message}`);
