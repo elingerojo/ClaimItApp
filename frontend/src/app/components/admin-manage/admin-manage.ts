@@ -290,10 +290,14 @@ export class AdminManage {
     return this.activeClaimsOf(item)[0] ?? null;
   }
 
-  /** ¿El admin puede marcar el item como entregado ahora? */
+  /**
+   * ¿El admin puede marcar el item como entregado ahora?
+   * Fases abiertas: claim_open (el primero de la lista llegó antes de T_inicio),
+   * pickup_turns (titular del turno activo) y ventana_libre (walk-in o claim).
+   */
   canDeliver(item: ItemWithQueue): boolean {
     const p = item.phase;
-    if (p === 'pickup_turns') return !!this.activeHolderOf(item);
+    if (p === 'claim_open' || p === 'pickup_turns') return !!this.activeHolderOf(item);
     if (p === 'ventana_libre') return true;
     return false;
   }
@@ -358,7 +362,7 @@ export class AdminManage {
     const target = this.deliverTarget();
     if (!target) return '';
     const claimId = this.deliverClaimId();
-    if (target.phase === 'pickup_turns') {
+    if (target.phase === 'claim_open' || target.phase === 'pickup_turns') {
       const holder = this.activeHolderOf(target);
       return holder ? `@${holder.username ?? 'usuario'}` : '—';
     }

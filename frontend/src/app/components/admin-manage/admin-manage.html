@@ -19,6 +19,9 @@
     <a routerLink="/admin/manage" class="px-4 py-2 text-xs font-medium rounded-md bg-white shadow-sm transition-colors">
       📋 Gestionar Inventario
     </a>
+    <a routerLink="/admin/pickup" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">
+      🚚 Registrar entrega
+    </a>
     <a routerLink="/admin/events" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">
       🎯 Eventos
     </a>
@@ -179,7 +182,7 @@
                         (click)="$event.stopPropagation(); openDeliver(item)"
                         [title]="item.phase === 'ventana_libre'
                           ? 'Ventana libre: entrega walk-in o de un claim activo (el artículo queda ENTREGADO).'
-                          : 'Marcar recogido: entrega al titular activo del turno (el artículo queda ENTREGADO).'"
+                          : 'Marcar recogido: entrega al titular de mayor prioridad (el artículo queda ENTREGADO).'"
                         class="flex items-center space-x-1.5 px-2.5 py-1 border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 transition-all text-xs font-medium"
                       >
                         ✅ Marcar recogido
@@ -246,8 +249,12 @@
           </p>
 
           <div class="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2 text-xs text-gray-700 space-y-1.5">
-            @if (target.phase === 'pickup_turns') {
-              <div>👑 Se entrega al <b>titular del turno activo</b>: <b>{{ deliverRecipientLabel() }}</b>.</div>
+            @if (target.phase === 'claim_open' || target.phase === 'pickup_turns') {
+              @if (target.phase === 'claim_open') {
+                <div>🕐 Apartado abierto (aún sin congelar): se entrega al <b>primero de la lista</b>: <b>{{ deliverRecipientLabel() }}</b>.</div>
+              } @else {
+                <div>👑 Se entrega al <b>titular del turno activo</b>: <b>{{ deliverRecipientLabel() }}</b>.</div>
+              }
               @if (activeHolderOf(target); as holder) {
                 @if (holder.turnVExpiresAt) {
                   <div class="text-[10px] text-gray-500 font-mono">Su turno vence: {{ holder.turnVExpiresAt | dateEs:'full' }}</div>

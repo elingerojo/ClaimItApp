@@ -25,7 +25,12 @@
  *    NEUTRO (sin sanción); abre ventana libre si se agotan posiciones activas.
  *  - `deliverItemByAdmin()`: el ADMIN marca 'item recogido' (phase='entregado',
  *    delivered_claim_id/delivered_at, cola conservada como forense; void a los
- *    demás activos; detiene workflows).
+ *    demás activos; detiene workflows). Permite forzar la entrega desde
+ *    claim_open (el titular llegó antes de T_inicio) y valida prioridad por
+ *    usuario para el flujo de recepción batch.
+ *  - `pickableItemsForUser()`: items donde un usuario es el titular de mayor
+ *    prioridad de recogida (claim_open/pickup_turns) o tiene un claim activo en
+ *    ventana libre.
  *
  * Cada función es auto-contenida (abre su propia conexión + transacción) y hace
  * write-through a la RAM store en el mismo flujo. Opcionalmente aceptan un
@@ -1255,11 +1260,19 @@ export type AdminDeliverOutcome =
       deliveredUsername: string | null;
       deliveredAt: string;
       eventId: string | null;
+      /** true cuando la entrega forzó el cierre desde phase='claim_open'. */
+      earlyPickup: boolean;
       voided: Array<{ claimId: string; userUuid: string; username: string | null }>;
     }
   | {
       ok: false;
-      code: 'not_found' | 'already_closed' | 'invalid_phase' | 'no_active_holder' | 'invalid_claim';
+      code:
+        | 'not_found'
+        | 'already_closed'
+        | 'invalid_phase'
+        | 'no_active_holder'
+        | 'invalid_claim'
+        | 'not_priority';
       message: string;
     };
 
@@ -1267,21 +1280,29 @@ export interface AdminDeliverInput {
   itemId: string;
   /** Opcional: claim a marcar como entregado (ventana libre con claim capturado). */
   claimId?: string | null;
+  /**
+   * Opcional: userUuid del titular que debe recibir el objeto. Cuando se indica
+   * (flujo de recepción batch), se entrega SIEMPRE al claim activo de mayor
+   * prioridad y se valida que pertenezca a ese usuario; si otro claim activo
+   * tiene mayor prioridad se rechaza con 'not_priority' (nunca se salta el FIFO).
+   */
+  expectedUserUuid?: string | null;
 }
 
 /**
- * El ADMIN marca 'item recogido': valida que haya un titular activo (pickup_turns)
- * o una ventana libre (con claim opcional); fija phase='entregado',
- * delivered_claim_id/delivered_at, conserva los claims como registro forense
- * (void a los demás activos, sin sanción) y detiene los workflows restantes
- * (la fase terminal 'entregado' deja de progresar automáticamente). Completar a
- * tiempo reduce el contador de expiraciones del titular (reward).
+ * El ADMIN marca 'item recogido'. Fases abiertas permitidas: claim_open,
+ * pickup_turns y ventana_libre. En claim_open (aún sin congelar: el titular llegó
+ * antes de T_inicio) la entrega fuerza el cierre directo a 'entregado'. Fija
+ * phase='entregado', delivered_claim_id/delivered_at, conserva los claims como
+ * registro forense (void a los demás activos, sin sanción) y detiene los
+ * workflows restantes (la fase terminal 'entregado' deja de progresar). Completar
+ * a tiempo reduce el contador de expiraciones del titular (reward).
  */
 export async function deliverItemByAdmin(
   input: AdminDeliverInput,
   client?: DbClient
 ): Promise<AdminDeliverOutcome> {
-  const { itemId, claimId } = input;
+  const { itemId, claimId, expectedUserUuid } = input;
 
   return runTx(async (c) => {
     const row = await lockItemWithEvent(itemId, c);
@@ -1289,10 +1310,14 @@ export async function deliverItemByAdmin(
     if (row.phase === 'entregado' || row.phase === 'enviado_a_caridad') {
       return { ok: false, code: 'already_closed', message: 'Este objeto ya está entregado o enviado a caridad.' };
     }
-    if (row.phase !== 'pickup_turns' && row.phase !== 'ventana_libre') {
+    if (row.phase !== 'claim_open' && row.phase !== 'pickup_turns' && row.phase !== 'ventana_libre') {
       return { ok: false, code: 'invalid_phase', message: 'El objeto aún no está en fase de recolección.' };
     }
 
+    const earlyPickup = row.phase === 'claim_open';
+    // `active` ya viene ordenado por prioridad: fifo_position asc (nulls last) y
+    // luego claimed_at asc. En claim_open todos tienen fifo_position NULL, así que
+    // la prioridad queda determinada por claimed_at (el primero que apartó).
     const active = await activeClaimsOfItem(itemId, c);
 
     let delivered: any = null;
@@ -1301,18 +1326,46 @@ export async function deliverItemByAdmin(
       if (!delivered) {
         return { ok: false, code: 'invalid_claim', message: 'El claim indicado no es un titular activo de este objeto.' };
       }
-    } else if (row.phase === 'pickup_turns') {
+    } else if (row.phase === 'claim_open' || row.phase === 'pickup_turns') {
       delivered = active[0] ?? null;
       if (!delivered) {
         return {
           ok: false,
           code: 'no_active_holder',
-          message: 'No hay un titular de turno activo para marcar como entregado.'
+          message: 'No hay un titular activo para marcar como entregado.'
         };
       }
     } else {
       // ventana_libre sin claim explícito: puede no existir claim (walk-in).
       delivered = active[0] ?? null;
+    }
+
+    // Guarda de prioridad del flujo de recepción por usuario.
+    //  - claim_open / pickup_turns: se entrega al tope de prioridad y debe ser el
+    //    usuario esperado (nunca se salta el orden FIFO).
+    //  - ventana_libre: ya no hay FIFO; basta con el claim activo del usuario.
+    if (expectedUserUuid) {
+      if (row.phase === 'ventana_libre') {
+        const mine = active.find((a: any) => a.user_uuid === expectedUserUuid) ?? null;
+        if (!mine) {
+          return {
+            ok: false,
+            code: 'not_priority',
+            message: 'El usuario indicado no tiene un claim activo para este objeto.'
+          };
+        }
+        delivered = mine;
+      } else {
+        const top = active[0] ?? null;
+        if (!top || top.user_uuid !== expectedUserUuid) {
+          return {
+            ok: false,
+            code: 'not_priority',
+            message: 'El usuario indicado no es el titular de mayor prioridad para este objeto.'
+          };
+        }
+        delivered = top;
+      }
     }
 
     const deliveredAt = nowIso();
@@ -1369,6 +1422,7 @@ export async function deliverItemByAdmin(
       deliveredUsername: delivered ? delivered.username ?? null : null,
       deliveredAt,
       eventId: row.event_id,
+      earlyPickup,
       voided
     };
   }, client);
@@ -1389,6 +1443,91 @@ export function activeClaimFromStore(item: StoreItem): StoreClaim | undefined {
       return new Date(a.claimedAt).getTime() - new Date(b.claimedAt).getTime();
     });
   return active[0];
+}
+
+/** Vista de un item recogible por un usuario (contrato del endpoint de recepción). */
+export interface PickableItemView {
+  itemId: string;
+  claimId: string;
+  title: string;
+  category: string;
+  imageUrl: string | null;
+  phase: ItemPhase;
+  /** Posición FIFO del titular (1..3) o índice 1-based si aún no se congeló. */
+  priorityPosition: number | null;
+  /** Vencimiento del turno del titular (ISO) o null si no aplica. */
+  turnVExpiresAt: string | null;
+  /** Total de claims activos del item (incluyendo al titular). */
+  holderCount: number;
+  /** Claims activos con mayor prioridad que el usuario (0 = es el titular). */
+  holdersAhead: number;
+  eventId: string | null;
+  claimedAt: string;
+  reason: 'open_claim_first' | 'turn_holder' | 'free_window_claim';
+}
+
+/**
+ * Items donde `userUuid` es el titular de MAYOR prioridad de recogida:
+ *  - claim_open / pickup_turns: debe ser el primer claim activo según
+ *    (fifo_position asc nulls last, claimed_at asc). En claim_open todos tienen
+ *    fifo_position NULL, así que manda claimed_at (el primero que apartó).
+ *  - ventana_libre: basta con tener un claim activo (ya no hay orden FIFO).
+ * Función pura sobre el store RAM; el llamador debe correr antes el lazy catch-up.
+ */
+export function pickableItemsForUser(items: StoreItem[], userUuid: string): PickableItemView[] {
+  const out: PickableItemView[] = [];
+  for (const item of items) {
+    if (
+      item.phase !== 'claim_open' &&
+      item.phase !== 'pickup_turns' &&
+      item.phase !== 'ventana_libre'
+    ) {
+      continue;
+    }
+
+    const active = item.queue
+      .filter((c) => c.claimState === 'active')
+      .sort((a, b) => {
+        const ap = a.fifoPosition === null ? Number.MAX_SAFE_INTEGER : a.fifoPosition;
+        const bp = b.fifoPosition === null ? Number.MAX_SAFE_INTEGER : b.fifoPosition;
+        if (ap !== bp) return ap - bp;
+        return new Date(a.claimedAt).getTime() - new Date(b.claimedAt).getTime();
+      });
+    if (active.length === 0) continue;
+
+    const mineIdx = active.findIndex((c) => c.userUuid === userUuid);
+    if (mineIdx < 0) continue;
+    const mine = active[mineIdx];
+    const top = active[0];
+
+    let reason: PickableItemView['reason'];
+    if (item.phase === 'ventana_libre') {
+      reason = 'free_window_claim';
+    } else if (top.userUuid === userUuid) {
+      reason = item.phase === 'claim_open' ? 'open_claim_first' : 'turn_holder';
+    } else {
+      // Otro claim activo tiene mayor prioridad: el usuario aún no puede recoger.
+      continue;
+    }
+
+    out.push({
+      itemId: item.id,
+      claimId: mine.id,
+      title: item.title,
+      category: item.category,
+      imageUrl:
+        Array.isArray(item.imageUrls) && item.imageUrls.length > 0 ? item.imageUrls[0] : null,
+      phase: item.phase,
+      priorityPosition: mine.fifoPosition ?? mineIdx + 1,
+      turnVExpiresAt: mine.turnVExpiresAt ?? null,
+      holderCount: active.length,
+      holdersAhead: mineIdx,
+      eventId: item.eventId,
+      claimedAt: mine.claimedAt,
+      reason
+    });
+  }
+  return out;
 }
 
 /**

@@ -7,7 +7,10 @@ import {
   FifoPosition,
   Role,
   FixedTimeline,
-  FrozenSchedule
+  FrozenSchedule,
+  AdminUserSummary,
+  AdminPickupListResponse,
+  AdminBatchDeliverResponse
 } from '@claimitapp/shared';
 import { railwayApiUrl } from '../app.config';
 import { UserService } from './user';
@@ -216,6 +219,14 @@ export class InventoryService implements OnDestroy {
   readonly adminCounts = this.adminCountsSignal.asReadonly();
   private readonly adminLoadedSignal = signal<boolean>(false);
   readonly adminLoaded = this.adminLoadedSignal.asReadonly();
+
+  /**
+   * Contador que incrementa con cada mutación SSE del feed. La pantalla
+   * "Registrar entrega" lo usa para recargar los items recogibles del usuario
+   * seleccionado sin acoplarse al feed público.
+   */
+  private readonly pickupTickSignal = signal(0);
+  readonly pickupTick = this.pickupTickSignal.asReadonly();
 
   // Parámetros del último loadAdminItems (para refrescar ante SSE).
   private adminLoadParams: { statuses: string[]; token: string } | null = null;
@@ -443,6 +454,8 @@ export class InventoryService implements OnDestroy {
       // La vista admin (adminItems) se mantiene en vivo ante mutaciones del
       // feed, reutilizando la combinación de estatus activa en ese momento.
       this.scheduleAdminRefresh();
+      // Señal para la pantalla de recepción (recarga los recogibles del usuario).
+      this.pickupTickSignal.update((n) => n + 1);
     });
 
     // Intercept deletion vectors so removed assets disappear from every view
@@ -767,5 +780,63 @@ export class InventoryService implements OnDestroy {
       throw new Error(result.error || 'No se pudo marcar el objeto como entregado.');
     }
     return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Recepción / entrega por usuario (admin) — pantalla "Registrar entrega"
+  // ---------------------------------------------------------------------------
+
+  /** GET /api/admin/users?q= — búsqueda de identidad para la recepción. */
+  async searchAdminUsers(query: string, adminToken: string): Promise<AdminUserSummary[]> {
+    const q = encodeURIComponent(query.trim());
+    const response = await fetch(`${this.apiUrl}/admin/users?q=${q}`, {
+      headers: { 'X-Admin-Token': adminToken }
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((result as any).error || 'No se pudo buscar usuarios.');
+    }
+    return ((result as any).users ?? []) as AdminUserSummary[];
+  }
+
+  /** GET /api/admin/pickups?userUuid= — items recogibles por el usuario. */
+  async loadAdminPickups(
+    userUuid: string,
+    adminToken: string
+  ): Promise<AdminPickupListResponse> {
+    const response = await fetch(
+      `${this.apiUrl}/admin/pickups?userUuid=${encodeURIComponent(userUuid)}`,
+      { headers: { 'X-Admin-Token': adminToken } }
+    );
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((result as any).error || 'No se pudieron cargar los objetos por entregar.');
+    }
+    return result as AdminPickupListResponse;
+  }
+
+  /**
+   * POST /api/admin/pickups/deliver — entrega batch de los items marcados.
+   * El backend revalida por item que el usuario siga siendo el titular de mayor
+   * prioridad; los rechazos se devuelven en `results` sin abortar los éxitos.
+   */
+  async deliverBatch(
+    userUuid: string,
+    itemIds: string[],
+    adminToken: string
+  ): Promise<AdminBatchDeliverResponse> {
+    const response = await fetch(`${this.apiUrl}/admin/pickups/deliver`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Admin-Token': adminToken
+      },
+      body: JSON.stringify({ userUuid, itemIds })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((result as any).error || 'No se pudieron registrar las entregas.');
+    }
+    return result as AdminBatchDeliverResponse;
   }
 }

@@ -322,3 +322,71 @@ export interface ItemTemporalState {
   linea_tiempo_fija: FixedTimeline | null;
   participantes: TemporalParticipant[];
 }
+
+// ---------------------------------------------------------------------------
+// Recepción / entrega por usuario (admin) — pantalla "Registrar entrega"
+// ---------------------------------------------------------------------------
+
+/** Usuario devuelto por la búsqueda admin (GET /api/admin/users?q=). */
+export interface AdminUserSummary {
+  uuid: string;
+  alias: string;
+  email: string | null;
+  phone: string | null;
+  globalRole: Role;
+}
+
+/** Motivo por el que un item aparece como recogible por un usuario. */
+export type AdminPickableReason = 'open_claim_first' | 'turn_holder' | 'free_window_claim';
+
+/**
+ * Item donde el usuario es el titular de mayor prioridad de recogida (o tiene un
+ * claim activo en ventana libre). Es el contrato de GET /api/admin/pickups.
+ */
+export interface AdminPickableItem {
+  itemId: string;
+  claimId: string;
+  title: string;
+  category: ItemCategory | string;
+  imageUrl: string | null;
+  phase: ItemPhase;
+  /** Posición FIFO del titular (1..3) o índice 1-based si aún no se congela. */
+  priorityPosition: number | null;
+  /** Vencimiento del turno del titular (ISO) o null si no aplica. */
+  turnVExpiresAt: string | null;
+  /** Total de claims activos del item (incluyendo al titular). */
+  holderCount: number;
+  /** Claims activos con mayor prioridad que el usuario (0 = es el titular). */
+  holdersAhead: number;
+  eventId: string | null;
+  eventTitle: string | null;
+  claimedAt: string;
+  reason: AdminPickableReason;
+}
+
+/** Respuesta de GET /api/admin/pickups?userUuid=. */
+export interface AdminPickupListResponse {
+  user: AdminUserSummary;
+  items: AdminPickableItem[];
+  counts: { total: number; byPhase: Record<string, number> };
+}
+
+/** Resultado por item de POST /api/admin/pickups/deliver. */
+export interface AdminBatchDeliverItemResult {
+  itemId: string;
+  ok: boolean;
+  code?: string;
+  message?: string;
+  deliveredClaimId?: string | null;
+  deliveredUsername?: string | null;
+  deliveredAt?: string;
+}
+
+/** Respuesta de POST /api/admin/pickups/deliver. */
+export interface AdminBatchDeliverResponse {
+  success: boolean;
+  userUuid: string;
+  results: AdminBatchDeliverItemResult[];
+  deliveredCount: number;
+  failedCount: number;
+}

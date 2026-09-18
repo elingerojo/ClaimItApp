@@ -1,0 +1,191 @@
+<div class="max-w-5xl mx-auto px-4 py-8 font-sans">
+
+  <!-- Encabezado -->
+  <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-100 pb-6 mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900 tracking-tight">Registrar entrega</h1>
+      <p class="text-xs text-gray-500 mt-1">
+        Busca a la persona que llegó, revisa los objetos donde tiene prioridad y marca los que le entregas.
+      </p>
+    </div>
+    <div class="mt-4 md:mt-0">
+      <app-admin-auth />
+    </div>
+  </div>
+
+  <!-- Navegación admin -->
+  <nav class="flex gap-1 bg-gray-100 p-1 rounded-lg mb-6 flex-wrap">
+    <a routerLink="/admin/ingest" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">
+      📥 Subir Objeto
+    </a>
+    <a routerLink="/admin/manage" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">
+      📋 Gestionar Inventario
+    </a>
+    <a routerLink="/admin/pickup" class="px-4 py-2 text-xs font-medium rounded-md bg-white shadow-sm transition-colors">
+      🚚 Registrar entrega
+    </a>
+    <a routerLink="/admin/events" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">
+      🎯 Eventos
+    </a>
+    <a routerLink="/admin/config" class="px-4 py-2 text-xs font-medium rounded-md text-gray-600 hover:bg-white hover:shadow-sm transition-colors">
+      ⚙️ Configuración
+    </a>
+  </nav>
+
+  @if (adminTokenService.authenticated()) {
+
+    <!-- Paso 1: buscar persona -->
+    <section class="bg-white border border-gray-100 rounded-xl shadow-sm p-4 mb-4">
+      <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">1. ¿Quién llegó?</h2>
+      <div class="flex gap-2 items-start">
+        <input
+          [formField]="searchForm"
+          type="text"
+          autocomplete="off"
+          placeholder="Alias, correo o teléfono"
+          (keyup.enter)="runSearch()"
+          class="flex-1 text-sm px-3 py-2.5 border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200"
+        />
+        <button
+          (click)="runSearch()"
+          [disabled]="searching()"
+          class="shrink-0 text-sm bg-gray-900 hover:bg-black disabled:opacity-50 text-white rounded-lg px-5 py-2.5 font-medium transition-colors"
+        >
+          {{ searching() ? 'Buscando…' : 'Buscar' }}
+        </button>
+      </div>
+
+      @if (searched() && !searching() && results().length === 0) {
+        <p class="text-xs text-gray-400 mt-3">Sin coincidencias.</p>
+      }
+
+      @if (results().length > 0) {
+        <ul class="mt-3 divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
+          @for (u of results(); track u.uuid) {
+            <li>
+              <button
+                (click)="chooseUser(u)"
+                class="w-full text-left px-3 py-2 hover:bg-emerald-50 transition-colors flex items-center justify-between gap-3"
+              >
+                <span class="text-sm text-gray-800 font-medium">👤 {{ u.alias }}</span>
+                <span class="text-[10px] text-gray-400 truncate">{{ u.email || u.phone || '' }}</span>
+              </button>
+            </li>
+          }
+        </ul>
+      }
+    </section>
+
+    @if (selectedUser(); as user) {
+
+      <!-- Paso 2 y 3: objetos recogibles + selección -->
+      <section class="bg-white border border-gray-100 rounded-xl shadow-sm p-4 mb-4">
+        <div class="flex items-start justify-between gap-2 mb-3">
+          <div>
+            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">
+              2. Objetos que puede recoger
+            </h2>
+            <p class="text-sm text-gray-800 mt-1">
+              👤 <b>{{ user.alias }}</b>
+              <span class="text-[10px] text-gray-400 ml-1">{{ user.email || user.phone || '' }}</span>
+            </p>
+          </div>
+          <button
+            (click)="clearUser()"
+            class="shrink-0 text-[10px] px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors"
+          >
+            Cambiar persona
+          </button>
+        </div>
+
+        @if (loadingItems()) {
+          <p class="text-xs text-gray-400">Cargando objetos…</p>
+        } @else if (items().length === 0) {
+          <p class="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-3 py-4">
+            Esta persona no tiene objetos con prioridad de recogida ahora mismo.
+          </p>
+        } @else {
+
+          <div class="flex items-center justify-between px-1 pb-2">
+            <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+              <input type="checkbox" [checked]="allSelected()" (change)="toggleAll()" class="accent-emerald-600" />
+              Seleccionar todos ({{ items().length }})
+            </label>
+            <span class="text-[10px] text-gray-400">{{ selectedCount() }} seleccionado/s</span>
+          </div>
+
+          <ul class="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
+            @for (item of items(); track item.itemId) {
+              <li class="flex items-center gap-3 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  [checked]="isSelected(item.itemId)"
+                  (change)="toggle(item.itemId)"
+                  class="accent-emerald-600"
+                />
+                @if (item.imageUrl) {
+                  <img [src]="item.imageUrl" [alt]="item.title" class="w-10 h-10 rounded-lg object-cover border border-gray-100" />
+                } @else {
+                  <div class="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 text-xs">📦</div>
+                }
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm text-gray-800 font-medium truncate">{{ item.title }}</p>
+                  <div class="flex flex-wrap items-center gap-2 mt-0.5">
+                    <span class="text-[10px] px-1.5 py-0.5 rounded border" [class]="phaseBadge(item.phase)">
+                      {{ phaseEmoji(item.phase) }} {{ phaseLabel(item.phase) }}
+                    </span>
+                    <span class="text-[10px] text-gray-500">{{ reasonLabel(item.reason) }}</span>
+                    @if (item.priorityPosition) {
+                      <span class="text-[10px] text-gray-400">Prioridad #{{ item.priorityPosition }} de {{ item.holderCount }}</span>
+                    }
+                    @if (item.eventTitle) {
+                      <span class="text-[10px] text-gray-400">· {{ item.eventTitle }}</span>
+                    }
+                  </div>
+                  @if (item.turnVExpiresAt) {
+                    <p class="text-[10px] text-gray-500 font-mono mt-0.5">
+                      Turno vence: {{ item.turnVExpiresAt | dateEs:'full' }}
+                    </p>
+                  }
+                </div>
+              </li>
+            }
+          </ul>
+
+          <!-- Paso 4: guardar -->
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4">
+            <p class="text-[10px] text-gray-400">
+              Los objetos marcados se cierran como <b>ENTREGADO</b>; el resto de la cola queda sin derecho
+              (sin sanción). Esta acción no se puede deshacer.
+            </p>
+            <button
+              (click)="registerDeliveries()"
+              [disabled]="delivering() || selectedCount() === 0"
+              class="shrink-0 text-sm bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl px-5 py-3 font-medium transition-colors"
+            >
+              {{ delivering() ? 'Registrando…' : 'Registrar entregas (' + selectedCount() + ')' }}
+            </button>
+          </div>
+        }
+      </section>
+
+      <!-- Rechazos del último guardado -->
+      @if (lastResults(); as res) {
+        @if (res.failedCount > 0) {
+          <section class="bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <h3 class="text-xs font-bold text-amber-900 uppercase tracking-wider mb-2">
+              Rechazos del último guardado ({{ res.failedCount }})
+            </h3>
+            <ul class="space-y-1">
+              @for (r of res.results; track r.itemId) {
+                @if (!r.ok) {
+                  <li class="text-[11px] text-amber-900">• {{ r.message || r.code }}</li>
+                }
+              }
+            </ul>
+          </section>
+        }
+      }
+    }
+  }
+</div>

@@ -22,6 +22,7 @@ import {
 } from './controllers/itemsController.js';
 import { getInventoryFeed, getLedgerFeed } from './controllers/feedsController.js';
 import { evictClaimant, deliverItem } from './controllers/adminController.js';
+import { searchUsers, listPickableItems, deliverBatch } from './controllers/pickupsController.js';
 import { adminLogin, adminSessionStatus, adminLogout } from './controllers/adminAuthController.js';
 import {
   createEvent,
@@ -120,6 +121,11 @@ app.get('/api/admin/events/:id', requireAdminSession, getEventDetail);
 app.patch('/api/admin/events/:id', requireAdminSession, updateEvent);
 app.delete('/api/admin/events/:id', requireAdminSession, deleteEvent);
 app.post('/api/admin/evict', requireAdminSession, evictClaimant);
+// Recepción / entrega por usuario (pantalla "Registrar entrega" del admin):
+// búsqueda de identidad, items recogibles por usuario y entrega batch.
+app.get('/api/admin/users', requireAdminSession, searchUsers);
+app.get('/api/admin/pickups', requireAdminSession, listPickableItems);
+app.post('/api/admin/pickups/deliver', requireAdminSession, deliverBatch);
 // Configuración global de eventos: plantilla de agenda + matriz de confianza.
 app.get('/api/admin/event-config', requireAdminSession, getEventConfig);
 app.put('/api/admin/event-config', requireAdminSession, updateEventConfig);
