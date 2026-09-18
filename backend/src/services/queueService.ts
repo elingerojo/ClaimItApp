@@ -63,6 +63,7 @@ import {
   type StoreItem
 } from '../cache/appStore.js';
 import { applyExpirationSanction, reduceExpirationCount } from './trustSanctions.js';
+import { rolePrice } from '../utils/pricing.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -1453,6 +1454,11 @@ export interface PickableItemView {
   category: string;
   imageUrl: string | null;
   phase: ItemPhase;
+  /**
+   * Precio visible por rol del usuario (precioBaseCosto × multiplicador del rol
+   * global); null si no se proporcionó `viewerRole` o el item no tiene precio.
+   */
+  precioVisible: number | null;
   /** Posición FIFO del titular (1..3) o índice 1-based si aún no se congeló. */
   priorityPosition: number | null;
   /** Vencimiento del turno del titular (ISO) o null si no aplica. */
@@ -1473,8 +1479,15 @@ export interface PickableItemView {
  *    fifo_position NULL, así que manda claimed_at (el primero que apartó).
  *  - ventana_libre: basta con tener un claim activo (ya no hay orden FIFO).
  * Función pura sobre el store RAM; el llamador debe correr antes el lazy catch-up.
+ *
+ * `viewerRole` (opcional) es el rol del usuario con el que se calcula
+ * `precioVisible` (precioBaseCosto × multiplicador). Si se omite, queda null.
  */
-export function pickableItemsForUser(items: StoreItem[], userUuid: string): PickableItemView[] {
+export function pickableItemsForUser(
+  items: StoreItem[],
+  userUuid: string,
+  viewerRole?: Role
+): PickableItemView[] {
   const out: PickableItemView[] = [];
   for (const item of items) {
     if (
@@ -1510,6 +1523,9 @@ export function pickableItemsForUser(items: StoreItem[], userUuid: string): Pick
       continue;
     }
 
+    const rawPrice = viewerRole ? rolePrice(item.precioBaseCosto, viewerRole) : null;
+    const precioVisible = rawPrice != null && Number.isFinite(rawPrice) ? rawPrice : null;
+
     out.push({
       itemId: item.id,
       claimId: mine.id,
@@ -1518,6 +1534,7 @@ export function pickableItemsForUser(items: StoreItem[], userUuid: string): Pick
       imageUrl:
         Array.isArray(item.imageUrls) && item.imageUrls.length > 0 ? item.imageUrls[0] : null,
       phase: item.phase,
+      precioVisible,
       priorityPosition: mine.fifoPosition ?? mineIdx + 1,
       turnVExpiresAt: mine.turnVExpiresAt ?? null,
       holderCount: active.length,

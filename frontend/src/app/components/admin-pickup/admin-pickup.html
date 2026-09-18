@@ -111,7 +111,12 @@
               <input type="checkbox" [checked]="allSelected()" (change)="toggleAll()" class="accent-emerald-600" />
               Seleccionar todos ({{ items().length }})
             </label>
-            <span class="text-[10px] text-gray-400">{{ selectedCount() }} seleccionado/s</span>
+            <span class="text-[10px] text-gray-400">
+              {{ selectedCount() }} seleccionado/s
+              @if (selectedUnpricedCount() > 0) {
+                · {{ selectedUnpricedCount() }} sin precio
+              }
+            </span>
           </div>
 
           <ul class="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
@@ -131,6 +136,13 @@
                 <div class="flex-1 min-w-0">
                   <p class="text-sm text-gray-800 font-medium truncate">{{ item.title }}</p>
                   <div class="flex flex-wrap items-center gap-2 mt-0.5">
+                    @if (item.precioVisible != null) {
+                      <span class="text-xs font-semibold text-emerald-700">
+                        ${{ item.precioVisible | precioEs }}
+                      </span>
+                    } @else {
+                      <span class="text-[10px] text-gray-400">Sin precio</span>
+                    }
                     <span class="text-[10px] px-1.5 py-0.5 rounded border" [class]="phaseBadge(item.phase)">
                       {{ phaseEmoji(item.phase) }} {{ phaseLabel(item.phase) }}
                     </span>
@@ -163,7 +175,13 @@
               [disabled]="delivering() || selectedCount() === 0"
               class="shrink-0 text-sm bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl px-5 py-3 font-medium transition-colors"
             >
-              {{ delivering() ? 'Registrando…' : 'Registrar entregas (' + selectedCount() + ')' }}
+              @if (delivering()) {
+                Registrando…
+              } @else if (hasSelectedPrice()) {
+                Registrar entregas ({{ selectedCount() }}) · ${{ selectedTotal() | precioEs }}
+              } @else {
+                Registrar entregas ({{ selectedCount() }})
+              }
             </button>
           </div>
         }

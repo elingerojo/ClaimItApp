@@ -11,8 +11,10 @@ import { InventoryService } from '../../services/inventory';
 import { AdminTokenService } from '../../services/admin-token';
 import { ToastService } from '../../services/toast';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
+import { PrecioEsPipe } from '../../pipes/precio-es.pipe';
 import { AdminAuth } from '../admin-auth/admin-auth';
 import { phaseBadge, phaseEmoji, phaseLabel } from '../../utils/event-status';
+import { formatPrecioEs } from '../../utils/precio-es';
 
 /**
  * Registrar entrega (admin) — recepción por usuario.
@@ -30,7 +32,7 @@ import { phaseBadge, phaseEmoji, phaseLabel } from '../../utils/event-status';
 @Component({
   selector: 'app-admin-pickup',
   standalone: true,
-  imports: [CommonModule, RouterModule, DateEsPipe, AdminAuth, FormField],
+  imports: [CommonModule, RouterModule, DateEsPipe, PrecioEsPipe, AdminAuth, FormField],
   templateUrl: './admin-pickup.html'
 })
 export class AdminPickup {
@@ -68,6 +70,23 @@ export class AdminPickup {
   readonly selectedCount = computed(() => this.selectedIds().size);
   readonly allSelected = computed(
     () => this.items().length > 0 && this.selectedIds().size === this.items().length
+  );
+
+  /** Items marcados actualmente (para valorar la selección). */
+  readonly selectedItems = computed(() =>
+    this.items().filter((i) => this.selectedIds().has(i.itemId))
+  );
+  /** Suma de los precios visibles por rol de los items marcados (sin precio = 0). */
+  readonly selectedTotal = computed(() =>
+    this.selectedItems().reduce((sum, i) => sum + (i.precioVisible ?? 0), 0)
+  );
+  /** Items marcados sin precio base (no suman al total). */
+  readonly selectedUnpricedCount = computed(
+    () => this.selectedItems().filter((i) => i.precioVisible == null).length
+  );
+  /** True si al menos un item marcado tiene precio (para mostrar el monto). */
+  readonly hasSelectedPrice = computed(
+    () => this.selectedCount() - this.selectedUnpricedCount() > 0
   );
 
   // ---------------------------------------------------------------------------
@@ -192,13 +211,15 @@ export class AdminPickup {
     try {
       const res = await this.inventoryService.deliverBatch(user.uuid, ids, token);
       this.lastResults.set(res);
+      const amountSuffix =
+        res.totalAmount > 0 ? ` por $${formatPrecioEs(res.totalAmount)}` : '';
       if (res.failedCount === 0) {
-        this.toastService.success(`✅ ${res.deliveredCount} objeto(s) marcados como entregados.`);
+        this.toastService.success(`✅ ${res.deliveredCount} objeto(s) entregados${amountSuffix}.`);
       } else if (res.deliveredCount === 0) {
         this.toastService.error(`No se pudo entregar ningún objeto (${res.failedCount} rechazado/s).`);
       } else {
         this.toastService.info(
-          `Entregados ${res.deliveredCount}; ${res.failedCount} rechazado/s. Revisa el detalle.`
+          `Entregados ${res.deliveredCount}${amountSuffix}; ${res.failedCount} rechazado/s. Revisa el detalle.`
         );
       }
       this.clearSelection();

@@ -21,9 +21,14 @@ import pool from '../config/db.js';
 import type { Role } from '@claimitapp/shared';
 import { broadcastSseEvent } from '../config/sse.js';
 import { ensureHydrated, getEvent, getItemById, getItems } from '../cache/appStore.js';
-import { deliverItemByAdmin, pickableItemsForUser } from '../services/queueService.js';
+import {
+  deliverItemByAdmin,
+  effectiveRoleForUser,
+  pickableItemsForUser
+} from '../services/queueService.js';
 import { runLazyCatchUp } from '../services/scheduler.js';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
+import { rolePrice } from '../utils/pricing.js';
 
 /** Tope de usuarios devueltos por la búsqueda admin. */
 const MAX_USER_RESULTS = 25;
@@ -110,7 +115,9 @@ export const listPickableItems = async (req: Request, res: Response): Promise<vo
     }
     const u = userRes.rows[0];
 
-    const picks = pickableItemsForUser(getItems(), userUuid);
+    // Precio por rol (base × multiplicador del rol global), igual que en el feed.
+    const viewerRole = effectiveRoleForUser(u.global_role);
+    const picks = pickableItemsForUser(getItems(), userUuid, viewerRole);
     const byPhase: Record<string, number> = {};
     const items = picks.map((p) => {
       byPhase[p.phase] = (byPhase[p.phase] ?? 0) + 1;
@@ -176,8 +183,13 @@ export const deliverBatch = async (req: Request, res: Response): Promise<void> =
     await ensureHydrated();
     await runLazyCatchUp();
 
+    // Rol global del usuario para valorar cada item con su precio visible.
+    const roleRes = await pool.query(`SELECT global_role FROM users WHERE uuid = $1`, [userUuid]);
+    const deliveredRole = effectiveRoleForUser(roleRes.rows[0]?.global_role ?? null);
+
     const results: Array<Record<string, unknown>> = [];
     let deliveredCount = 0;
+    let totalAmount = 0;
 
     for (const itemId of unique) {
       const outcome = await deliverItemByAdmin({ itemId, expectedUserUuid: userUuid });
@@ -189,6 +201,9 @@ export const deliverBatch = async (req: Request, res: Response): Promise<void> =
 
       deliveredCount++;
       const storeItem = getItemById(itemId);
+      const rawPrice = storeItem ? rolePrice(storeItem.precioBaseCosto, deliveredRole) : null;
+      const precioVisible = rawPrice != null && Number.isFinite(rawPrice) ? rawPrice : null;
+      if (precioVisible != null) totalAmount += precioVisible;
 
       await logAudit({
         action: 'ITEM_DELIVERED',
@@ -202,6 +217,7 @@ export const deliverBatch = async (req: Request, res: Response): Promise<void> =
           deliveredUsername: outcome.deliveredUsername,
           voidedCount: outcome.voided.length,
           phase: outcome.phase,
+          precioVisible,
           timestamp: outcome.deliveredAt
         }
       });
@@ -224,7 +240,23 @@ export const deliverBatch = async (req: Request, res: Response): Promise<void> =
         ok: true,
         deliveredClaimId: outcome.deliveredClaimId,
         deliveredUsername: outcome.deliveredUsername,
-        deliveredAt: outcome.deliveredAt
+        deliveredAt: outcome.deliveredAt,
+        precioVisible
+      });
+    }
+
+    // Resumen del lote con el monto total entregado (rastro forense).
+    if (deliveredCount > 0) {
+      await logAudit({
+        action: 'PICKUP_BATCH_DELIVERED',
+        adminCodeSuffix: adminSuffix(req),
+        userId: userUuid,
+        details: {
+          source: 'admin_pickup_batch',
+          totalAmount,
+          deliveredCount,
+          failedCount: results.length - deliveredCount
+        }
       });
     }
 
@@ -233,7 +265,8 @@ export const deliverBatch = async (req: Request, res: Response): Promise<void> =
       userUuid,
       results,
       deliveredCount,
-      failedCount: results.length - deliveredCount
+      failedCount: results.length - deliveredCount,
+      totalAmount
     });
   } catch (error) {
     console.error('Admin batch deliver failed:', error);

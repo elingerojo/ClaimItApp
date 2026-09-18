@@ -350,6 +350,12 @@ export interface AdminPickableItem {
   category: ItemCategory | string;
   imageUrl: string | null;
   phase: ItemPhase;
+  /**
+   * Precio visible por rol del usuario (precioBaseCosto × multiplicador del rol
+   * global); null si el item no tiene precio base. Mismo valor que ve el usuario
+   * en su feed.
+   */
+  precioVisible: number | null;
   /** Posición FIFO del titular (1..3) o índice 1-based si aún no se congela. */
   priorityPosition: number | null;
   /** Vencimiento del turno del titular (ISO) o null si no aplica. */
@@ -380,6 +386,8 @@ export interface AdminBatchDeliverItemResult {
   deliveredClaimId?: string | null;
   deliveredUsername?: string | null;
   deliveredAt?: string;
+  /** Precio visible por rol del item entregado (solo en resultados `ok`); null sin precio. */
+  precioVisible?: number | null;
 }
 
 /** Respuesta de POST /api/admin/pickups/deliver. */
@@ -389,4 +397,6 @@ export interface AdminBatchDeliverResponse {
   results: AdminBatchDeliverItemResult[];
   deliveredCount: number;
   failedCount: number;
+  /** Suma de los `precioVisible` de los items entregados `ok` (0 si ninguno tiene precio). */
+  totalAmount: number;
 }

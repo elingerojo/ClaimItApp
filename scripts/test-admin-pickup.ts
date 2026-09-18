@@ -10,6 +10,7 @@
  *   3. pickup_turns tras expirio del #1: el #2 es el titular activo.
  *   4. ventana_libre: cualquier claim activo del usuario es recogible.
  *   5. Fases terminales (entregado / enviado_a_caridad) nunca son recogibles.
+ *   6. precioVisible por rol (base × multiplicador); null sin precio o sin rol.
  *
  *  Parte B (solo con `--db`, toca la BD de backend/.env):
  *   1. Fuerza de entrega en claim_open (antes de T_inicio): el ADMIN entrega al
@@ -18,6 +19,7 @@
  *   2. Guarda de prioridad: entregar a un usuario que NO es el #1 ⇒ 'not_priority'.
  *   3. `freezeItemIfDue` no re-congela un item ya entregado.
  *   4. pickup_turns tras expirio: se entrega al titular activo (posición siguiente).
+ *   5. precioVisible por rol y suma del lote (contrato que consume el frontend).
  *   Limpia fixtures (cascade borra claims/items) al final.
  *
  * Uso:
@@ -31,6 +33,7 @@ import pool from '../backend/src/config/db.js';
 import type { StoreClaim, StoreItem } from '../backend/src/cache/appStore.js';
 import {
   deliverItemByAdmin,
+  effectiveRoleForUser,
   freezeItemIfDue,
   pickableItemsForUser
 } from '../backend/src/services/queueService.js';
@@ -179,6 +182,52 @@ function testPurePriority(): void {
   // --- A.6 claim_open sin activos ---
   const emptyOpen = item({ id: 'open-3', phase: 'claim_open', queue: [] });
   check('A.6 claim_open sin activos no lista a nadie', pickableItemsForUser([emptyOpen], 'u1').length === 0);
+
+  // --- A.7 precio visible por rol ---
+  const pricedItem = item({
+    id: 'price-1',
+    phase: 'claim_open',
+    precioBaseCosto: 100,
+    queue: [claim({ id: 'c1', userUuid: 'u1', claimedAt: at(1) })]
+  });
+  const asPublico = pickableItemsForUser([pricedItem], 'u1', 'publico');
+  check(
+    'A.7 precioVisible = base × 1.0 para publico',
+    asPublico[0]?.precioVisible === 100,
+    asPublico[0]
+  );
+  const asFamiliares = pickableItemsForUser([pricedItem], 'u1', 'familiares');
+  check(
+    'A.7 precioVisible = base × 0.7 (default) para familiares',
+    asFamiliares[0]?.precioVisible === 70,
+    asFamiliares[0]
+  );
+
+  // --- A.8 sin viewerRole ⇒ null (retrocompatibilidad de las llamadas de 2 args) ---
+  check(
+    'A.8 sin viewerRole el precio queda null',
+    pickableItemsForUser([pricedItem], 'u1')[0]?.precioVisible === null
+  );
+
+  // --- A.9 item sin precio base ⇒ null ---
+  check(
+    'A.9 item sin precio base ⇒ precioVisible null',
+    pickableItemsForUser([openItem], 'u1', 'publico')[0]?.precioVisible === null
+  );
+
+  // --- A.10 suma de la selección (contrato del frontend) ---
+  const otherPriced = item({
+    id: 'price-2',
+    phase: 'claim_open',
+    precioBaseCosto: 100,
+    queue: [claim({ id: 'c2', userUuid: 'u1', claimedAt: at(2) })]
+  });
+  const sumPicks = [
+    ...pickableItemsForUser([pricedItem], 'u1', 'publico'),
+    ...pickableItemsForUser([otherPriced], 'u1', 'familiares')
+  ];
+  const selectedTotal = sumPicks.reduce((s, p) => s + (p.precioVisible ?? 0), 0);
+  check('A.10 suma seleccionada = 170 (100 público + 70 familiares)', selectedTotal === 170, sumPicks);
 }
 
 // ---------------------------------------------------------------------------
@@ -210,12 +259,16 @@ async function createFutureCloseEvent(): Promise<string> {
   return res.rows[0].id as string;
 }
 
-async function createItem(eventId: string, title: string): Promise<string> {
+async function createItem(
+  eventId: string,
+  title: string,
+  precioBase: number | null = null
+): Promise<string> {
   const res = await pool.query(
-    `INSERT INTO items (event_id, title, category, image_urls, visibility_level)
-     VALUES ($1, $2, 'Misc.', '["https://example.com/p.jpg"]'::jsonb, 4)
+    `INSERT INTO items (event_id, title, category, image_urls, visibility_level, precio_base_costo)
+     VALUES ($1, $2, 'Misc.', '["https://example.com/p.jpg"]'::jsonb, 4, $3)
      RETURNING id`,
-    [eventId, title]
+    [eventId, title, precioBase]
   );
   return res.rows[0].id as string;
 }
@@ -325,6 +378,35 @@ async function testDatabase(): Promise<void> {
     if (toNext.ok) {
       check('B.4 earlyPickup=false (ya congelado)', toNext.earlyPickup === false, toNext);
     }
+
+    // --- B.5 precio visible por rol y suma del lote ---
+    const itemPriced = await createItem(eventOpen, `pickup_priced_item_${Date.now()}`, 200);
+    const pricedClaim = (
+      await pool.query(
+        `INSERT INTO claims (item_id, user_uuid, claim_state, role_at_claim, claimed_at)
+         VALUES ($1, $2, 'active', 'publico', NOW())
+         RETURNING id`,
+        [itemPriced, users[2].uuid]
+      )
+    ).rows[0];
+    const roleRow = (
+      await pool.query(`SELECT global_role FROM users WHERE uuid = $1`, [users[2].uuid])
+    ).rows[0];
+    const viewerRole = effectiveRoleForUser(roleRow?.global_role ?? null);
+    const pricedStore = item({
+      id: itemPriced,
+      phase: 'claim_open',
+      precioBaseCosto: 200,
+      queue: [claim({ id: pricedClaim.id, itemId: itemPriced, userUuid: users[2].uuid })]
+    });
+    const pricedPicks = pickableItemsForUser([pricedStore], users[2].uuid, viewerRole);
+    check(
+      'B.5 precioVisible = base × multiplicador del rol (publico = 1.0)',
+      pricedPicks[0]?.precioVisible === 200,
+      pricedPicks[0]
+    );
+    const batchTotal = pricedPicks.reduce((s, p) => s + (p.precioVisible ?? 0), 0);
+    check('B.5 la suma del lote coincide con el total del item', batchTotal === 200, batchTotal);
   } finally {
     // Cascade: borrar items borra claims; luego eventos y usuarios.
     await pool.query(`DELETE FROM items WHERE event_id = ANY($1)`, [[eventOpen, eventTurns]]);
