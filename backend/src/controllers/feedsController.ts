@@ -197,6 +197,15 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
           // Detalle descriptivo editorial (solo informativo; `null` = no
           // proporcionado ⇒ el visitante no renderiza bloque).
           descriptionDetail: item.descriptionDetail ?? null,
+          // Estado físico (SP4): SOLO informativo (decisión 5 del plan): no
+          // altera precio, multiplicadores, visibilidad, fases ni reglas de
+          // claim. `null` = no proporcionado ⇒ el visitante (SP6) no renderiza
+          // el campo.
+          conditionGrade: item.conditionGrade ?? null,
+          conditionPackaging: item.conditionPackaging ?? null,
+          conditionAccessories: item.conditionAccessories ?? null,
+          conditionUsage: item.conditionUsage ?? null,
+          conditionFunctionality: item.conditionFunctionality ?? null,
           category: item.category,
           infoUrl: item.infoUrl,
           imageUrls: item.imageUrls,

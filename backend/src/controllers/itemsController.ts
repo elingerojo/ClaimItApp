@@ -7,7 +7,12 @@ import {
   validateItemInput,
   validateImageUrls,
   validateMarketFields,
-  validateDescriptionDetail
+  validateDescriptionDetail,
+  validateConditionGrade,
+  validateConditionPackaging,
+  validateConditionAccessories,
+  validateConditionUsage,
+  validateConditionFunctionality
 } from '@claimitapp/shared';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 import {
@@ -79,6 +84,23 @@ function normalizeDescriptionDetail(value: unknown): string | null {
   return text.trim() === '' ? null : text;
 }
 
+/**
+ * Normaliza uno de los 5 campos del estado físico (`condition*` → columnas
+ * `items.condition_*`), con el mismo criterio que `descriptionDetail` (SP2a): la
+ * cadena vacía o solo espacios NUNCA se persiste, se guarda como SQL NULL. Los
+ * vocabularios son cerrados y ya fueron validados antes de llegar aquí
+ * (`validateCondition*` / `validateItemInput`), así que un valor no vacío se
+ * conserva tal cual (sin recortar el identificador del catálogo).
+ *
+ * NOTA: `undefined` no llega a este helper en el camino de PATCH — el guard
+ * `!== undefined` decide "no tocar el valor guardado" ANTES de llamarlo.
+ */
+function normalizeConditionValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text === '' ? null : text;
+}
+
 /** Convierte una fila de `items` (RETURNING) a un StoreItem con la cola dada. */
 function toStoreItem(item: any, queue: StoreItem['queue']): StoreItem {
   return {
@@ -87,6 +109,13 @@ function toStoreItem(item: any, queue: StoreItem['queue']): StoreItem {
     title: item.title,
     description: item.description,
     descriptionDetail: item.description_detail ?? null,
+    // Estado físico (SP4): espejo camelCase de items.condition_* (NULL-able,
+    // informativo). `?? null` normaliza tanto NULL de la BD como ausencia.
+    conditionGrade: item.condition_grade ?? null,
+    conditionPackaging: item.condition_packaging ?? null,
+    conditionAccessories: item.condition_accessories ?? null,
+    conditionUsage: item.condition_usage ?? null,
+    conditionFunctionality: item.condition_functionality ?? null,
     category: item.category,
     infoUrl: item.info_url,
     imageUrls: Array.isArray(item.image_urls) ? item.image_urls : [],
@@ -118,6 +147,11 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     title,
     description,
     descriptionDetail,
+    conditionGrade,
+    conditionPackaging,
+    conditionAccessories,
+    conditionUsage,
+    conditionFunctionality,
     category,
     infoUrl,
     imageUrls,
@@ -133,6 +167,11 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     title,
     description,
     descriptionDetail,
+    conditionGrade,
+    conditionPackaging,
+    conditionAccessories,
+    conditionUsage,
+    conditionFunctionality,
     category,
     infoUrl,
     imageUrls
@@ -184,8 +223,11 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
          visibility_level, event_id, precio_base_costo,
          barcode, barcode_type, market_currency,
          market_min_price, market_max_price, market_avg_price,
-         market_offers_count, market_analyzed_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+         market_offers_count, market_analyzed_at,
+         condition_grade, condition_packaging, condition_accessories,
+         condition_usage, condition_functionality)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+              $18, $19, $20, $21, $22)
       RETURNING id, title, description, description_detail, category, info_url, image_urls,
                 status, phase,
                 visibility_level, event_id,
@@ -193,6 +235,8 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
                 barcode, barcode_type, market_currency,
                 market_min_price, market_max_price, market_avg_price,
                 market_offers_count, market_analyzed_at,
+                condition_grade, condition_packaging, condition_accessories,
+                condition_usage, condition_functionality,
                 created_at
     `;
     const result = await pool.query(insertQuery, [
@@ -213,7 +257,14 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
       market.market_max_price ?? null,
       market.market_avg_price ?? null,
       market.market_offers_count ?? null,
-      market.market_analyzed_at ?? null
+      market.market_analyzed_at ?? null,
+      // Estado físico (SP4): vocabulario cerrado; vacío/solo espacios ⇒ NULL
+      // (nunca se persiste la cadena vacía), igual que descriptionDetail.
+      normalizeConditionValue(conditionGrade),
+      normalizeConditionValue(conditionPackaging),
+      normalizeConditionValue(conditionAccessories),
+      normalizeConditionValue(conditionUsage),
+      normalizeConditionValue(conditionFunctionality)
     ]);
 
     const item = result.rows[0];
@@ -239,6 +290,11 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
         title: item.title,
         description: item.description,
         descriptionDetail: item.description_detail ?? null,
+        conditionGrade: item.condition_grade ?? null,
+        conditionPackaging: item.condition_packaging ?? null,
+        conditionAccessories: item.condition_accessories ?? null,
+        conditionUsage: item.condition_usage ?? null,
+        conditionFunctionality: item.condition_functionality ?? null,
         category: item.category,
         infoUrl: item.info_url,
         imageUrls: item.image_urls ?? [],
@@ -271,6 +327,11 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     title,
     description,
     descriptionDetail,
+    conditionGrade,
+    conditionPackaging,
+    conditionAccessories,
+    conditionUsage,
+    conditionFunctionality,
     infoUrl,
     imageUrls,
     visibility_level,
@@ -320,6 +381,31 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     }
   }
 
+  // Estado físico (SP4): se valida SOLO la clave presente (`!== undefined`), de
+  // modo que un PATCH que no manda estos campos conserva el comportamiento
+  // previo; `null` es válido (= limpiar) porque los validadores de SP3 aceptan
+  // `null`/`undefined`. Un valor fuera del vocabulario se rechaza con 400.
+  const conditionErrors: string[] = [];
+  if (conditionGrade !== undefined) {
+    conditionErrors.push(...validateConditionGrade(conditionGrade));
+  }
+  if (conditionPackaging !== undefined) {
+    conditionErrors.push(...validateConditionPackaging(conditionPackaging));
+  }
+  if (conditionAccessories !== undefined) {
+    conditionErrors.push(...validateConditionAccessories(conditionAccessories));
+  }
+  if (conditionUsage !== undefined) {
+    conditionErrors.push(...validateConditionUsage(conditionUsage));
+  }
+  if (conditionFunctionality !== undefined) {
+    conditionErrors.push(...validateConditionFunctionality(conditionFunctionality));
+  }
+  if (conditionErrors.length > 0) {
+    res.status(400).json({ error: 'Validation failed', details: conditionErrors });
+    return;
+  }
+
   const assignments: string[] = [];
   const params: any[] = [];
   const changedFields: Record<string, boolean> = {};
@@ -335,6 +421,32 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
   // (limpieza explícita) guarda SQL NULL, y la cadena vacía también ⇒ NULL.
   if (descriptionDetail !== undefined) {
     set('description_detail', normalizeDescriptionDetail(descriptionDetail), 'descriptionDetail');
+  }
+  // Estado físico (SP4) — misma semántica de PATCH que descriptionDetail:
+  // `undefined` (llave ausente) ⇒ el guard es falso y NO se agrega nada al SET
+  // (no toca el valor guardado); `null` explícito ⇒ SQL NULL; vacío ⇒ NULL.
+  if (conditionGrade !== undefined) {
+    set('condition_grade', normalizeConditionValue(conditionGrade), 'conditionGrade');
+  }
+  if (conditionPackaging !== undefined) {
+    set('condition_packaging', normalizeConditionValue(conditionPackaging), 'conditionPackaging');
+  }
+  if (conditionAccessories !== undefined) {
+    set(
+      'condition_accessories',
+      normalizeConditionValue(conditionAccessories),
+      'conditionAccessories'
+    );
+  }
+  if (conditionUsage !== undefined) {
+    set('condition_usage', normalizeConditionValue(conditionUsage), 'conditionUsage');
+  }
+  if (conditionFunctionality !== undefined) {
+    set(
+      'condition_functionality',
+      normalizeConditionValue(conditionFunctionality),
+      'conditionFunctionality'
+    );
   }
   if (infoUrl !== undefined) set('info_url', infoUrl, 'infoUrl');
   if (imageUrls !== undefined) set('image_urls', JSON.stringify(imageUrls), 'imageUrls');
@@ -406,6 +518,8 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
                 barcode, barcode_type, market_currency,
                 market_min_price, market_max_price, market_avg_price,
                 market_offers_count, market_analyzed_at,
+                condition_grade, condition_packaging, condition_accessories,
+                condition_usage, condition_functionality,
                 created_at
     `;
     const result = await pool.query(updateQuery, params);
@@ -437,6 +551,13 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       title: updatedItem.title,
       description: updatedItem.description,
       descriptionDetail: updatedItem.description_detail ?? null,
+      // Estado físico (SP4): viaja en el broadcast de edición para que el
+      // contrato del cliente pueda aplicarlo; `null` = no proporcionado.
+      conditionGrade: updatedItem.condition_grade ?? null,
+      conditionPackaging: updatedItem.condition_packaging ?? null,
+      conditionAccessories: updatedItem.condition_accessories ?? null,
+      conditionUsage: updatedItem.condition_usage ?? null,
+      conditionFunctionality: updatedItem.condition_functionality ?? null,
       infoUrl: updatedItem.info_url,
       imageUrls: updatedItem.image_urls ?? []
     });
@@ -448,6 +569,11 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
         title: updatedItem.title,
         description: updatedItem.description,
         descriptionDetail: updatedItem.description_detail ?? null,
+        conditionGrade: updatedItem.condition_grade ?? null,
+        conditionPackaging: updatedItem.condition_packaging ?? null,
+        conditionAccessories: updatedItem.condition_accessories ?? null,
+        conditionUsage: updatedItem.condition_usage ?? null,
+        conditionFunctionality: updatedItem.condition_functionality ?? null,
         category: updatedItem.category,
         infoUrl: updatedItem.info_url,
         imageUrls: updatedItem.image_urls ?? [],
@@ -594,6 +720,13 @@ export const getItemDetail = async (req: Request, res: Response): Promise<void> 
     title: item.title,
     description: item.description,
     descriptionDetail: item.descriptionDetail ?? null,
+    // Estado físico (SP4): se lee del store RAM (hidratado por SP3); `null` = no
+    // proporcionado. Informativo: no altera precio/visibilidad/fases.
+    conditionGrade: item.conditionGrade ?? null,
+    conditionPackaging: item.conditionPackaging ?? null,
+    conditionAccessories: item.conditionAccessories ?? null,
+    conditionUsage: item.conditionUsage ?? null,
+    conditionFunctionality: item.conditionFunctionality ?? null,
     category: item.category,
     infoUrl: item.infoUrl,
     imageUrls: item.imageUrls,
@@ -665,6 +798,13 @@ export const listAllAdminItems = async (req: Request, res: Response): Promise<vo
         title: item.title,
         description: item.description,
         descriptionDetail: item.descriptionDetail ?? null,
+        // Estado físico (SP4): mismo contrato que el detalle admin; `null` = no
+        // proporcionado (la UI admin decide cómo pintarlo en SP5).
+        conditionGrade: item.conditionGrade ?? null,
+        conditionPackaging: item.conditionPackaging ?? null,
+        conditionAccessories: item.conditionAccessories ?? null,
+        conditionUsage: item.conditionUsage ?? null,
+        conditionFunctionality: item.conditionFunctionality ?? null,
         category: item.category,
         infoUrl: item.infoUrl,
         imageUrls: item.imageUrls,

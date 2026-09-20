@@ -8,6 +8,11 @@ import {
   Role,
   FixedTimeline,
   FrozenSchedule,
+  ConditionGrade,
+  ConditionPackaging,
+  ConditionAccessories,
+  ConditionUsage,
+  ConditionFunctionality,
   AdminUserSummary,
   AdminPickupListResponse,
   AdminBatchDeliverResponse
@@ -116,6 +121,20 @@ export interface ItemWithQueue extends Item {
    */
   descriptionDetail?: string | null;
   /**
+   * Estado físico del item (`items.condition_*`), capturado a mano por el ADMIN
+   * en SP5 y renderizado al visitante en SP6. Se redeclara explícitamente
+   * (además de heredarlo de `Item`) para que el contrato del feed, del detalle
+   * admin y del listado admin lo haga visible, igual que `descriptionDetail` y
+   * los campos `market*`. `null` (o ausente) ⇒ "no proporcionado" y la UI del
+   * visitante NO renderiza el campo. SOLO informativo: no altera precio,
+   * multiplicadores, visibilidad, fases ni reglas de claim.
+   */
+  conditionGrade?: ConditionGrade | null;
+  conditionPackaging?: ConditionPackaging | null;
+  conditionAccessories?: ConditionAccessories | null;
+  conditionUsage?: ConditionUsage | null;
+  conditionFunctionality?: ConditionFunctionality | null;
+  /**
    * Fase v2 (fuente de verdad del ciclo de vida). El feed/admin siempre lo
    * envía; se declara opcional (lo hereda de `Item`) para no forzar objetos
    * construidos a mano en la zona admin (que se adapta en la Fase 4b).
@@ -207,6 +226,16 @@ interface ItemUpdatedSse {
   description?: string | null;
   /** Detalle descriptivo editorial que viaja en los broadcasts de edición de item. */
   descriptionDetail?: string | null;
+  /**
+   * Estado físico del item que viaja en los broadcasts de edición
+   * (`item_updated`): vocabulario cerrado de `shared/itemCondition.ts`, o `null`
+   * para "limpio / no proporcionado".
+   */
+  conditionGrade?: ConditionGrade | null;
+  conditionPackaging?: ConditionPackaging | null;
+  conditionAccessories?: ConditionAccessories | null;
+  conditionUsage?: ConditionUsage | null;
+  conditionFunctionality?: ConditionFunctionality | null;
   infoUrl?: string | null;
   imageUrls?: string[];
   claimedAt?: string;
@@ -451,6 +480,24 @@ export class InventoryService implements OnDestroy {
             ...(updateData.charityAt !== undefined && { charityAt: updateData.charityAt }),
             ...(updateData.title !== undefined && { title: updateData.title }),
             ...(updateData.description !== undefined && { description: updateData.description }),
+            // Estado físico (SP4): inclusión ADITIVA en el mismo whitelist de
+            // llaves presente (`!== undefined`) que ya usan phase/title/...; no
+            // se toca `descriptionDetail` (SP2) ni la estructura del handler.
+            ...(updateData.conditionGrade !== undefined && {
+              conditionGrade: updateData.conditionGrade
+            }),
+            ...(updateData.conditionPackaging !== undefined && {
+              conditionPackaging: updateData.conditionPackaging
+            }),
+            ...(updateData.conditionAccessories !== undefined && {
+              conditionAccessories: updateData.conditionAccessories
+            }),
+            ...(updateData.conditionUsage !== undefined && {
+              conditionUsage: updateData.conditionUsage
+            }),
+            ...(updateData.conditionFunctionality !== undefined && {
+              conditionFunctionality: updateData.conditionFunctionality
+            }),
             ...(updateData.infoUrl !== undefined && { infoUrl: updateData.infoUrl }),
             ...(updateData.imageUrls !== undefined && { imageUrls: updateData.imageUrls })
           };
