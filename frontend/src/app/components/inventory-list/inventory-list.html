@@ -220,7 +220,7 @@
             @if (item.precioVisible != null) {
               <div class="text-sm font-extrabold text-gray-900 mt-0.5">${{ item.precioVisible | precioEs }}</div>
             }
-            <p class="text-xs text-gray-500 mt-1 line-clamp-2">{{ item.description || 'Sin descripción adicional.' }}</p>
+            <p class="text-xs text-gray-500 mt-1 line-clamp-2"><span class="inline-block align-middle mr-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-px rounded-full bg-violet-100 text-violet-700 border border-violet-200" title="Descripción generada por IA">IA</span>{{ item.description || 'Sin descripción adicional.' }}</p>
 
             <!-- Callouts por fase v2 -->
             @switch (item.phase) {
