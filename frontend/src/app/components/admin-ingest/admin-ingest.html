@@ -192,6 +192,12 @@
           <textarea rows="2" [(ngModel)]="formDescription" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400"></textarea>
         </div>
 
+        <!-- Detalle descriptivo editorial (manual del ADMIN; vacío ⇒ NULL en BD) -->
+        <div>
+          <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ 'Detalle descriptivo' | stripAccents }}</label>
+          <textarea rows="2" [(ngModel)]="formDescriptionDetail" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400"></textarea>
+        </div>
+
         <div>
           <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ 'Link de Información Externa (Goodreads / Amazon)' | stripAccents }}</label>
           <input type="text" [(ngModel)]="formInfoUrl" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono text-blue-600" />
@@ -399,6 +405,12 @@
             <div>
               <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ 'Descripción (IA)' | stripAccents }}</label>
               <textarea rows="2" [(ngModel)]="editDescription" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400"></textarea>
+            </div>
+
+            <!-- Detalle descriptivo editorial (manual del ADMIN; borrar el texto ⇒ NULL) -->
+            <div>
+              <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ 'Detalle descriptivo' | stripAccents }}</label>
+              <textarea rows="2" [(ngModel)]="editDescriptionDetail" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400"></textarea>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -105,6 +105,12 @@ export class AdminIngest implements OnInit {
   // Form signals for AI auto-fill
   readonly formTitle = signal<string>('');
   readonly formDescription = signal<string>('');
+  /**
+   * Detalle descriptivo editorial (`items.description_detail`): lo escribe el
+   * ADMIN a mano en la captura. Se envía como `descriptionDetail` en el POST y
+   * un valor vacío viaja como `null` (la BD lo guarda como `NULL`, nunca `''`).
+   */
+  readonly formDescriptionDetail = signal<string>('');
   readonly formCategory = signal<ItemCategory>('Misc.');
   readonly formInfoUrl = signal<string>('');
   readonly formPrecioBase = signal<number | null>(null);
@@ -125,6 +131,8 @@ export class AdminIngest implements OnInit {
   readonly editingItem = signal<ItemWithQueue | null>(null);
   readonly editTitle = signal<string>('');
   readonly editDescription = signal<string>('');
+  /** Detalle descriptivo editorial del EDITOR (vacío ⇒ PATCH con `null` ⇒ limpia la BD). */
+  readonly editDescriptionDetail = signal<string>('');
   readonly editInfoUrl = signal<string>('');
 
   // Campos adicionales del editor vertical (todo lo que soporta el PATCH admin).
@@ -143,6 +151,7 @@ export class AdminIngest implements OnInit {
     this.captureImages().length > 0 ||
     this.formTitle().trim() !== '' ||
     this.formDescription().trim() !== '' ||
+    this.formDescriptionDetail().trim() !== '' ||
     this.formInfoUrl().trim() !== '' ||
     this.formPrecioBase() != null
   );
@@ -245,6 +254,7 @@ export class AdminIngest implements OnInit {
       this.editImages.set(imageUrls);
       this.editTitle.set(item.title ?? '');
       this.editDescription.set(item.description ?? '');
+      this.editDescriptionDetail.set(item.descriptionDetail ?? '');
       this.editInfoUrl.set(item.infoUrl ?? '');
       this.editEventId.set(item.eventId ?? '');
       this.editPriceBase.set(item.precioBaseCosto != null ? Number(item.precioBaseCosto) : null);
@@ -671,6 +681,8 @@ export class AdminIngest implements OnInit {
         body: JSON.stringify({
           title: this.formTitle(),
           description: this.formDescription(),
+          // Detalle descriptivo: vacío ⇒ `null` (nunca `''`), la clave SIEMPRE viaja.
+          descriptionDetail: this.formDescriptionDetail().trim() === '' ? null : this.formDescriptionDetail(),
           category: this.formCategory(),
           infoUrl: this.formInfoUrl(),
           imageUrls: images,
@@ -696,6 +708,7 @@ export class AdminIngest implements OnInit {
       this.captureImages.set([]);
       this.formTitle.set('');
       this.formDescription.set('');
+      this.formDescriptionDetail.set('');
       this.formCategory.set('Misc.');
       this.formInfoUrl.set('');
       this.formPrecioBase.set(null);
@@ -729,6 +742,9 @@ export class AdminIngest implements OnInit {
     const body: Record<string, any> = {
       title: this.editTitle().trim(),
       description: this.editDescription() === '' ? null : this.editDescription(),
+      // Detalle descriptivo: clave SIEMPRE presente; vacío ⇒ `null` explícito, que
+      // el PATCH del backend interpreta como "limpiar" (undefined = no tocar).
+      descriptionDetail: this.editDescriptionDetail().trim() === '' ? null : this.editDescriptionDetail(),
       infoUrl: this.editInfoUrl() === '' ? null : this.editInfoUrl(),
       imageUrls: this.editImages(),
       event_id: this.editEventId() || null,
@@ -775,6 +791,7 @@ export class AdminIngest implements OnInit {
     this.editImages.set([]);
     this.editTitle.set('');
     this.editDescription.set('');
+    this.editDescriptionDetail.set('');
     this.editInfoUrl.set('');
     this.editEventId.set('');
     this.editPriceBase.set(null);
