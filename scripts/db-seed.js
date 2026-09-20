@@ -18,6 +18,10 @@
  *     bajo el evento de seed con las columnas pertinentes de v2 (phase
  *     'claim_open', status 'available'). Si no existe el archivo, se siembran 5
  *     items demo reales que REUTILIZAN su image_url de Vercel Blob (no huérfana).
+ *   - Estado físico + Detalle descriptivo (SP7): los 5 items demo siembran los
+ *     6 campos nuevos (`description_detail` + los 5 `condition_*`) con valores
+ *     variados para poder ver la matriz §6 del plan; los items preservados
+ *     entran por el MISMO insert con esos 6 campos en NULL (caso 1 de regresión).
  *
  * Debe correr DESPUÉS del rebuild desde cero (init.sql + migraciones 0001-0004).
  * Lee credenciales de backend/.env. Idempotente-ish (ON CONFLICT en la matriz,
@@ -88,6 +92,22 @@ function normalizePreservedRow(r) {
 
 // 5 real demo items: text/category copied from the previous DB, image_url REUSED
 // (solo se usan cuando NO hay items preservados).
+//
+// SP7 — condiciones de ejemplo que cubren la matriz UI de
+// `plans/estado-fisico-item.md` §6. Los items demo siguen siendo 5 (el seed
+// continúa prometiendo 5 items cuando no hay archivo de preservación):
+//   item 1 Audífonos  -> caso 4: los 5 campos del estado físico + detalle
+//   item 2 Jarrón     -> caso 3: estado físico + exactamente 2 calificadores
+//   item 3 Crema      -> caso 2: sólo estado físico (un chip)
+//   item 4 Libro      -> caso 1: los 6 campos nuevos en NULL
+//   item 5 Cinta      -> caso 1: los 6 campos nuevos en NULL
+// (`descriptionDetail` con texto en 2 items y en NULL en 3.)
+//
+// Los códigos son literales CONGELADOS y miembros exactos del vocabulario de
+// `shared/itemCondition.ts` (fuente única del dominio, plan §2.1/§2.2). Se
+// escriben literales —y no un import del módulo compilado `shared/dist`— porque
+// este seeder es un script CommonJS sin paso de build previo; la equivalencia
+// se valida aparte contra el dominio compilado.
 const DEMO_ITEMS = [
   {
     title: 'Audífonos Skullcandy Jib True Wireless',
@@ -99,7 +119,15 @@ const DEMO_ITEMS = [
       'https://3xpihqfobbfbdutq.public.blob.vercel-storage.com/17863973008953426777157718031845-cRm36rFqHftCj1z7AwSTqMeBwrOjk5.jpg'
     ],
     visibilityLevel: 4,
-    baseCost: 300
+    baseCost: 300,
+    // Caso 4 (plan §6): todo lleno -> 5 chips + Detalle descriptivo visible.
+    descriptionDetail:
+      'Incluyen su estuche de carga original y un cable micro USB. Poco uso: sin cortes de audio, sin golpes visibles; la caja original se entrega abierta.',
+    conditionGrade: 'como_nuevo',
+    conditionPackaging: 'original_abierto',
+    conditionAccessories: 'todos',
+    conditionUsage: 'usado',
+    conditionFunctionality: 'como_nuevo'
   },
   {
     title: 'Jarrón de vidrio transparente',
@@ -111,7 +139,13 @@ const DEMO_ITEMS = [
       'https://3xpihqfobbfbdutq.public.blob.vercel-storage.com/17840607625171452375709992991267-CMFJWE7IcdOjGYAALLdDZAH9188wus.jpg'
     ],
     visibilityLevel: 2,
-    baseCost: 80
+    baseCost: 80,
+    // Caso 3 (plan §6): estado físico + exactamente 2 calificadores -> 3 chips.
+    descriptionDetail:
+      'Jarrón de boca ancha y 25 cm de alto, sin fisuras ni despostillados. Se entrega envuelto en papel burbuja, sin la caja original.',
+    conditionGrade: 'excelente',
+    conditionPackaging: 'envuelto_sin_caja',
+    conditionUsage: 'usado'
   },
   {
     title: 'Crema de Avellana con Cacao Keto Morama',
@@ -123,7 +157,10 @@ const DEMO_ITEMS = [
       'https://3xpihqfobbfbdutq.public.blob.vercel-storage.com/17840782177727144257448346994374-I4ngwjcLFqmyGsuxWernpXNCXnPVyU.jpg'
     ],
     visibilityLevel: 3,
-    baseCost: 90
+    baseCost: 90,
+    // Caso 2 (plan §6): sólo estado físico -> un único chip en modal y tarjeta.
+    // `descriptionDetail` no se declara: el `?? null` del insert lo deja en NULL.
+    conditionGrade: 'nuevo_sellado'
   },
   {
     title: 'La Revolución de la Glucosa',
@@ -136,6 +173,9 @@ const DEMO_ITEMS = [
     ],
     visibilityLevel: 4,
     baseCost: 120
+    // Caso 1 (plan §6): sin estado físico ni detalle -> los 6 campos nuevos
+    // quedan en NULL (aquí no se declara ninguna clave: el `?? null` del insert
+    // normaliza la ausencia a NULL y nunca escribe la cadena vacía).
   },
   {
     title: 'Cinta adhesiva de embalaje Frágil',
@@ -148,6 +188,7 @@ const DEMO_ITEMS = [
     ],
     visibilityLevel: 4,
     baseCost: 40
+    // Caso 1 (plan §6): segundo item sin ningún campo nuevo (los 6 en NULL).
   }
 ];
 
@@ -158,13 +199,25 @@ const genCode = (len = 16) => {
   return out;
 };
 
-/** Inserta un item v2 (phase='claim_open', status='available', sin override de fechas). */
+/**
+ * Inserta un item v2 (phase='claim_open', status='available', sin override de fechas).
+ *
+ * SP7: incluye además los 6 campos nuevos (`description_detail` + los 5
+ * `condition_*`), de modo que las condiciones de ejemplo de `DEMO_ITEMS` y los
+ * items preservados viajan por el MISMO camino de inserción. El `?? null`
+ * normaliza `undefined` a `NULL`: un item preservado (fila estilo pre-existente,
+ * sin los campos nuevos en `.db-preserved-items.json`) aterriza con los 6 campos
+ * en NULL (matriz §6, caso 1 de regresión) y nunca se escribe la cadena vacía.
+ */
 async function insertItem(client, eventId, it) {
   await client.query(
     `INSERT INTO items
       (title, description, category, info_url, image_urls, status, phase,
-       visibility_level, event_id, precio_base_costo)
-     VALUES ($1, $2, $3, $4, $5::jsonb, 'available', 'claim_open', $6, $7, $8)`,
+       visibility_level, event_id, precio_base_costo,
+       description_detail, condition_grade, condition_packaging,
+       condition_accessories, condition_usage, condition_functionality)
+     VALUES ($1, $2, $3, $4, $5::jsonb, 'available', 'claim_open', $6, $7, $8,
+             $9, $10, $11, $12, $13, $14)`,
     [
       it.title,
       it.description,
@@ -173,7 +226,13 @@ async function insertItem(client, eventId, it) {
       JSON.stringify(it.imageUrls || []),
       it.visibilityLevel,
       eventId,
-      it.baseCost
+      it.baseCost,
+      it.descriptionDetail ?? null,
+      it.conditionGrade ?? null,
+      it.conditionPackaging ?? null,
+      it.conditionAccessories ?? null,
+      it.conditionUsage ?? null,
+      it.conditionFunctionality ?? null
     ]
   );
 }
