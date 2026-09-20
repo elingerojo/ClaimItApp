@@ -20,6 +20,7 @@ import {
   claimStateEmoji
 } from '../../utils/event-status';
 import { faseSectionVisible } from '../../utils/fase-reveal';
+import { conditionGradeCompactChip } from '../../utils/item-condition';
 
 @Component({
   selector: 'app-inventory-list',
@@ -95,6 +96,12 @@ export class InventoryList implements OnInit {
   readonly phaseEmoji = phaseEmoji;
   readonly phaseChipText = phaseChipText;
   readonly claimStateEmoji = claimStateEmoji;
+  /**
+   * Chip compacto de estado físico (SP6) para la tarjeta del listado. Solo el
+   * grado (los calificadores viven en el detalle) y `null` cuando el ADMIN no lo
+   * capturó, para que la tarjeta no muestre nada (decisión 2 del plan).
+   */
+  readonly conditionGradeCompactChip = conditionGradeCompactChip;
 
   selectEvent(id: string | null): void {
     this.selectedEventId.set(id);

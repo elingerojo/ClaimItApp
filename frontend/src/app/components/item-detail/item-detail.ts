@@ -32,6 +32,7 @@ import {
   tryNativeShare,
   buildWhatsAppInviteUrl
 } from '../../utils/invite-share';
+import { conditionChips } from '../../utils/item-condition';
 
 /** Pestañas disponibles en el detalle del objeto. */
 type DetailTab = 'datos' | 'tiempos' | 'condiciones';
@@ -102,6 +103,12 @@ export class ItemDetail implements OnInit, OnDestroy {
   readonly claimStateLabel = claimStateLabel;
   readonly roleDisplayName = roleDisplayName;
   readonly roleExpiryConsequence = roleExpiryConsequence;
+  /**
+   * Chips del estado físico (SP6) para la pestaña Datos. Las etiquetas y el
+   * orden salen del catálogo compartido (ver `utils/item-condition.ts`); con los
+   * 5 campos en NULL la lista es vacía y la plantilla no pinta contenedor alguno.
+   */
+  readonly conditionChips = conditionChips;
 
   // Tick de 1s para las cuentas regresivas en vivo (se limpia al cerrar el modal).
   private tickTimer: number | null = null;
