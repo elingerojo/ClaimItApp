@@ -129,7 +129,14 @@
                     <!-- Cola forense v2: claim_state emoji/label, posición FIFO, rol y V del turno -->
                     <div class="flex flex-wrap gap-1.5">
                       @for (user of item.queue; track user.id) {
-                        @if (user.claimState === 'active') {
+                        @if (isDeliveredRecipient(item, user)) {
+                          <span
+                            [title]="'Recogido por @' + user.username"
+                            class="inline-flex items-center gap-1 px-2 py-1 border border-emerald-200 bg-emerald-50/60 rounded-lg text-left font-medium text-emerald-800"
+                          >
+                            ✅ Recogido por &#64;{{ user.username }}
+                          </span>
+                        } @else if (user.claimState === 'active' && !isTerminalPhase(item.phase)) {
                           <span
                             [title]="'Turno activo — ' + claimStateLabel(user.claimState) + '. Abre el detalle para expulsarlo.'"
                             class="inline-flex flex-col items-start space-y-0.5 px-2 py-1 border border-amber-200 bg-amber-50/60 rounded-lg text-left"
@@ -160,8 +167,10 @@
                       }
                     </div>
 
-                    <!-- Calendario congelado v2 (V1..V3 / ventana libre / caridad) si existe -->
-                    @if (hasFrozenCalendar(item)) {
+                    <!-- Calendario congelado v2 (V1..V3 / ventana libre / caridad) si existe.
+                         Se OCULTA en fases terminales: en un item entregado/caridad el
+                         calendario es ruido (no hay turnos por recoger). -->
+                    @if (hasFrozenCalendar(item) && !isTerminalPhase(item.phase)) {
                       <div class="w-full flex flex-wrap gap-1 mt-0.5">
                         @for (row of frozenTimelineRows(item); track row.key) {
                           <span

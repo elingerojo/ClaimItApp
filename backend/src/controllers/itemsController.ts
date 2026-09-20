@@ -628,6 +628,10 @@ export const listAllAdminItems = async (req: Request, res: Response): Promise<vo
         marketOffersCount: item.marketOffersCount ?? null,
         marketAnalyzedAt: item.marketAnalyzedAt ?? null,
         frozenSchedule: item.frozenSchedule,
+        // Receptor de una entrega: permite a la UI admin pintar "Recogido por @alias"
+        // (el claim del receptor se cierra como 'void', así que se identifica por id).
+        deliveredClaimId: item.deliveredClaimId ?? null,
+        deliveredAt: item.deliveredAt ?? null,
         eventSummary: event
           ? {
               id: event.id,

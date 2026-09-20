@@ -302,6 +302,26 @@ export class AdminManage {
     return false;
   }
 
+  /**
+   * ¿La fase es terminal (entrega consumada / caridad)? En fases terminales la
+   * cola es SOLO registro forense: no debe pintarse como turno pendiente, para
+   * no mostrar la leyenda "⏰ recoge antes de …" en un item ya entregado (o en
+   * datos legados donde el claim entregado quedó 'active').
+   */
+  isTerminalPhase(phase: string | null | undefined): boolean {
+    return phase === 'entregado' || phase === 'enviado_a_caridad';
+  }
+
+  /**
+   * ¿Este claim es el RECEPTOR de un item ya entregado? Al entregar, el claim
+   * del receptor se cierra como 'void' (forense); para no mostrarlo como
+   * "Sin derecho" gris, se identifica por `items.delivered_claim_id` y se pinta
+   * en verde como "Recogido por @alias".
+   */
+  isDeliveredRecipient(item: ItemWithQueue, claim: QueueEntry): boolean {
+    return item.phase === 'entregado' && !!item.deliveredClaimId && claim.id === item.deliveredClaimId;
+  }
+
   /** ¿Hay calendario congelado (frozen_schedule) para esta fila? */
   hasFrozenCalendar(item: ItemWithQueue): boolean {
     return !!item.frozenSchedule || !!item.temporalState?.linea_tiempo_fija;

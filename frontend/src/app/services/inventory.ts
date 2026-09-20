@@ -115,6 +115,12 @@ export interface ItemWithQueue extends Item {
   frozenAt?: string | null;
   freeWindowOpenedAt?: string | null;
   deliveredAt?: string | null;
+  /**
+   * Claim RECEPTOR de una entrega (`items.delivered_claim_id`). Lo expone el
+   * listado admin para destacar "Recogido por @alias" (el claim se cierra como
+   * 'void', por eso se identifica por id y no por claimState).
+   */
+  deliveredClaimId?: string | null;
   charityAt?: string | null;
   /**
    * Snapshot congelado v2 (`items.frozen_schedule` JSONB) que entrega el

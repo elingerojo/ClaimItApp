@@ -409,9 +409,12 @@ export function patchItem(itemId: string, patch: Partial<StoreItem>): void {
   // Sanidad: mantener la cola del item previo si el parche no la trae.
   if (!('queue' in patch) && !next.queue) next.queue = prev.queue || [];
   items[idx] = next;
-  if (patch.eventId !== undefined && patch.eventId !== prev.eventId) {
-    invalidateEventStatusIndex();
-  }
+  // El índice admin (itemsByEventStatus) guarda REFERENCIAS a los StoreItem, así
+  // que CUALQUIER mutación (phase/status/queue/eventId) debe descartarlo. Antes
+  // solo se invalidaba si cambiaba eventId, por lo que entregas/congelamientos
+  // dejaban el índice con fases viejas (p.ej. el botón "Marcar recogido" visible
+  // en un item ya entregado, o el chip de fase desactualizado).
+  invalidateEventStatusIndex();
 }
 
 /** Aplica un parche a un claim dentro de la cola de un item en RAM. */
@@ -428,6 +431,8 @@ export function patchClaim(
   const queue = item.queue.slice();
   queue[cIdx] = { ...queue[cIdx], ...patch };
   items[idx] = { ...item, queue };
+  // La cola también se serializa en la lista admin: invalida el índice.
+  invalidateEventStatusIndex();
 }
 
 /** Inserta (o actualiza) un claim en la cola de un item en RAM. */
@@ -438,6 +443,8 @@ export function addClaimToItem(itemId: string, claim: StoreClaim): void {
   const exists = item.queue.some(c => c.id === claim.id);
   const queue = exists ? item.queue.map(c => (c.id === claim.id ? claim : c)) : [...item.queue, claim];
   items[idx] = { ...item, queue };
+  // La cola también se serializa en la lista admin: invalida el índice.
+  invalidateEventStatusIndex();
 }
 
 /** Write-through de un item completo (create/update). */
@@ -495,6 +502,9 @@ export function renameUserInStore(userUuid: string, newAlias: string): string[] 
 
   const u = users.get(userUuid);
   if (u) users.set(userUuid, { ...u, alias: newAlias });
+
+  // Los alias aparecen en la cola serializada del listado admin: invalida el índice.
+  if (affectedItemIds.length > 0) invalidateEventStatusIndex();
 
   return affectedItemIds;
 }

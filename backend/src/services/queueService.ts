@@ -1372,26 +1372,23 @@ export async function deliverItemByAdmin(
     const deliveredAt = nowIso();
     const deliveredClaimId = delivered ? delivered.id : null;
 
-    // Void de los demás claims activos (forense, sin sanción).
+    // Cierre forense de TODA la cola activa, INCLUIDO el titular entregado: un
+    // item terminal (entregado / enviado_a_caridad) NO debe conservar claims
+    // 'active', porque generan "turnos fantasma" en la UI admin (leyenda
+    // "⏰ recoge antes de …"), contaminan el ledger (cuenta claims activos) y el
+    // límite de apartados simultáneos. El receptor queda registrado en
+    // items.delivered_claim_id (FK forense) sin sanción. `voided` conserva su
+    // semántica de "los demás" (el titular entregado no se reporta como voided).
+    const deliveredClaimIdToKeep = delivered ? delivered.id : null;
     const voided: Array<{ claimId: string; userUuid: string; username: string | null }> = [];
-    if (delivered) {
-      const others = active.filter((a: any) => a.id !== delivered.id);
-      for (const o of others) {
-        await c.query(
-          `UPDATE claims SET claim_state = 'void', updated_at = NOW() WHERE id = $1`,
-          [o.id]
-        );
+    for (const o of active) {
+      await c.query(
+        `UPDATE claims SET claim_state = 'void', updated_at = NOW() WHERE id = $1`,
+        [o.id]
+      );
+      patchClaim(itemId, o.id, { claimState: 'void' });
+      if (o.id !== deliveredClaimIdToKeep) {
         voided.push({ claimId: o.id, userUuid: o.user_uuid, username: o.username ?? null });
-        patchClaim(itemId, o.id, { claimState: 'void' });
-      }
-    } else {
-      for (const o of active) {
-        await c.query(
-          `UPDATE claims SET claim_state = 'void', updated_at = NOW() WHERE id = $1`,
-          [o.id]
-        );
-        voided.push({ claimId: o.id, userUuid: o.user_uuid, username: o.username ?? null });
-        patchClaim(itemId, o.id, { claimState: 'void' });
       }
     }
 
