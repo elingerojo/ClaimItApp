@@ -108,6 +108,14 @@ export interface ItemWithQueue extends Item {
   visibilityLevel?: number | null;
   eventId?: string | null;
   /**
+   * Detalle descriptivo editorial (`items.description_detail`), capturado a
+   * mano por el ADMIN. Se redeclara explícitamente (además de heredarlo de
+   * `Item`) para que el contrato del feed y del listado admin lo haga visible,
+   * igual que los campos `market*`. `null` (o ausente) ⇒ "no proporcionado" y
+   * la UI del visitante NO renderiza bloque alguno.
+   */
+  descriptionDetail?: string | null;
+  /**
    * Fase v2 (fuente de verdad del ciclo de vida). El feed/admin siempre lo
    * envía; se declara opcional (lo hereda de `Item`) para no forzar objetos
    * construidos a mano en la zona admin (que se adapta en la Fase 4b).
@@ -197,6 +205,8 @@ interface ItemUpdatedSse {
   reason?: string;
   title?: string;
   description?: string | null;
+  /** Detalle descriptivo editorial que viaja en los broadcasts de edición de item. */
+  descriptionDetail?: string | null;
   infoUrl?: string | null;
   imageUrls?: string[];
   claimedAt?: string;

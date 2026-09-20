@@ -148,6 +148,13 @@
             <!-- Descripción completa (sin truncar) -->
             <h3 class="mt-3 text-[10px] font-bold uppercase tracking-wider text-gray-400">Descripción (IA)</h3>
             <p class="mt-3 text-sm text-gray-600">{{ item().description || 'Sin descripción adicional.' }}</p>
+
+            <!-- Detalle descriptivo (editorial, capturado por el ADMIN).
+                 El bloque COMPLETO desaparece del DOM si el valor es null/undefined/vacío. -->
+            @if (item().descriptionDetail?.trim()) {
+              <h3 class="mt-3 text-[10px] font-bold uppercase tracking-wider text-gray-400">Detalle descriptivo</h3>
+              <p class="mt-3 text-sm text-gray-600">{{ item().descriptionDetail }}</p>
+            }
           }
 
           @case ('tiempos') {
