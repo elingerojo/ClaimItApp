@@ -59,6 +59,88 @@ Aplicar la migración sobre una BD viva:
 
 ---
 
+### Estado físico del item y Detalle descriptivo
+
+Cada item puede llevar, además de la descripción generada por IA, **seis campos
+nuevos** que captura el ADMIN. **Todos son opcionales y quedan en `NULL` por
+defecto**: `NULL` significa "no proporcionado" y la UI del visitante **no
+renderiza elemento alguno** para ese campo (sin chip, sin bloque y sin etiqueta
+vacía). Nada rellena retroactivamente los items existentes, así que un catálogo
+sin capturas se ve igual que antes de esta función.
+
+| Columna DB | Contrato (`Item`, camelCase) | Etiqueta UI | Tipo |
+| :--- | :--- | :--- | :--- |
+| `description_detail` | `descriptionDetail` | Detalle descriptivo | `TEXT`, sin mínimo |
+| `condition_grade` | `conditionGrade` | Estado físico | `VARCHAR(20)` + `CHECK` |
+| `condition_packaging` | `conditionPackaging` | Empaque | `VARCHAR(20)` + `CHECK` |
+| `condition_accessories` | `conditionAccessories` | Accesorios | `VARCHAR(20)` + `CHECK` |
+| `condition_usage` | `conditionUsage` | Uso | `VARCHAR(20)` + `CHECK` |
+| `condition_functionality` | `conditionFunctionality` | Funcionamiento | `VARCHAR(20)` + `CHECK` |
+
+**Convención `Descripción (IA)`:** lo que cambió es **sólo la etiqueta de UI** de
+`items.description`, que ahora se lee `Descripción (IA)`; la columna
+`items.description` **NO se renombró** (decisión bloqueada del plan), así que el
+contrato de la API, el feed, los serializadores y el prompt de Gemini quedan
+intactos. El `Detalle descriptivo` (`description_detail`) es un campo
+**independiente** de `items.description`: es texto editorial que el ADMIN captura
+y edita a mano (y que vuelve a `NULL` si se borra el texto).
+
+**El estado físico es input exclusivo del ADMIN:** nunca se deriva de la
+descripción, de la foto ni de otro campo, y Gemini **no sugiere** calificadores
+(decisiones 1 y 6 del plan). Es **sólo informativo**: no altera
+`precio_base_costo`, ni los multiplicadores por rol, ni el orden del catálogo, ni
+la visibilidad, ni las fases, ni las reglas de claim (decisión 5), y no existe
+filtrado ni ordenamiento por condición.
+
+**Catálogo ordenado de Estado físico** (`condition_grade`, mejor → peor; es el
+orden en que se renderiza el `select` del admin):
+
+| rank | code | Etiqueta UI | Composición típica |
+| :--- | :--- | :--- | :--- |
+| 7 | `nuevo_sellado` | Nuevo (sellado) | `nuevo` + `original_sellado` + `todos` + `perfecto` |
+| 6 | `como_nuevo` | Como nuevo | `usado` + `original_abierto` + `todos` + `como_nuevo` |
+| 5 | `excelente` | Excelente | `usado` + `envuelto_sin_caja` + `todos` + `normal` |
+| 4 | `bueno` | Bueno | `usado` + `sin_empaque` + `algunos` + `normal` |
+| 3 | `regular` | Regular | desgaste visible; funciona `normal` |
+| 2 | `con_fallas` | Con fallas | funcionamiento parcial o faltantes importantes |
+| 1 | `para_refacciones` | No funciona (para refacciones) | `no_funciona` |
+
+**Vocabularios de los calificadores** (se persiste el código; la etiqueta es sólo
+de UI):
+
+- `condition_packaging` (**Empaque**): `original_sellado`, `original_abierto`, `envuelto_sin_caja`, `sin_empaque`.
+- `condition_accessories` (**Accesorios**): `todos`, `algunos`, `sin`.
+- `condition_usage` (**Uso**): `nuevo`, `usado`.
+- `condition_functionality` (**Funcionamiento**): `perfecto`, `como_nuevo`, `normal`, `se_desconoce`, `no_funciona`.
+
+Refinamiento del vocabulario de funcionamiento: el identificador interno es
+**`perfecto`** y su etiqueta visible es **`100% (perfecto)`**. Persistir el
+literal `'100'` es **inválido** (un identificador numérico en `VARCHAR(20)` +
+`CHECK` envejece mal): en la BD y en la API viaja `perfecto`, y el "100%" vive
+sólo en la etiqueta.
+
+La fuente única de códigos, etiquetas, orden (rank) y tono de chip es
+[`shared/itemCondition.ts`](shared/itemCondition.ts:1), exportada por
+[`shared/index.ts`](shared/index.ts:1); las migraciones replican los mismos
+`CHECK`.
+
+**Operación:** aplicar las migraciones `0010` y `0011` **antes de arrancar el
+backend**, porque el `SELECT` de hidratación del store en RAM y las sentencias
+`INSERT`/`RETURNING` ya referencian las columnas nuevas (sin ellas el backend
+falla al hidratar y al guardar):
+
+```bash
+node scripts/run-migration.js database/migrations/0010_item_description_detail.sql
+node scripts/run-migration.js database/migrations/0011_item_physical_condition.sql
+```
+
+El seed de demo ([`scripts/db-seed.js`](scripts/db-seed.js:1)) siembra condiciones
+variadas para poder ver la matriz completa en un catálogo recién creado: un item
+con los 5 campos + detalle, uno con estado físico y 2 calificadores, uno sólo con
+estado físico y dos sin ningún campo nuevo.
+
+---
+
 ### Phase 1: The Database Schema & Concurrency Design ( Neon[^neon-term] PostgreSQL[^PostgreSQL-term] )
 
 The foundation of the app is a relational database designed to handle high concurrency and prevent race conditions for high-value items.
