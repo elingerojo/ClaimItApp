@@ -5,7 +5,18 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { InventoryService, ItemWithQueue } from '../../services/inventory';
 import { AdminTokenService } from '../../services/admin-token';
 import { ToastService } from '../../services/toast';
-import { ItemCategory } from '@claimitapp/shared';
+import {
+  ItemCategory,
+  CONDITION_GRADES_ORDERED,
+  CONDITION_PACKAGING_OPTIONS,
+  CONDITION_ACCESSORIES_OPTIONS,
+  CONDITION_USAGE_OPTIONS,
+  CONDITION_FUNCTIONALITY_OPTIONS,
+  CONDITION_PACKAGING_FIELD_LABEL,
+  CONDITION_ACCESSORIES_FIELD_LABEL,
+  CONDITION_USAGE_FIELD_LABEL,
+  CONDITION_FUNCTIONALITY_FIELD_LABEL
+} from '@claimitapp/shared';
 import { upload } from '@vercel/blob/client';
 import { railwayApiUrl } from '../../app.config';
 import { comprimirFoto, extensionParaMime, type FotoComprimida } from '../../utils/image-compress';
@@ -111,6 +122,19 @@ export class AdminIngest implements OnInit {
    * un valor vacío viaja como `null` (la BD lo guarda como `NULL`, nunca `''`).
    */
   readonly formDescriptionDetail = signal<string>('');
+  /**
+   * Estado físico del item (`items.condition_*`) en la CAPTURA: 100% manual, lo
+   * captura el ADMIN (nunca derivado ni sugerido por IA — decisión 6 del plan).
+   * El estado "sin especificar" del modelo es la cadena `''` (opción
+   * "Sin especificar" de cada select) y el payload lo mapea a `null` explícito:
+   * la BD guarda `NULL`, jamás `''`. SOLO informativo: no altera precio,
+   * multiplicadores, visibilidad, fases ni reglas de claim (decisión 5).
+   */
+  readonly formConditionGrade = signal<string>('');
+  readonly formConditionPackaging = signal<string>('');
+  readonly formConditionAccessories = signal<string>('');
+  readonly formConditionUsage = signal<string>('');
+  readonly formConditionFunctionality = signal<string>('');
   readonly formCategory = signal<ItemCategory>('Misc.');
   readonly formInfoUrl = signal<string>('');
   readonly formPrecioBase = signal<number | null>(null);
@@ -133,6 +157,16 @@ export class AdminIngest implements OnInit {
   readonly editDescription = signal<string>('');
   /** Detalle descriptivo editorial del EDITOR (vacío ⇒ PATCH con `null` ⇒ limpia la BD). */
   readonly editDescriptionDetail = signal<string>('');
+  /**
+   * Estado físico del EDITOR (los mismos 5 campos de la captura). Dejar un select
+   * en "Sin especificar" deja `''` y el PATCH manda `null` explícito, de modo que
+   * el valor vuelve a `NULL` (decisión 3: capturar, modificar y volver a `NULL`).
+   */
+  readonly editConditionGrade = signal<string>('');
+  readonly editConditionPackaging = signal<string>('');
+  readonly editConditionAccessories = signal<string>('');
+  readonly editConditionUsage = signal<string>('');
+  readonly editConditionFunctionality = signal<string>('');
   readonly editInfoUrl = signal<string>('');
 
   // Campos adicionales del editor vertical (todo lo que soporta el PATCH admin).
@@ -152,6 +186,11 @@ export class AdminIngest implements OnInit {
     this.formTitle().trim() !== '' ||
     this.formDescription().trim() !== '' ||
     this.formDescriptionDetail().trim() !== '' ||
+    this.formConditionGrade().trim() !== '' ||
+    this.formConditionPackaging().trim() !== '' ||
+    this.formConditionAccessories().trim() !== '' ||
+    this.formConditionUsage().trim() !== '' ||
+    this.formConditionFunctionality().trim() !== '' ||
     this.formInfoUrl().trim() !== '' ||
     this.formPrecioBase() != null
   );
@@ -198,6 +237,43 @@ export class AdminIngest implements OnInit {
     { value: 3, label: '3 — Conocidos' },
     { value: 4, label: '4 — Público' }
   ];
+
+  // ---- Estado físico (SP5): captions y catálogos de los 5 selects ----
+  /**
+   * Captions de los 5 campos del estado físico. `Empaque`, `Accesorios`, `Uso` y
+   * `Funcionamiento` se toman del dominio compartido (fuente única ⇒ anti-deriva,
+   * riesgo §9 del plan). `Estado físico` NO tiene constante en shared
+   * (`CONDITION_GRADE_FIELD_LABEL` no existe y `shared/**` está congelado en este
+   * subplan), así que se declara UNA sola vez aquí; si aparece un segundo
+   * consumidor, se promueve a shared en un SP `feat(shared)` propio.
+   */
+  readonly conditionFieldLabels = {
+    grade: 'Estado físico',
+    packaging: CONDITION_PACKAGING_FIELD_LABEL,
+    accessories: CONDITION_ACCESSORIES_FIELD_LABEL,
+    usage: CONDITION_USAGE_FIELD_LABEL,
+    functionality: CONDITION_FUNCTIONALITY_FIELD_LABEL
+  } as const;
+
+  /**
+   * Opciones de `Estado físico` en el ORDEN DEL CATÁLOGO (rank 7 → 1: `Nuevo
+   * (sellado)` primero, `No funciona (para refacciones)` al final). Se DERIVA de
+   * `CONDITION_GRADES_ORDERED` (que ordena por `rank` descendente), sin lista
+   * paralela que pueda desincronizarse.
+   */
+  readonly conditionGradeOptions = CONDITION_GRADES_ORDERED.map(entry => ({
+    value: entry.code,
+    label: entry.label
+  }));
+
+  /**
+   * Opciones de los 4 calificadores en el orden declarado en shared (§2.2 del
+   * plan). Se importan tal cual: no se reescriben etiquetas ni valores aquí.
+   */
+  readonly conditionPackagingOptions = CONDITION_PACKAGING_OPTIONS;
+  readonly conditionAccessoriesOptions = CONDITION_ACCESSORIES_OPTIONS;
+  readonly conditionUsageOptions = CONDITION_USAGE_OPTIONS;
+  readonly conditionFunctionalityOptions = CONDITION_FUNCTIONALITY_OPTIONS;
 
   private readonly apiUrl = railwayApiUrl;
 
@@ -255,6 +331,13 @@ export class AdminIngest implements OnInit {
       this.editTitle.set(item.title ?? '');
       this.editDescription.set(item.description ?? '');
       this.editDescriptionDetail.set(item.descriptionDetail ?? '');
+      // Estado físico: `null`/ausente ⇒ '' , que equivale a la opción
+      // "Sin especificar" de cada select del editor (decisión 3).
+      this.editConditionGrade.set(item.conditionGrade ?? '');
+      this.editConditionPackaging.set(item.conditionPackaging ?? '');
+      this.editConditionAccessories.set(item.conditionAccessories ?? '');
+      this.editConditionUsage.set(item.conditionUsage ?? '');
+      this.editConditionFunctionality.set(item.conditionFunctionality ?? '');
       this.editInfoUrl.set(item.infoUrl ?? '');
       this.editEventId.set(item.eventId ?? '');
       this.editPriceBase.set(item.precioBaseCosto != null ? Number(item.precioBaseCosto) : null);
@@ -683,6 +766,14 @@ export class AdminIngest implements OnInit {
           description: this.formDescription(),
           // Detalle descriptivo: vacío ⇒ `null` (nunca `''`), la clave SIEMPRE viaja.
           descriptionDetail: this.formDescriptionDetail().trim() === '' ? null : this.formDescriptionDetail(),
+          // Estado físico (SP5): las 5 claves SIEMPRE viajan; "Sin especificar"
+          // (`''`) ⇒ `null` explícito, nunca una cadena vacía ni una omisión.
+          conditionGrade: this.formConditionGrade().trim() === '' ? null : this.formConditionGrade(),
+          conditionPackaging: this.formConditionPackaging().trim() === '' ? null : this.formConditionPackaging(),
+          conditionAccessories: this.formConditionAccessories().trim() === '' ? null : this.formConditionAccessories(),
+          conditionUsage: this.formConditionUsage().trim() === '' ? null : this.formConditionUsage(),
+          conditionFunctionality:
+            this.formConditionFunctionality().trim() === '' ? null : this.formConditionFunctionality(),
           category: this.formCategory(),
           infoUrl: this.formInfoUrl(),
           imageUrls: images,
@@ -709,6 +800,11 @@ export class AdminIngest implements OnInit {
       this.formTitle.set('');
       this.formDescription.set('');
       this.formDescriptionDetail.set('');
+      this.formConditionGrade.set('');
+      this.formConditionPackaging.set('');
+      this.formConditionAccessories.set('');
+      this.formConditionUsage.set('');
+      this.formConditionFunctionality.set('');
       this.formCategory.set('Misc.');
       this.formInfoUrl.set('');
       this.formPrecioBase.set(null);
@@ -745,6 +841,15 @@ export class AdminIngest implements OnInit {
       // Detalle descriptivo: clave SIEMPRE presente; vacío ⇒ `null` explícito, que
       // el PATCH del backend interpreta como "limpiar" (undefined = no tocar).
       descriptionDetail: this.editDescriptionDetail().trim() === '' ? null : this.editDescriptionDetail(),
+      // Estado físico (SP5): claves INCONDICIONALES (jamás omitidas). Vaciarlas en
+      // el editor viaja como `null` explícito ⇒ el backend limpia la BD; omitirlas
+      // (undefined) significaría "no tocar" y conservaría el valor anterior.
+      conditionGrade: this.editConditionGrade().trim() === '' ? null : this.editConditionGrade(),
+      conditionPackaging: this.editConditionPackaging().trim() === '' ? null : this.editConditionPackaging(),
+      conditionAccessories: this.editConditionAccessories().trim() === '' ? null : this.editConditionAccessories(),
+      conditionUsage: this.editConditionUsage().trim() === '' ? null : this.editConditionUsage(),
+      conditionFunctionality:
+        this.editConditionFunctionality().trim() === '' ? null : this.editConditionFunctionality(),
       infoUrl: this.editInfoUrl() === '' ? null : this.editInfoUrl(),
       imageUrls: this.editImages(),
       event_id: this.editEventId() || null,
@@ -792,6 +897,11 @@ export class AdminIngest implements OnInit {
     this.editTitle.set('');
     this.editDescription.set('');
     this.editDescriptionDetail.set('');
+    this.editConditionGrade.set('');
+    this.editConditionPackaging.set('');
+    this.editConditionAccessories.set('');
+    this.editConditionUsage.set('');
+    this.editConditionFunctionality.set('');
     this.editInfoUrl.set('');
     this.editEventId.set('');
     this.editPriceBase.set(null);

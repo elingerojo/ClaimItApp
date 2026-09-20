@@ -198,6 +198,60 @@
           <textarea rows="2" [(ngModel)]="formDescriptionDetail" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400"></textarea>
         </div>
 
+        <!-- Estado físico (SP5): captura manual del ADMIN, informativa. "Sin
+             especificar" guarda NULL en BD y no se renderiza al visitante.
+             Opciones derivadas del catálogo compartido (nunca literales aquí). -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ conditionFieldLabels.grade | stripAccents }}</label>
+            <select [(ngModel)]="formConditionGrade" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white">
+              <option value="">Sin especificar</option>
+              @for (opt of conditionGradeOptions; track opt.value) {
+                <option [value]="opt.value">{{ opt.label }}</option>
+              }
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ conditionFieldLabels.packaging | stripAccents }}</label>
+            <select [(ngModel)]="formConditionPackaging" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white">
+              <option value="">Sin especificar</option>
+              @for (opt of conditionPackagingOptions; track opt.value) {
+                <option [value]="opt.value">{{ opt.label }}</option>
+              }
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ conditionFieldLabels.accessories | stripAccents }}</label>
+            <select [(ngModel)]="formConditionAccessories" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white">
+              <option value="">Sin especificar</option>
+              @for (opt of conditionAccessoriesOptions; track opt.value) {
+                <option [value]="opt.value">{{ opt.label }}</option>
+              }
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ conditionFieldLabels.usage | stripAccents }}</label>
+            <select [(ngModel)]="formConditionUsage" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white">
+              <option value="">Sin especificar</option>
+              @for (opt of conditionUsageOptions; track opt.value) {
+                <option [value]="opt.value">{{ opt.label }}</option>
+              }
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ conditionFieldLabels.functionality | stripAccents }}</label>
+            <select [(ngModel)]="formConditionFunctionality" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white">
+              <option value="">Sin especificar</option>
+              @for (opt of conditionFunctionalityOptions; track opt.value) {
+                <option [value]="opt.value">{{ opt.label }}</option>
+              }
+            </select>
+          </div>
+        </div>
+        <p class="text-[10px] text-gray-400">
+          Estado físico: solo informativo (no altera precio ni reglas de claim). "Sin especificar" guarda NULL y no se muestra al visitante.
+        </p>
+
         <div>
           <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ 'Link de Información Externa (Goodreads / Amazon)' | stripAccents }}</label>
           <input type="text" [(ngModel)]="formInfoUrl" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 font-mono text-blue-600" />
@@ -411,6 +465,56 @@
             <div>
               <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ 'Detalle descriptivo' | stripAccents }}</label>
               <textarea rows="2" [(ngModel)]="editDescriptionDetail" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400"></textarea>
+            </div>
+
+            <!-- Estado físico (SP5): editor manual del ADMIN. Volver a
+                 "Sin especificar" ⇒ PATCH con `null` explícito ⇒ NULL en BD. -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ conditionFieldLabels.grade | stripAccents }}</label>
+                <select [(ngModel)]="editConditionGrade" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white">
+                  <option value="">Sin especificar</option>
+                  @for (opt of conditionGradeOptions; track opt.value) {
+                    <option [value]="opt.value">{{ opt.label }}</option>
+                  }
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ conditionFieldLabels.packaging | stripAccents }}</label>
+                <select [(ngModel)]="editConditionPackaging" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white">
+                  <option value="">Sin especificar</option>
+                  @for (opt of conditionPackagingOptions; track opt.value) {
+                    <option [value]="opt.value">{{ opt.label }}</option>
+                  }
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ conditionFieldLabels.accessories | stripAccents }}</label>
+                <select [(ngModel)]="editConditionAccessories" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white">
+                  <option value="">Sin especificar</option>
+                  @for (opt of conditionAccessoriesOptions; track opt.value) {
+                    <option [value]="opt.value">{{ opt.label }}</option>
+                  }
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ conditionFieldLabels.usage | stripAccents }}</label>
+                <select [(ngModel)]="editConditionUsage" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white">
+                  <option value="">Sin especificar</option>
+                  @for (opt of conditionUsageOptions; track opt.value) {
+                    <option [value]="opt.value">{{ opt.label }}</option>
+                  }
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{{ conditionFieldLabels.functionality | stripAccents }}</label>
+                <select [(ngModel)]="editConditionFunctionality" class="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white">
+                  <option value="">Sin especificar</option>
+                  @for (opt of conditionFunctionalityOptions; track opt.value) {
+                    <option [value]="opt.value">{{ opt.label }}</option>
+                  }
+                </select>
+              </div>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
