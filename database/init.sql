@@ -126,6 +126,10 @@ CREATE TABLE items (
   event_id UUID NOT NULL REFERENCES events (id) ON DELETE RESTRICT, -- event-first
   title VARCHAR(255) NOT NULL,
   description TEXT,
+  -- Detalle descriptivo editorial: lo captura el ADMIN a mano y es independiente
+  -- de la descripción IA de `description`. NULL = no proporcionado ⇒ la UI del
+  -- visitante no renderiza bloque. Sin mínimo de longitud ni CHECK (migración 0010).
+  description_detail TEXT,
   category item_category NOT NULL,
   info_url TEXT,
   image_urls JSONB NOT NULL DEFAULT '[]'::jsonb,  -- arreglo ordenado de fotos
