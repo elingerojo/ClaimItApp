@@ -39,6 +39,52 @@ export type ItemCategory =
 export type BarcodeType = 'UPC' | 'EAN' | 'ASIN' | 'ISBN';
 
 /**
+ * Estado físico del item (`items.condition_grade`): catálogo ORDENADO de mejor a
+ * peor (rank 7→1), 100% manual (lo captura el ADMIN; nunca derivado, nunca IA) y
+ * SOLO informativo (no altera precio, multiplicadores, visibilidad, fases ni
+ * reglas de claim).
+ *
+ * El orden de render, las etiquetas ES, el tono de chip y la composición típica
+ * documentada viven en `shared/itemCondition.ts` (fuente única del catálogo);
+ * aquí solo se declara el vocabulario. Dirección de importación: itemCondition.ts
+ * importa de types.ts, NUNCA al revés (evita un ciclo).
+ */
+export type ConditionGrade =
+  | 'nuevo_sellado'
+  | 'como_nuevo'
+  | 'excelente'
+  | 'bueno'
+  | 'regular'
+  | 'con_fallas'
+  | 'para_refacciones';
+
+/** Empaque del item (`items.condition_packaging`). */
+export type ConditionPackaging =
+  | 'original_sellado'
+  | 'original_abierto'
+  | 'envuelto_sin_caja'
+  | 'sin_empaque';
+
+/** Accesorios incluidos (`items.condition_accessories`). */
+export type ConditionAccessories = 'todos' | 'algunos' | 'sin';
+
+/** Uso previo (`items.condition_usage`). */
+export type ConditionUsage = 'nuevo' | 'usado';
+
+/**
+ * Funcionamiento (`items.condition_functionality`). El identificador interno es
+ * `perfecto` y NO el literal `'100'` propuesto inicialmente: un identificador
+ * numérico en `VARCHAR + CHECK` envejece mal (nota de refinamiento, plan §2.2);
+ * la etiqueta de UI sigue siendo "100% (perfecto)".
+ */
+export type ConditionFunctionality =
+  | 'perfecto'
+  | 'como_nuevo'
+  | 'normal'
+  | 'se_desconoce'
+  | 'no_funciona';
+
+/**
  * Estado LEGACY `items.status` (available | waitlist_open | unavailable).
  * Se conserva como columna de lectura para no romper contratos actuales; el
  * ciclo de vida v2 lo maneja `items.phase` (ItemPhase).
@@ -106,6 +152,16 @@ export interface Item {
    * renderizar bloque alguno para este campo.
    */
   descriptionDetail?: string | null;
+  // ---- Estado físico (columna items.condition_*; captura manual del ADMIN).
+  // Espejo camelCase de columnas `VARCHAR(20)` + CHECK. Todos opcionales y
+  // NULL-ables: `null` (o ausente) = "no proporcionado" ⇒ la UI del visitante NO
+  // debe renderizar el campo. Vocabulario en types.ts; catálogo ordenado,
+  // etiquetas ES y tono de chip en shared/itemCondition.ts.
+  conditionGrade?: ConditionGrade | null;
+  conditionPackaging?: ConditionPackaging | null;
+  conditionAccessories?: ConditionAccessories | null;
+  conditionUsage?: ConditionUsage | null;
+  conditionFunctionality?: ConditionFunctionality | null;
   category: ItemCategory;
   infoUrl: string | null;
   /**

@@ -21,6 +21,12 @@
 export {
   DESCRIPTION_DETAIL_MAX_LENGTH,
   validateDescriptionDetail,
+  validateConditionGrade,
+  validateConditionPackaging,
+  validateConditionAccessories,
+  validateConditionUsage,
+  validateConditionFunctionality,
+  validateItemConditionFields,
   validateItemInput,
   validateClaimInput,
   validateEmailFormat,
@@ -93,6 +99,49 @@ export type {
   BuildPickupScheduleInput,
   BuildFrozenScheduleInput
 } from './eventHelpers.js';
+
+// Item physical condition domain (SP3): catálogo ordenado de `condition_grade`
+// (rank 7→1), vocabularios de los 4 calificadores, etiquetas ES y helpers de
+// orden/búsqueda/tono. Dominio agnóstico de framework (sin clases CSS).
+export {
+  CONDITION_GRADE_TONES,
+  CONDITION_GRADE_CATALOG,
+  CONDITION_GRADES_ORDERED,
+  CONDITION_GRADE_ORDER,
+  getConditionGradeEntry,
+  isConditionGrade,
+  conditionGradeLabel,
+  conditionGradeTone,
+  CONDITION_PACKAGING_FIELD_LABEL,
+  CONDITION_PACKAGING_VALUES,
+  CONDITION_PACKAGING_LABELS,
+  CONDITION_PACKAGING_OPTIONS,
+  isConditionPackaging,
+  CONDITION_ACCESSORIES_FIELD_LABEL,
+  CONDITION_ACCESSORIES_VALUES,
+  CONDITION_ACCESSORIES_LABELS,
+  CONDITION_ACCESSORIES_OPTIONS,
+  isConditionAccessories,
+  CONDITION_USAGE_FIELD_LABEL,
+  CONDITION_USAGE_VALUES,
+  CONDITION_USAGE_LABELS,
+  CONDITION_USAGE_OPTIONS,
+  isConditionUsage,
+  CONDITION_FUNCTIONALITY_FIELD_LABEL,
+  CONDITION_FUNCTIONALITY_VALUES,
+  CONDITION_FUNCTIONALITY_LABELS,
+  CONDITION_FUNCTIONALITY_OPTIONS,
+  isConditionFunctionality
+} from './itemCondition.js';
+
+export { CONDITION_COLUMN_BY_FIELD } from './itemCondition.js';
+
+export type {
+  ConditionGradeTone,
+  ConditionGradeEntry,
+  ConditionQualifierOption,
+  ConditionFieldName
+} from './itemCondition.js';
 
 // Shared Types
 export * from './types.js';

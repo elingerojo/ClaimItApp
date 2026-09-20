@@ -16,6 +16,19 @@
  * los cambia).
  */
 
+import {
+  CONDITION_ACCESSORIES_VALUES,
+  CONDITION_FUNCTIONALITY_VALUES,
+  CONDITION_GRADE_ORDER,
+  CONDITION_PACKAGING_VALUES,
+  CONDITION_USAGE_VALUES,
+  isConditionAccessories,
+  isConditionFunctionality,
+  isConditionGrade,
+  isConditionPackaging,
+  isConditionUsage
+} from './itemCondition.js';
+
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
@@ -58,6 +71,99 @@ export function validateDescriptionDetail(value: unknown): string[] {
   return [];
 }
 
+// ---------------------------------------------------------------------------
+// Estado físico del item (SP3): validación OPCIONAL de vocabulario
+// ---------------------------------------------------------------------------
+
+/**
+ * Helper reutilizable: valida que `value` pertenezca a un vocabulario cerrado.
+ *
+ * Contrato (plan §2.1 y §2.2, todos los campos son opcionales y NULL-ables):
+ *  - `null` / `undefined` = "no proporcionado" (o "limpiar" en un PATCH) ⇒ válido.
+ *  - Cualquier valor fuera del vocabulario ⇒ rechazado (incluye no-strings y
+ *    variantes de caja: 'EXCELENTE' no es 'excelente').
+ * Devuelve la lista de errores (vacía cuando es válido).
+ */
+function validateVocabulary(
+  value: unknown,
+  field: string,
+  isMember: (candidate: unknown) => boolean,
+  allowed: readonly string[]
+): string[] {
+  if (value === null || value === undefined) return [];
+  if (typeof value === 'string' && isMember(value)) return [];
+  return [`${field}: must be one of ${allowed.join('/')} (or null)`];
+}
+
+/** Valida el campo OPCIONAL `conditionGrade` contra el catálogo ordenado. */
+export function validateConditionGrade(value: unknown): string[] {
+  return validateVocabulary(value, 'conditionGrade', isConditionGrade, CONDITION_GRADE_ORDER);
+}
+
+/** Valida el campo OPCIONAL `conditionPackaging` (empaque). */
+export function validateConditionPackaging(value: unknown): string[] {
+  return validateVocabulary(
+    value,
+    'conditionPackaging',
+    isConditionPackaging,
+    CONDITION_PACKAGING_VALUES
+  );
+}
+
+/** Valida el campo OPCIONAL `conditionAccessories` (accesorios). */
+export function validateConditionAccessories(value: unknown): string[] {
+  return validateVocabulary(
+    value,
+    'conditionAccessories',
+    isConditionAccessories,
+    CONDITION_ACCESSORIES_VALUES
+  );
+}
+
+/** Valida el campo OPCIONAL `conditionUsage` (uso). */
+export function validateConditionUsage(value: unknown): string[] {
+  return validateVocabulary(value, 'conditionUsage', isConditionUsage, CONDITION_USAGE_VALUES);
+}
+
+/** Valida el campo OPCIONAL `conditionFunctionality` (funcionamiento). */
+export function validateConditionFunctionality(value: unknown): string[] {
+  return validateVocabulary(
+    value,
+    'conditionFunctionality',
+    isConditionFunctionality,
+    CONDITION_FUNCTIONALITY_VALUES
+  );
+}
+
+/**
+ * Valida de una vez los 5 campos opcionales del estado físico.
+ *
+ * Solo se valida la clave que el llamador envía (`!== undefined`), igual que el
+ * UPDATE parcial: un llamador que no manda ninguna de estas claves obtiene `[]`
+ * y conserva EXACTAMENTE el comportamiento previo. Ningún campo es obligatorio.
+ */
+export function validateItemConditionFields(data: any): string[] {
+  const errors: string[] = [];
+
+  if (data?.conditionGrade !== undefined) {
+    errors.push(...validateConditionGrade(data.conditionGrade));
+  }
+  if (data?.conditionPackaging !== undefined) {
+    errors.push(...validateConditionPackaging(data.conditionPackaging));
+  }
+  if (data?.conditionAccessories !== undefined) {
+    errors.push(...validateConditionAccessories(data.conditionAccessories));
+  }
+  if (data?.conditionUsage !== undefined) {
+    errors.push(...validateConditionUsage(data.conditionUsage));
+  }
+  if (data?.conditionFunctionality !== undefined) {
+    errors.push(...validateConditionFunctionality(data.conditionFunctionality));
+  }
+
+  return errors;
+}
+
 /**
  * Validate item creation/update input
  */
@@ -90,6 +196,12 @@ export function validateItemInput(data: any): ValidationResult {
   if (data.descriptionDetail !== undefined) {
     errors.push(...validateDescriptionDetail(data.descriptionDetail));
   }
+
+  // Campos OPCIONALES del estado físico (SP3). Igual que arriba: solo se validan
+  // cuando el llamador envía la clave (`null` es válido = limpiar), así que los
+  // llamadores que no mandan estas claves conservan el comportamiento previo y
+  // ningún campo se vuelve obligatorio.
+  errors.push(...validateItemConditionFields(data));
 
   // Conditional validation for Roles/Events feature
   if (data.visibility_level !== undefined) {
