@@ -3,7 +3,12 @@ import pool from '../config/db.js';
 import type { PoolClient } from 'pg';
 import type { ItemPhase } from '@claimitapp/shared';
 import { broadcastSseEvent } from '../config/sse.js';
-import { validateItemInput, validateImageUrls, validateMarketFields } from '@claimitapp/shared';
+import {
+  validateItemInput,
+  validateImageUrls,
+  validateMarketFields,
+  validateDescriptionDetail
+} from '@claimitapp/shared';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
 import {
   getItemById,
@@ -62,6 +67,18 @@ function normalizeMarketPayload(body: any): Record<string, any> {
   return out;
 }
 
+/**
+ * Normaliza el detalle descriptivo (`descriptionDetail` → `items.description_detail`).
+ * - `null` / `undefined` / cadena vacía o solo espacios ⇒ `null` ("no proporcionado").
+ * - Cualquier otro texto se guarda tal cual (sin recortar contenido real).
+ * La cadena vacía NUNCA se persiste: el vacío se guarda como SQL NULL (SP2a).
+ */
+function normalizeDescriptionDetail(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value);
+  return text.trim() === '' ? null : text;
+}
+
 /** Convierte una fila de `items` (RETURNING) a un StoreItem con la cola dada. */
 function toStoreItem(item: any, queue: StoreItem['queue']): StoreItem {
   return {
@@ -69,6 +86,7 @@ function toStoreItem(item: any, queue: StoreItem['queue']): StoreItem {
     eventId: item.event_id ?? null,
     title: item.title,
     description: item.description,
+    descriptionDetail: item.description_detail ?? null,
     category: item.category,
     infoUrl: item.info_url,
     imageUrls: Array.isArray(item.image_urls) ? item.image_urls : [],
@@ -99,6 +117,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
   const {
     title,
     description,
+    descriptionDetail,
     category,
     infoUrl,
     imageUrls,
@@ -108,7 +127,16 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
   } = req.body;
   const adminSession = (req as any).adminSession;
 
-  const validation = validateItemInput({ title, description, category, infoUrl, imageUrls });
+  // `descriptionDetail` es opcional: acepta null/undefined y solo se rechaza si
+  // un valor no nulo excede DESCRIPTION_DETAIL_MAX_LENGTH.
+  const validation = validateItemInput({
+    title,
+    description,
+    descriptionDetail,
+    category,
+    infoUrl,
+    imageUrls
+  });
   if (!validation.valid) {
     res.status(400).json({
       error: 'Validation failed',
@@ -152,13 +180,14 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
 
     const insertQuery = `
       INSERT INTO items
-        (title, description, category, info_url, image_urls,
+        (title, description, description_detail, category, info_url, image_urls,
          visibility_level, event_id, precio_base_costo,
          barcode, barcode_type, market_currency,
          market_min_price, market_max_price, market_avg_price,
          market_offers_count, market_analyzed_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-      RETURNING id, title, description, category, info_url, image_urls, status, phase,
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      RETURNING id, title, description, description_detail, category, info_url, image_urls,
+                status, phase,
                 visibility_level, event_id,
                 precio_base_costo,
                 barcode, barcode_type, market_currency,
@@ -169,6 +198,8 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
     const result = await pool.query(insertQuery, [
       title,
       description || null,
+      // Vacío/solo espacios ⇒ NULL (nunca se persiste la cadena vacía).
+      normalizeDescriptionDetail(descriptionDetail),
       category,
       infoUrl || null,
       JSON.stringify(imageUrls),
@@ -207,6 +238,7 @@ export const createItem = async (req: Request, res: Response): Promise<void> => 
         id: item.id,
         title: item.title,
         description: item.description,
+        descriptionDetail: item.description_detail ?? null,
         category: item.category,
         infoUrl: item.info_url,
         imageUrls: item.image_urls ?? [],
@@ -238,6 +270,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
   const {
     title,
     description,
+    descriptionDetail,
     infoUrl,
     imageUrls,
     visibility_level,
@@ -277,6 +310,16 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
+  // Detalle descriptivo opcional: `null` es válido (limpiar); solo se rechaza si
+  // un valor no nulo excede DESCRIPTION_DETAIL_MAX_LENGTH.
+  if (descriptionDetail !== undefined) {
+    const detailErrors = validateDescriptionDetail(descriptionDetail);
+    if (detailErrors.length > 0) {
+      res.status(400).json({ error: 'Validation failed', details: detailErrors });
+      return;
+    }
+  }
+
   const assignments: string[] = [];
   const params: any[] = [];
   const changedFields: Record<string, boolean> = {};
@@ -288,6 +331,11 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
 
   if (title !== undefined) set('title', title, 'title');
   if (description !== undefined) set('description', description, 'description');
+  // PATCH: `undefined` (llave ausente) NO toca el valor guardado; `null`
+  // (limpieza explícita) guarda SQL NULL, y la cadena vacía también ⇒ NULL.
+  if (descriptionDetail !== undefined) {
+    set('description_detail', normalizeDescriptionDetail(descriptionDetail), 'descriptionDetail');
+  }
   if (infoUrl !== undefined) set('info_url', infoUrl, 'infoUrl');
   if (imageUrls !== undefined) set('image_urls', JSON.stringify(imageUrls), 'imageUrls');
   if (visibility_level !== undefined) set('visibility_level', visibility_level, 'visibility_level');
@@ -351,7 +399,8 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       SET ${assignments.join(', ')},
           updated_at = NOW()
       WHERE id = $${params.length}
-      RETURNING id, title, description, category, info_url, image_urls, status, phase,
+      RETURNING id, title, description, description_detail, category, info_url, image_urls,
+                status, phase,
                 visibility_level, event_id,
                 precio_base_costo,
                 barcode, barcode_type, market_currency,
@@ -387,6 +436,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
       phase: updatedItem.phase,
       title: updatedItem.title,
       description: updatedItem.description,
+      descriptionDetail: updatedItem.description_detail ?? null,
       infoUrl: updatedItem.info_url,
       imageUrls: updatedItem.image_urls ?? []
     });
@@ -397,6 +447,7 @@ export const updateItem = async (req: Request, res: Response): Promise<void> => 
         id: updatedItem.id,
         title: updatedItem.title,
         description: updatedItem.description,
+        descriptionDetail: updatedItem.description_detail ?? null,
         category: updatedItem.category,
         infoUrl: updatedItem.info_url,
         imageUrls: updatedItem.image_urls ?? [],
@@ -542,6 +593,7 @@ export const getItemDetail = async (req: Request, res: Response): Promise<void> 
     id: item.id,
     title: item.title,
     description: item.description,
+    descriptionDetail: item.descriptionDetail ?? null,
     category: item.category,
     infoUrl: item.infoUrl,
     imageUrls: item.imageUrls,
@@ -612,6 +664,7 @@ export const listAllAdminItems = async (req: Request, res: Response): Promise<vo
         id: item.id,
         title: item.title,
         description: item.description,
+        descriptionDetail: item.descriptionDetail ?? null,
         category: item.category,
         infoUrl: item.infoUrl,
         imageUrls: item.imageUrls,

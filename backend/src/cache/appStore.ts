@@ -57,6 +57,8 @@ export interface StoreItem {
   eventId: string | null;
   title: string;
   description: string | null;
+  /** Detalle descriptivo editorial capturado por el ADMIN (nullable). */
+  descriptionDetail?: string | null;
   category: string;
   infoUrl: string | null;
   /** Arreglo ordenado de URLs de fotos del Item (JSONB image_urls). */
@@ -185,7 +187,8 @@ export async function rehydrateAll(): Promise<boolean> {
   try {
     // 1. Items (columnas v2)
     const itemsResult = await pool.query(
-      `SELECT id, event_id, title, description, category, info_url, image_urls,
+      `SELECT id, event_id, title, description, description_detail, category,
+              info_url, image_urls,
               status, phase, visibility_level, precio_base_costo,
               barcode, barcode_type, market_currency,
               market_min_price, market_max_price, market_avg_price,
@@ -230,6 +233,7 @@ export async function rehydrateAll(): Promise<boolean> {
         eventId: item.event_id ?? null,
         title: item.title,
         description: item.description,
+        descriptionDetail: item.description_detail ?? null,
         category: item.category,
         infoUrl: item.info_url,
         // pg devuelve el JSONB como arreglo JS ya parseado.

@@ -19,6 +19,8 @@
 
 // Validators
 export {
+  DESCRIPTION_DETAIL_MAX_LENGTH,
+  validateDescriptionDetail,
   validateItemInput,
   validateClaimInput,
   validateEmailFormat,

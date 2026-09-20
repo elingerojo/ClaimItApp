@@ -98,6 +98,14 @@ export interface Item {
   id: string;
   title: string;
   description: string | null;
+  /**
+   * Detalle descriptivo editorial (columna `items.description_detail`): texto
+   * ampliado que captura el ADMIN a mano, independiente de `description` (la
+   * descripción generada por IA, cuya etiqueta de UI es "Descripción (IA)").
+   * `null` (o ausente) = "no proporcionado" ⇒ la UI del visitante NO debe
+   * renderizar bloque alguno para este campo.
+   */
+  descriptionDetail?: string | null;
   category: ItemCategory;
   infoUrl: string | null;
   /**

@@ -26,6 +26,39 @@ function isValidDateString(value: unknown): value is string {
 }
 
 /**
+ * Cota de aplicación para el detalle descriptivo (`descriptionDetail` /
+ * `items.description_detail`). La columna en BD es `TEXT` sin `CHECK` (plan
+ * §2.3: sin longitud mínima); este máximo es solo una salvaguarda de cordura
+ * compartida por backend y frontend.
+ */
+export const DESCRIPTION_DETAIL_MAX_LENGTH = 500;
+
+/**
+ * Valida el campo OPCIONAL `descriptionDetail` (detalle descriptivo).
+ *
+ * Contrato backward-compatible por diseño (plan SP2a):
+ *  - `null` / `undefined` / cadena vacía = "no proporcionado" ⇒ siempre válido.
+ *  - Sin longitud mínima.
+ *  - El único rechazo es un valor no nulo que exceda
+ *    DESCRIPTION_DETAIL_MAX_LENGTH.
+ *
+ * Devuelve la lista de errores (vacía cuando es válido) para que los llamadores
+ * la fusionen con la suya.
+ */
+export function validateDescriptionDetail(value: unknown): string[] {
+  if (value === null || value === undefined) return [];
+  // La API normaliza el payload a `string | null` antes de validar; la coerción
+  // es defensiva para no romper si un llamador envía otro tipo.
+  const text = typeof value === 'string' ? value : String(value);
+  if (text.length > DESCRIPTION_DETAIL_MAX_LENGTH) {
+    return [
+      `Description detail: maximum ${DESCRIPTION_DETAIL_MAX_LENGTH} characters allowed (got ${text.length})`
+    ];
+  }
+  return [];
+}
+
+/**
  * Validate item creation/update input
  */
 export function validateItemInput(data: any): ValidationResult {
@@ -49,6 +82,13 @@ export function validateItemInput(data: any): ValidationResult {
     if (!isValidUrl(data.infoUrl)) {
       errors.push('Info URL: invalid URL format');
     }
+  }
+
+  // Campo OPCIONAL `descriptionDetail` (detalle descriptivo del ADMIN). Solo se
+  // valida cuando el llamador envía la clave: los llamadores actuales que no la
+  // mandan conservan el comportamiento previo intacto.
+  if (data.descriptionDetail !== undefined) {
+    errors.push(...validateDescriptionDetail(data.descriptionDetail));
   }
 
   // Conditional validation for Roles/Events feature

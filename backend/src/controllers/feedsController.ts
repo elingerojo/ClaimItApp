@@ -194,6 +194,9 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
           id: item.id,
           title: item.title,
           description: item.description,
+          // Detalle descriptivo editorial (solo informativo; `null` = no
+          // proporcionado ⇒ el visitante no renderiza bloque).
+          descriptionDetail: item.descriptionDetail ?? null,
           category: item.category,
           infoUrl: item.infoUrl,
           imageUrls: item.imageUrls,
