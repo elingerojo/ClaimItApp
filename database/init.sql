@@ -130,6 +130,32 @@ CREATE TABLE items (
   -- de la descripción IA de `description`. NULL = no proporcionado ⇒ la UI del
   -- visitante no renderiza bloque. Sin mínimo de longitud ni CHECK (migración 0010).
   description_detail TEXT,
+  -- Estado físico del item (migración 0011): 100% manual (lo captura el ADMIN),
+  -- SOLO informativo (no altera precio, multiplicadores, visibilidad, fases ni
+  -- reglas de claim) y NULL-able (NULL = no proporcionado ⇒ la UI del visitante
+  -- no lo renderiza). Catálogo ORDENADO de condition_grade (mejor → peor,
+  -- rank 7→1): nuevo_sellado, como_nuevo, excelente, bueno, regular, con_fallas,
+  -- para_refacciones. El orden de render, las etiquetas ES y el tono de chip
+  -- viven en shared/itemCondition.ts (fuente única del dominio).
+  -- CHECK en línea sin nombre: PostgreSQL lo nombra items_condition_<columna>_check,
+  -- el mismo nombre que crea (de forma idempotente) la migración 0011.
+  condition_grade VARCHAR(20)
+    CHECK (condition_grade IS NULL OR condition_grade IN (
+      'nuevo_sellado', 'como_nuevo', 'excelente', 'bueno',
+      'regular', 'con_fallas', 'para_refacciones')),
+  condition_packaging VARCHAR(20)
+    CHECK (condition_packaging IS NULL OR condition_packaging IN (
+      'original_sellado', 'original_abierto', 'envuelto_sin_caja', 'sin_empaque')),
+  condition_accessories VARCHAR(20)
+    CHECK (condition_accessories IS NULL OR condition_accessories IN (
+      'todos', 'algunos', 'sin')),
+  condition_usage VARCHAR(20)
+    CHECK (condition_usage IS NULL OR condition_usage IN ('nuevo', 'usado')),
+  -- El identificador interno de funcionamiento es `perfecto` y NO el literal '100'
+  -- (plan §2.2); su etiqueta de UI sigue siendo "100% (perfecto)".
+  condition_functionality VARCHAR(20)
+    CHECK (condition_functionality IS NULL OR condition_functionality IN (
+      'perfecto', 'como_nuevo', 'normal', 'se_desconoce', 'no_funciona')),
   category item_category NOT NULL,
   info_url TEXT,
   image_urls JSONB NOT NULL DEFAULT '[]'::jsonb,  -- arreglo ordenado de fotos

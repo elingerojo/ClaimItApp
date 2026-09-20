@@ -24,6 +24,11 @@
 import type {
   BarcodeType,
   ClaimState,
+  ConditionAccessories,
+  ConditionFunctionality,
+  ConditionGrade,
+  ConditionPackaging,
+  ConditionUsage,
   FifoPosition,
   FrozenSchedule,
   ItemPhase,
@@ -59,6 +64,15 @@ export interface StoreItem {
   description: string | null;
   /** Detalle descriptivo editorial capturado por el ADMIN (nullable). */
   descriptionDetail?: string | null;
+  // Estado físico del item (migración 0011): espejo camelCase de las columnas
+  // items.condition_* (VARCHAR(20) + CHECK). Opcionales y NULL-ables: `null` =
+  // "no proporcionado". SOLO informativos: no alteran precio, multiplicadores,
+  // visibilidad, fases ni reglas de claim.
+  conditionGrade?: ConditionGrade | null;
+  conditionPackaging?: ConditionPackaging | null;
+  conditionAccessories?: ConditionAccessories | null;
+  conditionUsage?: ConditionUsage | null;
+  conditionFunctionality?: ConditionFunctionality | null;
   category: string;
   infoUrl: string | null;
   /** Arreglo ordenado de URLs de fotos del Item (JSONB image_urls). */
@@ -189,6 +203,8 @@ export async function rehydrateAll(): Promise<boolean> {
     const itemsResult = await pool.query(
       `SELECT id, event_id, title, description, description_detail, category,
               info_url, image_urls,
+              condition_grade, condition_packaging, condition_accessories,
+              condition_usage, condition_functionality,
               status, phase, visibility_level, precio_base_costo,
               barcode, barcode_type, market_currency,
               market_min_price, market_max_price, market_avg_price,
@@ -234,6 +250,12 @@ export async function rehydrateAll(): Promise<boolean> {
         title: item.title,
         description: item.description,
         descriptionDetail: item.description_detail ?? null,
+        conditionGrade: (item.condition_grade as ConditionGrade) ?? null,
+        conditionPackaging: (item.condition_packaging as ConditionPackaging) ?? null,
+        conditionAccessories: (item.condition_accessories as ConditionAccessories) ?? null,
+        conditionUsage: (item.condition_usage as ConditionUsage) ?? null,
+        conditionFunctionality:
+          (item.condition_functionality as ConditionFunctionality) ?? null,
         category: item.category,
         infoUrl: item.info_url,
         // pg devuelve el JSONB como arreglo JS ya parseado.
