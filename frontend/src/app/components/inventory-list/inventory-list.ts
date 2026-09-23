@@ -17,7 +17,8 @@ import {
   phaseBadge,
   phaseEmoji,
   phaseChipText,
-  claimStateEmoji
+  claimStateEmoji,
+  isAvailableItemPhase
 } from '../../utils/event-status';
 import { faseSectionVisible } from '../../utils/fase-reveal';
 import { conditionGradeCompactChip } from '../../utils/item-condition';
@@ -89,6 +90,24 @@ export class InventoryList implements OnInit {
   });
   /** Evento seleccionado como filtro (null = todos). */
   readonly selectedEventId = signal<string | null>(null);
+
+  /**
+   * Conteo de artículos DISPONIBLES por categoría, mostrado entre paréntesis
+   * junto a cada chip del filtro de categorías (mismo formato que el conteo
+   * del filtro de eventos). Solo suma las fases disponibles — claim_open,
+   * pickup_turns y ventana_libre — vía el helper compartido
+   * `isAvailableItemPhase`; excluye las terminales (entregado,
+   * enviado_a_caridad). Es un indicador GLOBAL: no depende de los filtros
+   * activos ni altera el pipeline de `filteredItems()`.
+   */
+  readonly categoryCounts = computed(() => {
+    const counts = new Map<ItemCategory, number>();
+    for (const item of this.inventoryService.items()) {
+      if (!isAvailableItemPhase(item.phase)) continue;
+      counts.set(item.category, (counts.get(item.category) ?? 0) + 1);
+    }
+    return counts;
+  });
   /** Bindings de utilidades de estado de evento y fase v2 para la plantilla. */
   readonly eventStatusLabel = eventStatusLabel;
   readonly eventStatusBadge = eventStatusBadge;

@@ -126,6 +126,26 @@ export function phaseChipText(phase: ItemPhase | string | null | undefined): str
   }
 }
 
+/**
+ * Fases en las que un artículo está "disponible" para el visitante:
+ *   claim_open    -> Apartados abiertos
+ *   pickup_turns  -> Turnos en curso
+ *   ventana_libre -> Ventana libre
+ * Se excluyen las fases terminales (`entregado`, `enviado_a_caridad`). Es la
+ * regla ÚNICA para los conteos de los filtros (categorías y, en su caso,
+ * eventos), de modo que ambos presentan el mismo número entre paréntesis.
+ */
+export const AVAILABLE_ITEM_PHASES: readonly ItemPhase[] = [
+  'claim_open',
+  'pickup_turns',
+  'ventana_libre'
+];
+
+/** true si la fase del artículo cuenta como "disponible" (ver AVAILABLE_ITEM_PHASES). */
+export function isAvailableItemPhase(phase: ItemPhase | string | null | undefined): boolean {
+  return (AVAILABLE_ITEM_PHASES as readonly string[]).includes(phase ?? '');
+}
+
 // ---------------------------------------------------------------------------
 // `estado_actual` compacto (v2): CLAIM_ABIERTO / TURNO_1..3 / VENTANA_LIBRE /
 // ENTREGADO / ENVIADO_A_CARIDAD

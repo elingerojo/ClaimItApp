@@ -61,15 +61,18 @@
         </button>
         @for (cat of categories; track cat) {
           <button (click)="onSelectCategory(cat)" [title]="'Filtrar solo objetos de la categoría: ' + categoryLabel(cat)" [class]="activeCategory() === cat && !showOnlyMyClaims() ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
-            {{ cat | categoryEs }}
+            {{ cat | categoryEs }} <span class="opacity-70">({{ categoryCounts().get(cat) ?? 0 }})</span>
           </button>
         }
       </div>
     </div>
 
-    <!-- Renglón 2: Filtro por Fase v2 (revelado progresivo: visible cuando el
-         contador de localStorage claimit_fase_contador llega a 0 / dispositivo
-         sin contador lo inicia en 4 → oculto hasta usar 5 días distintos). -->
+    <!-- OCULTO EN UI DE VISITANTE: Renglón 2 - Filtro por Fase v2 (revelado
+         progresivo con la clave claimit_fase_contador). Se dejó de renderizar
+         por decisión de UX para liberar espacio en la zona de filtros. La
+         lógica se conserva INTACTA en el componente (signal `faseSectionVisible`,
+         `activeStatus` y el filtrado por fase dentro de `filteredItems()`);
+         basta con quitar este comentario para reactivar el bloque.
     @if (faseSectionVisible()) {
     <div class="flex items-center gap-3 flex-wrap border-t border-gray-100 pt-3">
       <span class="text-xs font-bold text-gray-400 uppercase tracking-wider min-w-[100px]">{{ 'Fase:' | stripAccents }}</span>
@@ -95,6 +98,7 @@
       </div>
     </div>
     }
+    -->
 
     <!-- Botón de Utilidad: Mis Elegidos -->
     @if (userService.isAuthenticated()) {
@@ -107,7 +111,11 @@
     }
   </div>
 
-  <!-- Contexto de evento (Fase 1) -->
+  <!-- OCULTO EN UI DE VISITANTE: Contexto/filtro de evento (Fase 1).
+       Se dejó de renderizar la tarjeta informativa (📅 EVENTO:) y los chips de
+       filtro por evento (Evento:) para simplificar la vista del visitante.
+       La lógica se conserva INTACTA en el componente (`eventContexts`,
+       `selectedEventId` y `selectEvent`) por si se reactiva más adelante.
   @if (eventContexts().length === 1) {
     <div class="rounded-2xl border p-4 space-y-1.5"
          [class]="eventContexts()[0].status === 'closing' ? 'border-amber-200 bg-amber-50' : eventContexts()[0].status === 'closed' ? 'border-red-200 bg-red-50' : 'border-indigo-100 bg-indigo-50/70'">
@@ -142,6 +150,7 @@
       }
     </div>
   }
+  -->
 
   <!-- Barra de paginación superior -->
   @if (filteredItems().length > pageSize()) {
