@@ -23,6 +23,7 @@ import { InventoryService, ItemWithQueue, QueueEntry } from '../../services/inve
 import { UserService } from '../../services/user';
 import { AdminTokenService } from '../../services/admin-token';
 import { ToastService } from '../../services/toast';
+import { HistoryBackService, BackLayer } from '../../services/history-back';
 import { railwayApiUrl } from '../../app.config';
 import {
   eventStatusBadge,
@@ -122,6 +123,11 @@ export class ItemDetail implements OnInit, OnDestroy {
   private tickTimer: number | null = null;
   readonly now = signal(Date.now());
 
+  // ---- Guard de historial (botón back) ----
+  private readonly historyBack = inject(HistoryBackService);
+  /** Capa de back registrada; null en modo admin (D3) o tras desarmar. */
+  private backLayer: BackLayer | null = null;
+
   // ---- Scroll lock del documento mientras el modal está montado ----
   /** Posición vertical de la página al abrir el modal, para restaurarla al cerrar. */
   private scrollLockY = 0;
@@ -148,6 +154,10 @@ export class ItemDetail implements OnInit, OnDestroy {
     if (typeof window === 'undefined') return;
     this.lockBodyScroll();
     this.tickTimer = window.setInterval(() => this.now.set(Date.now()), 1000);
+    // D3: el guard de historial aplica SOLO al detalle del visitante.
+    if (!this.adminMode()) {
+      this.backLayer = this.historyBack.arm(() => this.handleBack());
+    }
   }
 
   ngOnDestroy(): void {
@@ -156,6 +166,16 @@ export class ItemDetail implements OnInit, OnDestroy {
       this.tickTimer = null;
     }
     this.unlockBodyScroll();
+    if (this.backLayer) {
+      this.historyBack.disarm(this.backLayer);
+      this.backLayer = null;
+    }
+  }
+
+  /** D4: el back cierra el card de una vez, igual que la X. */
+  handleBack(): boolean {
+    this.onClose()();
+    return false;
   }
 
   /**
