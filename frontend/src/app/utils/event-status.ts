@@ -147,6 +147,48 @@ export function isAvailableItemPhase(phase: ItemPhase | string | null | undefine
 }
 
 // ---------------------------------------------------------------------------
+// Fases TERMINALES y SHOWABLE (visibilidad de los chips de categoría)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fases TERMINALES v2: el ciclo de vida del artículo ya cerró.
+ *   entregado         -> el objeto se entregó a alguien
+ *   enviado_a_caridad -> pasó el pickup_deadline sin entrega
+ * La rejilla del visitante las sigue renderizando como tarjeta, pero atenuada
+ * (opacity/grayscale) y sin callouts de acción.
+ */
+export const TERMINAL_ITEM_PHASES: readonly ItemPhase[] = [
+  'entregado',
+  'enviado_a_caridad'
+];
+
+/** true si la fase del artículo es terminal (ver TERMINAL_ITEM_PHASES). */
+export function isTerminalItemPhase(phase: ItemPhase | string | null | undefined): boolean {
+  return (TERMINAL_ITEM_PHASES as readonly string[]).includes(phase ?? '');
+}
+
+/**
+ * Fases SHOWABLE: el conjunto EXACTO de fases que la rejilla del visitante puede
+ * renderizar como tarjeta = operables (AVAILABLE_ITEM_PHASES) + terminales
+ * (TERMINAL_ITEM_PHASES).
+ *
+ * Es la regla de VISIBILIDAD de los chips de categoría del visitante: una
+ * categoría tiene chip si y sólo si al menos uno de sus artículos puede dibujar
+ * tarjeta. El número entre paréntesis, en cambio, sigue contando SOLO operables
+ * (`isAvailableItemPhase`), de modo que una categoría con únicamente
+ * entregados/caridad se presenta como "(0)".
+ */
+export const SHOWABLE_ITEM_PHASES: readonly ItemPhase[] = [
+  ...AVAILABLE_ITEM_PHASES,
+  ...TERMINAL_ITEM_PHASES
+];
+
+/** true si la fase del artículo puede renderizar tarjeta (ver SHOWABLE_ITEM_PHASES). */
+export function isShowableItemPhase(phase: ItemPhase | string | null | undefined): boolean {
+  return (SHOWABLE_ITEM_PHASES as readonly string[]).includes(phase ?? '');
+}
+
+// ---------------------------------------------------------------------------
 // `estado_actual` compacto (v2): CLAIM_ABIERTO / TURNO_1..3 / VENTANA_LIBRE /
 // ENTREGADO / ENVIADO_A_CARIDAD
 // ---------------------------------------------------------------------------

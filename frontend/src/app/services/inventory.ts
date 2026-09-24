@@ -254,6 +254,16 @@ export class InventoryService implements OnDestroy {
   private readonly itemsSignal = signal<ItemWithQueue[]>([]);
   readonly items = this.itemsSignal.asReadonly();
 
+  /**
+   * true una vez que la PRIMERA carga del feed público se resolvió (con éxito
+   * o con error). Permite a la UI del visitante distinguir "el feed todavía no
+   * llega" de "el feed llegó y está vacío": sin este flag ambos casos son
+   * indistinguibles (`items()` arranca como `[]`), y los chips de categoría se
+   * ocultarían todos durante el primer render.
+   */
+  private readonly visitorLoadedSignal = signal<boolean>(false);
+  readonly visitorLoaded = this.visitorLoadedSignal.asReadonly();
+
   // ---- Vista admin (Gestionar Inventario): lista filtrada por estatus ----
   // El servidor devuelve SOLO los buckets pedidos (?statuses=...) + counts de
   // todos los estatus. Se mantiene separado de `items` (feed público) para no
@@ -310,6 +320,11 @@ export class InventoryService implements OnDestroy {
       this.itemsSignal.set(data);
     } catch (error) {
       console.error('Core visual collection mapping failed:', error);
+    } finally {
+      // Primera carga resuelta (éxito o error): la UI del visitante ya puede
+      // aplicar la regla de visibilidad de chips sin confundir "cargando" con
+      // "catálogo vacío". No se reintenta aquí para no alterar el flujo actual.
+      this.visitorLoadedSignal.set(true);
     }
   }
 

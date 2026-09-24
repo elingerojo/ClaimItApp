@@ -18,7 +18,9 @@ import {
   phaseEmoji,
   phaseChipText,
   claimStateEmoji,
-  isAvailableItemPhase
+  isAvailableItemPhase,
+  isShowableItemPhase,
+  isTerminalItemPhase
 } from '../../utils/event-status';
 import { faseSectionVisible } from '../../utils/fase-reveal';
 import { conditionGradeCompactChip } from '../../utils/item-condition';
@@ -92,13 +94,19 @@ export class InventoryList implements OnInit {
   readonly selectedEventId = signal<string | null>(null);
 
   /**
-   * Conteo de artículos DISPONIBLES por categoría, mostrado entre paréntesis
+   * Conteo de artículos OPERABLES por categoría, mostrado entre paréntesis
    * junto a cada chip del filtro de categorías (mismo formato que el conteo
    * del filtro de eventos). Solo suma las fases disponibles — claim_open,
    * pickup_turns y ventana_libre — vía el helper compartido
    * `isAvailableItemPhase`; excluye las terminales (entregado,
    * enviado_a_caridad). Es un indicador GLOBAL: no depende de los filtros
    * activos ni altera el pipeline de `filteredItems()`.
+   *
+   * OJO: este número cuenta SOLO operables, mientras que la VISIBILIDAD del
+   * chip depende de artículos SHOWABLE (ver `visibleCategoryPills`: operables +
+   * entregados + caridad). Por eso un chip puede renderizar "(0)": significa
+   * que la categoría solo conserva entregados/caridad, o que es la categoría
+   * activa "pineada" y ya no le queda nada showable.
    */
   readonly categoryCounts = computed(() => {
     const counts = new Map<ItemCategory, number>();
@@ -108,6 +116,39 @@ export class InventoryList implements OnInit {
     }
     return counts;
   });
+
+  /**
+   * Chips de categoría que la sección de filtros debe renderizar.
+   *
+   * Regla: una categoría tiene chip si al menos uno de sus artículos es
+   * SHOWABLE (`isShowableItemPhase` = operable + entregado + enviado_a_caridad),
+   * es decir, si puede dibujar tarjeta en la rejilla. Así ningún chip aparece
+   * por una categoría ausente del catálogo visible (ni por categorías cuyos
+   * objetos solo son invisibles para el rol actual, ya que `items()` ya viene
+   * filtrado por rol desde el feed).
+   *
+   * Dos excepciones deliberadas:
+   *   1. Mientras `visitorLoaded()` es false el feed aún no llega: se devuelven
+   *      TODAS las categorías para no vaciar el renglón en el primer render. No
+   *      se usa `items().length > 0` porque no distingue "cargando" de "catálogo
+   *      vacío" (un evento sin objetos dejaría chips muertos).
+   *   2. La categoría ACTIVA se conserva siempre (pin): si su último artículo
+   *      showable pasa a terminal por SSE/scheduler, el chip permanece visible
+   *      y resaltado para que el visitante VEA la causa del filtro y pueda
+   *      limpiarlo con "Todos". No existe auto-reset que mueva la selección a
+   *      espaldas del usuario.
+   */
+  readonly visibleCategoryPills = computed<ItemCategory[]>(() => {
+    if (!this.inventoryService.visitorLoaded()) return this.categories;
+
+    const showable = new Set<ItemCategory>();
+    for (const item of this.inventoryService.items()) {
+      if (isShowableItemPhase(item.phase)) showable.add(item.category);
+    }
+
+    const active = this.activeCategory();
+    return this.categories.filter((cat) => showable.has(cat) || cat === active);
+  });
   /** Bindings de utilidades de estado de evento y fase v2 para la plantilla. */
   readonly eventStatusLabel = eventStatusLabel;
   readonly eventStatusBadge = eventStatusBadge;
@@ -115,6 +156,8 @@ export class InventoryList implements OnInit {
   readonly phaseEmoji = phaseEmoji;
   readonly phaseChipText = phaseChipText;
   readonly claimStateEmoji = claimStateEmoji;
+  /** Regla de fases terminales (atenuado de tarjetas) para la plantilla. */
+  readonly isTerminalItemPhase = isTerminalItemPhase;
   /**
    * Chip compacto de estado físico (SP6) para la tarjeta del listado. Solo el
    * grado (los calificadores viven en el detalle) y `null` cuando el ADMIN no lo
@@ -205,6 +248,12 @@ export class InventoryList implements OnInit {
       this.selectedEventId();
       this.currentPage.set(1);
     });
+
+    // NOTA (chips de categoría): NO se agrega un efecto que reescriba
+    // `activeCategory`. Si la categoría activa pierde su último artículo
+    // showable, su chip se conserva por "pin" dentro de `visibleCategoryPills()`
+    // y limpiar el filtro es una acción EXPLÍCITA del visitante (chip "Todos").
+    // Así la selección nunca cambia sin un clic.
 
     // Protección: corregir página si excede el total (ocurre al redimensionar)
     effect(() => {

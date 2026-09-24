@@ -59,7 +59,7 @@
         <button (click)="onSelectCategory('All')" title="Mostrar todas las categorías" [class]="activeCategory() === 'All' && !showOnlyMyClaims() ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
           Todos
         </button>
-        @for (cat of categories; track cat) {
+        @for (cat of visibleCategoryPills(); track cat) {
           <button (click)="onSelectCategory(cat)" [title]="'Filtrar solo objetos de la categoría: ' + categoryLabel(cat)" [class]="activeCategory() === cat && !showOnlyMyClaims() ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors shadow-sm">
             {{ cat | categoryEs }} <span class="opacity-70">({{ categoryCounts().get(cat) ?? 0 }})</span>
           </button>
@@ -202,8 +202,8 @@
     @for (item of paginatedItems(); track item.id) {
 
       <!-- Card horizontal: thumbnail left + content right (click to open detail) -->
-      <div [class.opacity-60]="item.phase === 'entregado' || item.phase === 'enviado_a_caridad'"
-           [class.grayscale]="item.phase === 'entregado' || item.phase === 'enviado_a_caridad'"
+      <div [class.opacity-60]="isTerminalItemPhase(item.phase)"
+           [class.grayscale]="isTerminalItemPhase(item.phase)"
            class="flex gap-0 bg-gray-50 border border-gray-100 rounded-2xl shadow-sm overflow-hidden transition-all hover:shadow-md cursor-pointer"
            (click)="selectedItem.set(item)">
 
