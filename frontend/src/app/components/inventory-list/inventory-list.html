@@ -290,22 +290,27 @@
             }
           </div>
 
-          <div class="mt-2 pt-2 border-t border-gray-50">
-            <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">{{ 'En la lista:' | stripAccents }}</div>
-            <div class="flex flex-wrap gap-1.5">
-              @for (claimer of activeQueueOf(item); track claimer.id; let idx = $index) {
-                <span [title]="queueTooltip(claimer, idx)"
-                      [class.bg-blue-50]="claimer.userUuid === userService.currentUuid()"
-                      [class.border-b-2]="claimer.userUuid === userService.currentUuid()"
-                      [class.border-blue-400]="claimer.userUuid === userService.currentUuid()"
-                      class="inline-flex items-center text-[10px] font-medium bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-md text-gray-700 font-mono">
-                  {{ claimStateEmoji(claimer.claimState) }} {{ idx === 0 && item.phase === 'pickup_turns' ? '👑' : '' }}&#64;{{ claimer.username }}
-                </span>
-              } @empty {
-                <span class="text-[10px] text-gray-500 italic">Nadie en la lista todavía.</span>
-              }
+          <!-- Cola compacta: el VISITANTE no ve este bloque en fases terminales
+               (entregado / enviado_a_caridad), por eso el contenedor completo
+               —incluido su separador— sale del DOM. -->
+          @if (!isTerminalItemPhase(item.phase)) {
+            <div class="mt-2 pt-2 border-t border-gray-50">
+              <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">{{ 'En la lista:' | stripAccents }}</div>
+              <div class="flex flex-wrap gap-1.5">
+                @for (claimer of activeQueueOf(item); track claimer.id; let idx = $index) {
+                  <span [title]="queueTooltip(claimer, idx)"
+                        [class.bg-blue-50]="claimer.userUuid === userService.currentUuid()"
+                        [class.border-b-2]="claimer.userUuid === userService.currentUuid()"
+                        [class.border-blue-400]="claimer.userUuid === userService.currentUuid()"
+                        class="inline-flex items-center text-[10px] font-medium bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-md text-gray-700 font-mono">
+                    {{ claimStateEmoji(claimer.claimState) }} {{ idx === 0 && item.phase === 'pickup_turns' ? '👑' : '' }}&#64;{{ claimer.username }}
+                  </span>
+                } @empty {
+                  <span class="text-[10px] text-gray-500 italic">Nadie en la lista todavía.</span>
+                }
+              </div>
             </div>
-          </div>
+          }
         </div>
       </div>
 

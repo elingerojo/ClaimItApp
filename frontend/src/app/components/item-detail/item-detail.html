@@ -338,7 +338,10 @@
         }
       </div>
 
-      <!-- Cola (Línea de Espera / turnos) -->
+      <!-- Cola (Línea de Espera / turnos): el VISITANTE no ve este bloque en
+           fases terminales (entregado / enviado_a_caridad), pero el modo admin
+           siempre conserva la cola forense (ver showQueueSection()). -->
+      @if (showQueueSection()) {
       <div class="mt-4 pt-4 border-t border-gray-100">
         <div class="flex items-center justify-between gap-2 mb-2">
           <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">{{ adminMode() ? 'Cola forense (todos los estados):' : 'Línea de Espera:' | stripAccents }}</span>
@@ -380,6 +383,7 @@
           }
         </div>
       </div>
+      }
 
       <!-- Compartir invitación (participantes) — solo visitante -->
       @if (!adminMode() && canShare()) {

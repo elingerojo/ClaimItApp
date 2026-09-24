@@ -24,7 +24,15 @@ import { UserService } from '../../services/user';
 import { AdminTokenService } from '../../services/admin-token';
 import { ToastService } from '../../services/toast';
 import { railwayApiUrl } from '../../app.config';
-import { eventStatusBadge, eventStatusLabel, phaseBadge, phaseLabel, claimStateEmoji, claimStateLabel } from '../../utils/event-status';
+import {
+  eventStatusBadge,
+  eventStatusLabel,
+  phaseBadge,
+  phaseLabel,
+  claimStateEmoji,
+  claimStateLabel,
+  isTerminalItemPhase
+} from '../../utils/event-status';
 import { roleDisplayName, roleExpiryConsequence } from '../../utils/role-info';
 import {
   buildInviteUrl,
@@ -453,10 +461,27 @@ export class ItemDetail implements OnInit, OnDestroy {
     );
   }
 
-  /** Fase terminal: ya no hay acciones de visitante. */
+  /**
+   * Fase terminal v2: el ciclo de vida del artículo ya cerró y no hay acciones de
+   * visitante. Delega en la regla compartida `isTerminalItemPhase` (misma que usa
+   * el listado para atenuar tarjetas) en lugar de repetir aquí la lista de fases.
+   */
   isTerminal(): boolean {
-    const p = this.phase();
-    return p === 'entregado' || p === 'enviado_a_caridad';
+    return isTerminalItemPhase(this.phase());
+  }
+
+  /**
+   * Compuerta de la sección de cola ("Línea de Espera:" del visitante / "Cola
+   * forense" del admin).
+   *
+   * Regla de UI: el VISITANTE no ve la cola de un artículo terminal (`entregado`
+   * o `enviado_a_caridad`) y el bloque completo sale del DOM —título, chips,
+   * botón ✕ y su separador—; el modo admin SIEMPRE la conserva, porque es su
+   * superficie de diagnóstico. En fases no terminales el bloque se mantiene
+   * aunque la cola esté vacía (mensaje "Nadie se ha anotado aún.").
+   */
+  showQueueSection(): boolean {
+    return this.adminMode() || !this.isTerminal();
   }
 
   async onClaimItem(): Promise<void> {
