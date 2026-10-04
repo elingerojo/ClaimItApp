@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
 import {
+  CHARITY_VISIBILITY_HOURS_DEFAULT,
   dailyClaimStatus,
   HOUR_MS,
+  isCharityItemExpiredForVisitor,
   ROLE_HIERARCHY,
   type ItemPhase,
   type Role,
@@ -13,6 +15,7 @@ import {
   getUser,
   getEvent,
   getTrustSetting,
+  getEventConfig,
   ensureHydrated,
   type StoreClaim,
   type StoreEvent,
@@ -119,6 +122,12 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
     const now = Date.now();
     const itemsSnapshot = getItems();
 
+    // Ventana de visibilidad de los objetos enviados a caridad (event_config):
+    // horas desde `charity_at` que siguen mostrándose en el feed del visitante.
+    const charityVisibilityHours = Number(
+      getEventConfig()?.charity_visibility_hours ?? CHARITY_VISIBILITY_HOURS_DEFAULT
+    );
+
     // Apartados activos del usuario por evento (límite simultáneo real).
     const activeApartadosByEvent = new Map<string, number>();
     // Apartados diarios del usuario (UTC-6, GLOBAL entre eventos): cuentan los
@@ -150,6 +159,21 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
         // 1b. Regla v2 "evento como fuente única": evento sin published_at (draft /
         // no publicado) ⇒ sus items NO son visibles en el feed público.
         if (!event?.published_at) return null;
+
+        // 1c. Objetos enviados a caridad: solo se muestran mientras no superen
+        // `charity_visibility_hours` desde `charity_at` (fallback defensivo al
+        // pickup_deadline del evento). Sin marca temporal = se conserva visible.
+        if (
+          isCharityItemExpiredForVisitor(
+            item.phase,
+            item.charityAt,
+            event.pickup_deadline,
+            charityVisibilityHours,
+            now
+          )
+        ) {
+          return null;
+        }
 
         // 2. Visibilidad temporal por rol (cero columnas por evento — dinámico;
         // la base SIEMPRE es la del evento).

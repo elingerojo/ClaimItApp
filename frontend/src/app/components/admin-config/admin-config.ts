@@ -11,6 +11,8 @@ import { AdminAuth } from '../admin-auth/admin-auth';
 const ADVANCE_HOURS_MAX = 360;
 /** Multiplicador de precio por rol (rango que valida el backend/shared). */
 const MULTIPLIER_MAX = 9.99;
+/** Tope de horas de visibilidad tras caridad (espejo de shared). */
+const CHARITY_VISIBILITY_HOURS_MAX = 8760;
 
 /**
  * Fila editable de la matriz de confianza v2 (trust_levels_settings).
@@ -38,6 +40,8 @@ export interface AgendaConfig {
   open_after_publish_hours: number;
   claims_window_hours: number;
   closing_window_hours: number;
+  /** Horas que un objeto enviado a caridad sigue visible al visitante. */
+  charity_visibility_hours: number;
   pickup_schedule_info: string | null;
 }
 
@@ -132,6 +136,8 @@ export class AdminConfig {
         open_after_publish_hours: Number(c.open_after_publish_hours),
         claims_window_hours: Number(c.claims_window_hours),
         closing_window_hours: Number(c.closing_window_hours),
+        charity_visibility_hours:
+          c.charity_visibility_hours != null ? Number(c.charity_visibility_hours) : 72,
         pickup_schedule_info: c.pickup_schedule_info ?? null
       });
     } catch (err: any) {
@@ -252,6 +258,7 @@ export class AdminConfig {
             open_after_publish_hours: Number(agenda.open_after_publish_hours),
             claims_window_hours: Number(agenda.claims_window_hours),
             closing_window_hours: Number(agenda.closing_window_hours),
+            charity_visibility_hours: Number(agenda.charity_visibility_hours),
             pickup_schedule_info: agenda.pickup_schedule_info?.trim() || null
           }
         })
@@ -269,4 +276,5 @@ export class AdminConfig {
   /** Rango máx. de horas de adelanto (para atributos min/max). */
   readonly advanceHoursMax = ADVANCE_HOURS_MAX;
   readonly multiplierMax = MULTIPLIER_MAX;
+  readonly charityVisibilityHoursMax = CHARITY_VISIBILITY_HOURS_MAX;
 }

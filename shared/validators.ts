@@ -16,6 +16,7 @@
  * los cambia).
  */
 
+import { CHARITY_VISIBILITY_HOURS_MAX } from './eventConfig.js';
 import {
   CONDITION_ACCESSORIES_VALUES,
   CONDITION_FUNCTIONALITY_VALUES,
@@ -477,13 +478,20 @@ export function validateEventConfig(data: any): ValidationResult {
   const keys = [
     'open_after_publish_hours',
     'claims_window_hours',
-    'closing_window_hours'
+    'closing_window_hours',
+    'charity_visibility_hours'
   ] as const;
   for (const key of keys) {
     const v = data?.[key];
     if (!Number.isInteger(v) || (v as number) < 0) {
       errors.push(`${key}: must be a non-negative integer`);
     }
+  }
+  if (
+    Number.isInteger(data?.charity_visibility_hours) &&
+    data.charity_visibility_hours > CHARITY_VISIBILITY_HOURS_MAX
+  ) {
+    errors.push(`charity_visibility_hours: must be 0-${CHARITY_VISIBILITY_HOURS_MAX}`);
   }
   if (data?.pickup_schedule_info !== undefined && data.pickup_schedule_info !== null) {
     if (typeof data.pickup_schedule_info !== 'string') {

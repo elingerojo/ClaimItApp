@@ -52,10 +52,13 @@ export {
   HOUR_MS,
   ADVANCE_HOURS_MIN,
   ADVANCE_HOURS_MAX,
+  CHARITY_VISIBILITY_HOURS_DEFAULT,
+  CHARITY_VISIBILITY_HOURS_MAX,
   CLAIM_DAY_TIMEZONE,
   DAILY_WARNING_FRACTION,
   dailyWarningThreshold,
   dailyClaimStatus,
+  isCharityItemExpiredForVisitor,
   deriveEventSchedule
 } from './eventConfig.js';
 

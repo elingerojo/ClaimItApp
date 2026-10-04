@@ -161,6 +161,8 @@ let users: Map<string, StoreUser> = new Map();
 let events: Map<string, StoreEvent> = new Map();
 let eventMembers: Map<string, StoreEventMember[]> = new Map(); // userUuid -> memberships
 let trustSettings: Map<string, any> = new Map(); // level id -> trust_levels_settings row
+/** Fila única de event_config (id=1): plantilla de agenda + visibilidad de caridad. */
+let eventConfig: any | null = null;
 
 // Índice por estatus de evento de los items (lazy). Ver getItemsByEventStatus.
 let itemsByEventStatus: Map<string, StoreItem[]> | null = null;
@@ -327,6 +329,11 @@ export async function rehydrateAll(): Promise<boolean> {
     );
     trustSettings = new Map(trustResult.rows.map((r: any) => [r.id, r]));
 
+    // 6b. Plantilla de agenda global (event_config id=1): agenda + ventana de
+    // visibilidad de los objetos enviados a caridad. El feed lee de aquí (RAM).
+    const eventConfigResult = await pool.query('SELECT * FROM event_config WHERE id = 1');
+    eventConfig = eventConfigResult.rows[0] ?? null;
+
     // 7. Eventos v2 (solo 4 fechas + status + notas informativas)
     const eventsResult = await pool.query(
       `SELECT id, title, description, available_from, published_at,
@@ -410,6 +417,17 @@ export const getEventMembership = (
 ): StoreEventMember | undefined =>
   (eventMembers.get(userUuid) || []).find(m => m.eventId === eventId);
 export const getTrustSetting = (level: string): any => trustSettings.get(level);
+
+/** Fila de event_config (id=1) cacheada, o null si aún no se hidrató. */
+export const getEventConfig = (): any | null => eventConfig;
+
+/**
+ * Write-through: aplica un parche a la fila de event_config en RAM (después del
+ * UPDATE en Neon). Hace merge conservando columnas no tocadas.
+ */
+export function upsertEventConfig(patch: Record<string, any>): void {
+  eventConfig = { ...(eventConfig ?? {}), ...patch, id: 1 };
+}
 
 /**
  * Write-through: aplica un parche a una fila de la matriz de confianza en RAM

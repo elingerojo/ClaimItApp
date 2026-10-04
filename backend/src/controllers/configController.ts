@@ -25,7 +25,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db.js';
 import { validateEventConfig, validateRoleDefaultsUpdate } from '@claimitapp/shared';
 import { logAudit, maskAdminCode } from '../utils/auditLog.js';
-import { upsertTrustSetting } from '../cache/appStore.js';
+import { upsertTrustSetting, upsertEventConfig } from '../cache/appStore.js';
 
 const EVENT_CONFIG_ID = 1;
 const ROLE_ORDER = ['familiares', 'amigos', 'conocidos', 'publico'] as const;
@@ -84,11 +84,12 @@ export const updateEventConfig = async (req: Request, res: Response): Promise<vo
   try {
     const upd = await pool.query(
       `UPDATE event_config SET
-         open_after_publish_hours = $2,
-         claims_window_hours      = $3,
-         closing_window_hours     = $4,
-         pickup_schedule_info     = $5,
-         updated_at               = NOW()
+         open_after_publish_hours  = $2,
+         claims_window_hours       = $3,
+         closing_window_hours      = $4,
+         pickup_schedule_info      = $5,
+         charity_visibility_hours  = $6,
+         updated_at                = NOW()
        WHERE id = $1
        RETURNING *`,
       [
@@ -96,7 +97,8 @@ export const updateEventConfig = async (req: Request, res: Response): Promise<vo
         Number(body.open_after_publish_hours),
         Number(body.claims_window_hours),
         Number(body.closing_window_hours),
-        body.pickup_schedule_info ?? null
+        body.pickup_schedule_info ?? null,
+        Number(body.charity_visibility_hours)
       ]
     );
     if (upd.rows.length === 0) {
@@ -106,6 +108,16 @@ export const updateEventConfig = async (req: Request, res: Response): Promise<vo
       return;
     }
 
+    // Refrescar el cache RAM del store para que el feed del visitante aplique la
+    // nueva ventana sin reiniciar.
+    upsertEventConfig({
+      open_after_publish_hours: Number(body.open_after_publish_hours),
+      claims_window_hours: Number(body.claims_window_hours),
+      closing_window_hours: Number(body.closing_window_hours),
+      pickup_schedule_info: body.pickup_schedule_info ?? null,
+      charity_visibility_hours: Number(body.charity_visibility_hours)
+    });
+
     await logAudit({
       action: 'EVENT_CONFIG_UPDATED',
       adminCodeSuffix: maskAdminCode(adminCodeOf(req)),
@@ -113,6 +125,7 @@ export const updateEventConfig = async (req: Request, res: Response): Promise<vo
         open_after_publish_hours: Number(body.open_after_publish_hours),
         claims_window_hours: Number(body.claims_window_hours),
         closing_window_hours: Number(body.closing_window_hours),
+        charity_visibility_hours: Number(body.charity_visibility_hours),
         timestamp: new Date().toISOString()
       }
     });

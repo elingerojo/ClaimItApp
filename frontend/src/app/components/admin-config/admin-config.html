@@ -170,6 +170,18 @@
             </label>
           </div>
 
+          <div class="mt-3">
+            <label class="text-[10px] text-gray-500">
+              Visibilidad de objetos enviados a caridad (h)
+              <span class="block text-[9px] text-gray-400 mb-1">
+                Horas que un objeto enviado a caridad permanece visible en el catálogo del visitante
+                desde su envío. 0 = ocultar de inmediato.
+              </span>
+              <input [(ngModel)]="a.charity_visibility_hours" type="number" min="0" [max]="charityVisibilityHoursMax"
+                     class="w-full mt-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg" />
+            </label>
+          </div>
+
           <label class="block text-[10px] text-gray-500 mt-3">
             Nota de recogida (opcional)
             <textarea [(ngModel)]="a.pickup_schedule_info" rows="2"

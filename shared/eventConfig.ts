@@ -20,6 +20,15 @@ import type { Role } from './types.js';
 
 export const HOUR_MS = 60 * 60 * 1000;
 
+/**
+ * Horas por defecto que un objeto `enviado_a_caridad` permanece visible en el
+ * catálogo del visitante tras `items.charity_at` (3 días).
+ */
+export const CHARITY_VISIBILITY_HOURS_DEFAULT = 72;
+
+/** Tope del campo `charity_visibility_hours` (1 año). */
+export const CHARITY_VISIBILITY_HOURS_MAX = 8760;
+
 /** Fila de la plantilla de agenda global (event_config id=1). */
 export interface EventConfig {
   /** available_from = published_at + esto (horas tras publicar que abren las reservas). */
@@ -28,6 +37,11 @@ export interface EventConfig {
   claims_window_hours: number;
   /** pickup_deadline = claims_close_at + esto (horas de ventana de recogida tras el corte). */
   closing_window_hours: number;
+  /**
+   * Horas, desde `items.charity_at`, que un objeto `enviado_a_caridad` sigue
+   * visible en el catálogo del visitante. 0 = ocultar de inmediato.
+   */
+  charity_visibility_hours: number;
   /** Nota de recogida (texto informativo). */
   pickup_schedule_info: string | null;
 }
@@ -142,4 +156,31 @@ export function dailyClaimStatus(dailyLimit: number, dailyUsed: number): DailyCl
     atLimit: remaining === 0,
     warn: remaining > 0 && remaining <= warningThreshold
   };
+}
+
+/**
+ * ¿Debe ocultarse del catálogo del visitante un objeto enviado a caridad?
+ *
+ * `true` cuando el objeto está en fase `enviado_a_caridad` y han transcurrido
+ * MÁS de `charityVisibilityHours` desde `charityAt` (fallback defensivo a
+ * `pickupDeadline`). Sin marca temporal válida NO se oculta (evita sobre-ocultar
+ * datos incompletos). Función PURA con reloj inyectable (`nowMs`), reutilizada
+ * por el feed del visitante (`feedsController`) y sus pruebas.
+ */
+export function isCharityItemExpiredForVisitor(
+  phase: string | null | undefined,
+  charityAt: string | null | undefined,
+  pickupDeadline: string | null | undefined,
+  charityVisibilityHours: number,
+  nowMs: number
+): boolean {
+  if (phase !== 'enviado_a_caridad') return false;
+  const ts = charityAt ?? pickupDeadline ?? null;
+  if (!ts) return false;
+  const tsMs = new Date(ts).getTime();
+  if (Number.isNaN(tsMs)) return false;
+  const hours = Number.isFinite(charityVisibilityHours)
+    ? charityVisibilityHours
+    : CHARITY_VISIBILITY_HOURS_DEFAULT;
+  return nowMs - tsMs > hours * HOUR_MS;
 }
