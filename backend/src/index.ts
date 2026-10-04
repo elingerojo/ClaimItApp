@@ -18,7 +18,8 @@ import {
   deleteItem,
   getItemDetail,
   listAllAdminItems,
-  getItemTemporalState
+  getItemTemporalState,
+  changeItemEvent
 } from './controllers/itemsController.js';
 import { getInventoryFeed, getLedgerFeed } from './controllers/feedsController.js';
 import { evictClaimant, deliverItem } from './controllers/adminController.js';
@@ -139,6 +140,8 @@ app.patch('/api/admin/items/:id', requireAdminSession, updateItem);
 app.delete('/api/admin/items/:id', requireAdminSession, deleteItem);
 // ADMIN marca 'item recogido' (v2 — entrega). Declarado antes de /:id genérico.
 app.post('/api/admin/items/:id/deliver', requireAdminSession, deliverItem);
+// ADMIN re-enlista un item enviado a caridad en otro evento (reinicio a disponible).
+app.post('/api/admin/items/:id/change-event', requireAdminSession, changeItemEvent);
 
 /* ==========================================================================
    ADMIN AUDITING & OPERATIONAL OVERSIGHT

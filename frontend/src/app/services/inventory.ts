@@ -200,6 +200,8 @@ export interface ItemWithQueue extends Item {
 /** Payload tipado de un `item_updated` SSE (razones v2). */
 interface ItemUpdatedSse {
   itemId: string;
+  /** Evento destino tras un re-enlistamiento (`reason: 'reenlisted'`). */
+  eventId?: string;
   status?: ItemStatus;
   phase?: ItemPhase;
   userUuid?: string;
@@ -487,6 +489,9 @@ export class InventoryService implements OnDestroy {
             ...item,
             ...(updateData.phase !== undefined && { phase: updateData.phase as ItemPhase }),
             ...(updateData.status !== undefined && { status: updateData.status }),
+            // Re-enlistamiento (change-event): el item cambia de evento; el feed
+            // público re-sincroniza `eventSummary` en el refresh con debounce.
+            ...(updateData.eventId !== undefined && { eventId: updateData.eventId }),
             ...(updateData.frozenAt !== undefined && { frozenAt: updateData.frozenAt }),
             ...(updateData.freeWindowOpenedAt !== undefined && {
               freeWindowOpenedAt: updateData.freeWindowOpenedAt
@@ -732,6 +737,36 @@ export class InventoryService implements OnDestroy {
     const result = await response.json();
     if (!response.ok) {
       throw new Error(result.error || 'No fue posible eliminar el objeto.');
+    }
+    return result;
+  }
+
+  /**
+   * Re-enlista un objeto enviado a caridad en OTRO evento, reiniciándolo como
+   * disponible (admin). POST /api/admin/items/:id/change-event.
+   *
+   * El backend valida que el item esté en `enviado_a_caridad`, que el evento
+   * destino exista y no esté cerrado, borra la cola forense y limpia los campos
+   * del ciclo de vida v2. Conserva datos e imágenes. La UI admin refresca su
+   * tabla tras el éxito (además del SSE debounced).
+   */
+  async changeItemEvent(itemId: string, eventId: string, adminToken: string): Promise<any> {
+    const response = await fetch(
+      `${this.apiUrl}/admin/items/${encodeURIComponent(itemId)}/change-event`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Admin-Token': adminToken
+        },
+        body: JSON.stringify({ eventId })
+      }
+    );
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const err: any = new Error((result as any).error || 'No se pudo cambiar el objeto de evento.');
+      err.code = (result as any).code;
+      throw err;
     }
     return result;
   }

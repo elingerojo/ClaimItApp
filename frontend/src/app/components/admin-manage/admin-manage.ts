@@ -1,10 +1,11 @@
-import { Component, inject, signal, effect } from '@angular/core';
+import { Component, inject, signal, effect, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { InventoryService, ItemWithQueue, QueueEntry } from '../../services/inventory';
 import { AdminTokenService } from '../../services/admin-token';
 import { ToastService } from '../../services/toast';
+import { railwayApiUrl } from '../../app.config';
 import { StripAccentsPipe } from '../../pipes/strip-accents.pipe';
 import { DateEsPipe } from '../../pipes/date-es.pipe';
 import { AdminAuth } from '../admin-auth/admin-auth';
@@ -34,12 +35,28 @@ const DEFAULT_ACTIVE_STATUSES: readonly EventStatus[] = ['draft', 'scheduled', '
 /** Clave de persistencia de la selección dentro de la sesión. */
 const FILTER_STORAGE_KEY = 'claimit_admin_event_status_filter';
 
+/**
+ * Clave de `sessionStorage` (por pestaña) con el último evento elegido en el
+ * modal "Cambiar de evento". Se usa como default preseleccionado para no tener
+ * que re-elegir el evento al re-enlistar varios items seguidos.
+ */
+const REENLIST_STORAGE_KEY = 'claimit_reenlist_target_event';
+
 /** Renglón del calendario congelado (V1..V3 / ventana libre / caridad) en la fila. */
 interface TimelineRow {
   key: string;
   label: string;
   icon: string;
   date: string | null;
+}
+
+/** Opción de evento para el selector de re-enlistamiento (GET /api/events). */
+interface EventOption {
+  id: string;
+  title: string | null;
+  status: string;
+  available_from?: string | null;
+  pickup_deadline?: string | null;
 }
 
 @Component({
@@ -52,6 +69,7 @@ export class AdminManage {
   readonly inventoryService = inject(InventoryService);
   readonly adminTokenService = inject(AdminTokenService);
   readonly toastService = inject(ToastService);
+  private readonly apiUrl = railwayApiUrl;
 
   /** Estatus en orden canónico (para dibujar los chips). */
   readonly statusOptions: EventStatus[] = [...EVENT_STATUS_ORDER];
@@ -93,6 +111,27 @@ export class AdminManage {
   readonly deliverClaimId = signal<string | null>(null);
   readonly delivering = signal(false);
 
+  // ---------------------------------------------------------------------------
+  // Diálogo admin 'Cambiar de evento' (re-enlistar un item enviado a caridad)
+  // ---------------------------------------------------------------------------
+  /** Item sobre el que se abre el diálogo de cambio de evento. */
+  readonly reenlistTarget = signal<ItemWithQueue | null>(null);
+  /** ¿Diálogo de cambio de evento visible? */
+  readonly isConfirmingReenlist = signal(false);
+  /** Evento destino elegido (default hidratado desde sessionStorage). */
+  readonly reenlistTargetEventId = signal<string | null>(null);
+  readonly reenlisting = signal(false);
+  /** Catálogo de eventos cargado (GET /api/events) para el selector. */
+  readonly reenlistEvents = signal<EventOption[]>([]);
+  readonly loadingReenlistEvents = signal(false);
+  /** Eventos elegibles: ni el evento actual del item ni los cerrados. */
+  readonly reenlistEventOptions = computed<EventOption[]>(() => {
+    const currentId = this.reenlistTarget()?.eventId ?? null;
+    return this.reenlistEvents().filter(
+      (ev) => ev.id !== currentId && ev.status !== 'closed'
+    );
+  });
+
   constructor() {
     // Cuando el admin se autentica (puede ocurrir de forma asíncrona tras el
     // mount), restauramos la selección de la sesión y cargamos el inventario
@@ -103,6 +142,7 @@ export class AdminManage {
         this.bootstrapped = false;
         this.selectedAdminItem.set(null);
         this.cancelDeliver();
+        this.cancelReenlist();
         return;
       }
       if (this.bootstrapped) return;
@@ -415,6 +455,96 @@ export class AdminManage {
       this.delivering.set(false);
       // Refresco inmediato de la vista admin (además del SSE debounced).
       this.inventoryService.refreshAdminItems().catch(() => {});
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Flujo 'Cambiar de evento' (re-enlistar un item enviado a caridad)
+  // ---------------------------------------------------------------------------
+
+  /** ¿El item puede re-enlistarse? Solo los enviados a caridad. */
+  canReenlist(item: ItemWithQueue): boolean {
+    return item.phase === 'enviado_a_caridad';
+  }
+
+  /** Abre el modal 'Cambiar de evento' para un item enviado a caridad. */
+  async openReenlist(item: ItemWithQueue): Promise<void> {
+    this.reenlistTarget.set(item);
+    this.isConfirmingReenlist.set(true);
+    await this.loadReenlistEvents();
+    const options = this.reenlistEventOptions();
+    const stored = this.readStoredReenlistEvent();
+    const defaultId = stored && options.some((ev) => ev.id === stored) ? stored : null;
+    this.reenlistTargetEventId.set(defaultId);
+  }
+
+  /** Cierra el modal sin aplicar cambios (no borra el default de la sesión). */
+  cancelReenlist(): void {
+    this.isConfirmingReenlist.set(false);
+    this.reenlistTarget.set(null);
+    this.reenlistTargetEventId.set(null);
+  }
+
+  /** Confirma: POST change-event y refresca la tabla admin. */
+  async confirmReenlist(): Promise<void> {
+    const target = this.reenlistTarget();
+    const eventId = this.reenlistTargetEventId();
+    if (!target || !eventId) return;
+    const token = this.adminTokenService.token();
+    if (!token) return;
+
+    this.reenlisting.set(true);
+    try {
+      await this.inventoryService.changeItemEvent(target.id, eventId, token);
+      this.writeStoredReenlistEvent(eventId);
+      this.toastService.success(
+        `"${target.title}" se cambió de evento y quedó disponible (cola reiniciada).`
+      );
+      this.cancelReenlist();
+      await this.inventoryService.refreshAdminItems().catch(() => {});
+    } catch (err: any) {
+      this.toastService.error(`Error al cambiar de evento: ${err.message}`);
+    } finally {
+      this.reenlisting.set(false);
+    }
+  }
+
+  /**
+   * Carga el catálogo de eventos (GET /api/events) una vez por instancia. La
+   * lista se cachea en memoria; el filtrado de elegibles es por item.
+   */
+  private async loadReenlistEvents(): Promise<void> {
+    if (this.reenlistEvents().length > 0 || this.loadingReenlistEvents()) return;
+    this.loadingReenlistEvents.set(true);
+    try {
+      const res = await fetch(`${this.apiUrl}/events?limit=100`);
+      if (!res.ok) throw new Error('No se pudo obtener la lista de eventos');
+      const data = await res.json();
+      this.reenlistEvents.set((data.events ?? []) as EventOption[]);
+    } catch (err: any) {
+      this.toastService.error(`Error al cargar eventos: ${err.message}`);
+    } finally {
+      this.loadingReenlistEvents.set(false);
+    }
+  }
+
+  /** Último evento elegido en esta pestaña (sessionStorage), o null. */
+  private readStoredReenlistEvent(): string | null {
+    if (typeof sessionStorage === 'undefined') return null;
+    try {
+      return sessionStorage.getItem(REENLIST_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Persiste el evento elegido para la sesión de esta pestaña. */
+  private writeStoredReenlistEvent(eventId: string): void {
+    if (typeof sessionStorage === 'undefined') return;
+    try {
+      sessionStorage.setItem(REENLIST_STORAGE_KEY, eventId);
+    } catch {
+      // Sin persistencia disponible: el default no sobrevive, pero la acción sí.
     }
   }
 }

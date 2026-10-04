@@ -197,6 +197,15 @@
                         ✅ Marcar recogido
                       </button>
                     }
+                    @if (canReenlist(item)) {
+                      <button
+                        (click)="$event.stopPropagation(); openReenlist(item)"
+                        title="Cambiar este objeto a otro evento y reiniciarlo como disponible (solo objetos enviados a caridad)."
+                        class="flex items-center space-x-1.5 px-2.5 py-1 border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-50 transition-all text-xs font-medium"
+                      >
+                        🔄 Cambiar de evento
+                      </button>
+                    }
                     <a
                       routerLink="/admin/ingest"
                       (click)="$event.stopPropagation()"
@@ -298,6 +307,60 @@
             <button (click)="confirmDeliver()" [disabled]="delivering()"
                     class="flex-1 text-sm bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl py-3 font-medium transition-colors">
               {{ delivering() ? 'Marcando…' : 'Sí, marcar entregado' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    }
+  }
+
+  <!-- Diálogo admin 'Cambiar de evento' (re-enlistar item enviado a caridad) -->
+  @if (adminTokenService.authenticated() && isConfirmingReenlist()) {
+    @if (reenlistTarget(); as target) {
+      <div class="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50"
+           (click)="$event.stopPropagation(); cancelReenlist()">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4"
+             (click)="$event.stopPropagation()">
+          <div class="text-center">
+            <div class="mx-auto w-14 h-14 bg-indigo-100 rounded-full flex items-center justify-center mb-3 text-2xl">🔄</div>
+            <h3 class="text-lg font-bold text-gray-900">¿A qué evento se debe cambiar?</h3>
+          </div>
+          <p class="text-sm text-gray-600">
+            Vas a mover <b>{{ target.title }}</b> a otro evento. El objeto se
+            <b>reinicia como disponible</b> y su <b>cola se vacía por completo</b>
+            (los apartados previos no se conservan). Sus datos e imágenes se mantienen intactos.
+          </p>
+
+          <label class="block">
+            <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Evento destino</span>
+            <select [(ngModel)]="reenlistTargetEventId"
+                    class="w-full mt-1 text-xs px-2 py-2 border border-gray-200 rounded-lg bg-white">
+              <option [ngValue]="null" disabled>Selecciona un evento…</option>
+              @for (ev of reenlistEventOptions(); track ev.id) {
+                <option [ngValue]="ev.id">{{ ev.title || 'Evento sin título' }} — {{ eventStatusLabel(ev.status) }}</option>
+              }
+            </select>
+          </label>
+
+          @if (loadingReenlistEvents()) {
+            <p class="text-[10px] text-gray-400">Cargando eventos…</p>
+          } @else if (reenlistEventOptions().length === 0) {
+            <p class="text-[10px] text-amber-600">No hay eventos elegibles (se excluyen el evento actual y los cerrados).</p>
+          }
+
+          <p class="text-[10px] text-gray-400">
+            El último evento que elijas en esta pestaña se recordará como opción por defecto para cambios posteriores.
+          </p>
+
+          <div class="flex gap-2">
+            <button (click)="cancelReenlist()"
+                    class="flex-1 text-sm border border-gray-200 rounded-xl py-3 text-gray-600 hover:bg-gray-50 transition-colors">
+              Cancelar
+            </button>
+            <button (click)="confirmReenlist()"
+                    [disabled]="reenlisting() || !reenlistTargetEventId()"
+                    class="flex-1 text-sm bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl py-3 font-medium transition-colors">
+              {{ reenlisting() ? 'Cambiando…' : 'OK, cambiar de evento' }}
             </button>
           </div>
         </div>

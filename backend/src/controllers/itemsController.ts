@@ -23,6 +23,7 @@ import {
   getItemsByEventStatus,
   getEventStatusCounts,
   ensureHydrated,
+  patchItem,
   EVENT_STATUS_ORDER,
   type StoreItem
 } from '../cache/appStore.js';
@@ -848,5 +849,218 @@ export const listAllAdminItems = async (req: Request, res: Response): Promise<vo
   } catch (error) {
     console.error('Failed to list admin items:', error);
     res.status(500).json({ error: 'Database processing error listing admin items.' });
+  }
+};
+
+/**
+ * POST /api/admin/items/:id/change-event — re-enlista un objeto enviado a
+ * caridad en OTRO evento, reiniciándolo como disponible (v2).
+ *
+ * Regla de negocio (decidida por producto): SOLO se permite cuando el item está
+ * en fase `enviado_a_caridad`. El objeto ocupa una "segunda oportunidad": se le
+ * reasigna `event_id` y se reinicia a `phase='claim_open'` / legacy
+ * `status='available'`, conservando INTACTOS sus datos e imágenes.
+ *
+ * La cola forense se BORRA por completo (`DELETE FROM claims WHERE item_id`) para
+ * que el objeto parta verdaderamente limpio en el evento destino, y se limpian
+ * todos los marcadores de ciclo de vida (`frozen_schedule`, `frozen_at`,
+ * `free_window_opened_at`, `delivered_claim_id`, `delivered_at`, `charity_at`).
+ *
+ * Validaciones: item existe; fase `enviado_a_caridad`; evento destino existe y
+ * `status !== 'closed'`; `eventId !== item.eventId` actual. Body: `{ eventId }`.
+ *
+ * Efectos: escritura atómica en Neon + write-through al store RAM
+ * (`patchItem` con `queue: []`), auditoría `ITEM_REENLISTED` (evento origen y
+ * destino) y SSE `item_updated` con `reason: 'reenlisted'` para que el catálogo
+ * de visitantes y las pestañas admin converjan en tiempo real.
+ */
+export const changeItemEvent = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+  const adminSession = (req as any).adminSession;
+  const { eventId } = req.body ?? {};
+
+  if (!id) {
+    res.status(400).json({ error: 'Missing item id parameter.' });
+    return;
+  }
+  if (!eventId || typeof eventId !== 'string') {
+    res.status(400).json({
+      error: 'eventId is required: provide the target event to re-enlist the item.',
+      timestamp: new Date().toISOString()
+    });
+    return;
+  }
+
+  // Asegurar el store hidratado y el reloj v2 al día antes de mutar.
+  await ensureHydrated();
+  await runLazyCatchUp();
+
+  const storeItem = getItemById(id);
+  if (!storeItem) {
+    res.status(404).json({ error: 'Item not found.' });
+    return;
+  }
+  if (storeItem.phase !== 'enviado_a_caridad') {
+    res.status(409).json({
+      error: 'Only items sent to charity (enviado_a_caridad) can be re-enlisted to another event.',
+      code: 'not_in_charity',
+      timestamp: new Date().toISOString()
+    });
+    return;
+  }
+  if (storeItem.eventId === eventId) {
+    res.status(400).json({
+      error: 'The item already belongs to the selected event.',
+      code: 'same_event',
+      timestamp: new Date().toISOString()
+    });
+    return;
+  }
+
+  let client: PoolClient | undefined;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // Row-lock del item y re-validación de fase bajo lock (evita carreras con el
+    // scheduler: si pasó a otra fase entre la lectura RAM y el BEGIN, se aborta).
+    const lock = await client.query(
+      'SELECT event_id, phase FROM items WHERE id = $1 FOR UPDATE',
+      [id]
+    );
+    if (lock.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Item not found.' });
+      return;
+    }
+    if (lock.rows[0].phase !== 'enviado_a_caridad') {
+      await client.query('ROLLBACK');
+      res.status(409).json({
+        error: 'Only items sent to charity (enviado_a_caridad) can be re-enlisted to another event.',
+        code: 'not_in_charity',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+
+    const previousEventId: string | null = lock.rows[0].event_id ?? null;
+
+    // Validar evento destino (existe y no está cerrado).
+    const evRes = await client.query(
+      'SELECT id, title, status FROM events WHERE id = $1',
+      [eventId]
+    );
+    if (evRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      res.status(400).json({
+        error: 'Invalid eventId: the referenced event does not exist.',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+    if (evRes.rows[0].status === 'closed') {
+      await client.query('ROLLBACK');
+      res.status(409).json({
+        error: 'Cannot re-enlist into a closed event.',
+        code: 'event_closed',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+    const targetEventTitle: string | null = evRes.rows[0].title ?? null;
+
+    // 1) Soltar la FK a la entrega antes de borrar la cola (defensivo).
+    await client.query('UPDATE items SET delivered_claim_id = NULL WHERE id = $1', [id]);
+    // 2) Borrar la cola forense: el item parte limpio en el evento destino.
+    await client.query('DELETE FROM claims WHERE item_id = $1', [id]);
+
+    // 3) Reasignar evento + reiniciar a disponible (limpiando el ciclo de vida v2).
+    const upd = await client.query(
+      `UPDATE items SET
+         event_id = $1,
+         phase = 'claim_open',
+         status = 'available',
+         frozen_schedule = NULL,
+         frozen_at = NULL,
+         free_window_opened_at = NULL,
+         delivered_at = NULL,
+         charity_at = NULL,
+         updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, title, event_id, phase, status, charity_at`,
+      [eventId, id]
+    );
+    const updated = upd.rows[0];
+
+    // Auditoría dentro de la transacción (mismo patrón savepoint que deleteItem).
+    await client.query('SAVEPOINT audit_sp');
+    const auditOk = await logAudit(
+      {
+        action: 'ITEM_REENLISTED',
+        adminCodeSuffix: maskAdminCode(String(adminSession?.id ?? '')),
+        itemId: id,
+        details: {
+          title: updated.title,
+          previousEventId,
+          previousEventTitle: previousEventId ? (getEvent(previousEventId)?.title ?? null) : null,
+          targetEventId: eventId,
+          targetEventTitle,
+          phase: updated.phase,
+          timestamp: new Date().toISOString()
+        }
+      },
+      client
+    );
+    if (auditOk) {
+      await client.query('RELEASE SAVEPOINT audit_sp');
+    } else {
+      await client.query('ROLLBACK TO SAVEPOINT audit_sp');
+    }
+
+    await client.query('COMMIT');
+
+    // Write-through al store RAM: nuevo evento, fase disponible y cola vacía.
+    patchItem(id, {
+      eventId,
+      phase: 'claim_open',
+      status: 'available',
+      frozenSchedule: null,
+      frozenAt: null,
+      freeWindowOpenedAt: null,
+      deliveredClaimId: null,
+      deliveredAt: null,
+      charityAt: null,
+      queue: []
+    });
+
+    // SSE para que el catálogo público y las demás vistas admin converjan.
+    broadcastSseEvent('item_updated', {
+      itemId: id,
+      eventId,
+      phase: 'claim_open',
+      status: 'available',
+      charityAt: null,
+      reason: 'reenlisted'
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Item "${updated.title}" re-enlisted into the selected event and reset to available.`,
+      itemId: id,
+      previousEventId,
+      eventId,
+      phase: updated.phase,
+      status: updated.status
+    });
+  } catch (error) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {
+        /* connection may already be released or the transaction aborted */
+      });
+    }
+    console.error('Failed to change item event:', error);
+    res.status(500).json({ error: 'Database execution error changing the item event.' });
+  } finally {
+    if (client) client.release();
   }
 };
