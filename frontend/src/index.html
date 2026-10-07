@@ -19,13 +19,14 @@
       estas etiquetas deben vivir en el HTML servido (Angular no las inyecta).
       Al ser un SPA con rewrites, este bloque aplica a todas las rutas, así que los
       enlaces compartidos (/?invite=TOKEN) heredan esta misma vista previa.
-      og:image debe ser absoluta y pública. El banner es 1200×628 (1.91:1) y pesa
+      og:image debe ser absoluta, pública y apuntar al dominio de producción real
+      (claim-it-app-frontend.vercel.app). El banner es 1200×628 (1.91:1) y pesa
       ~143 KB, por debajo del límite práctico de ~300 KB de WhatsApp.
       La ruta distingue mayúsculas: el nombre del archivo debe coincidir tal cual.
     -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Limpia x Mudanza" />
-    <meta property="og:url" content="https://claimitapp.vercel.app/" />
+    <meta property="og:url" content="https://claim-it-app-frontend.vercel.app/" />
     <meta property="og:title" content="Limpia x Mudanza — El primero que llega, se lo lleva" />
     <meta
       property="og:description"
@@ -33,11 +34,11 @@
     />
     <meta
       property="og:image"
-      content="https://claimitapp.vercel.app/images/ClaimItApp_OG-banner-1200x628-02.png"
+      content="https://claim-it-app-frontend.vercel.app/images/ClaimItApp_OG-banner-1200x628-02.png"
     />
     <meta
       property="og:image:secure_url"
-      content="https://claimitapp.vercel.app/images/ClaimItApp_OG-banner-1200x628-02.png"
+      content="https://claim-it-app-frontend.vercel.app/images/ClaimItApp_OG-banner-1200x628-02.png"
     />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
@@ -54,7 +55,7 @@
     />
     <meta
       name="twitter:image"
-      content="https://claimitapp.vercel.app/images/ClaimItApp_OG-banner-1200x628-02.png"
+      content="https://claim-it-app-frontend.vercel.app/images/ClaimItApp_OG-banner-1200x628-02.png"
     />
     <meta name="twitter:image:alt" content="Limpia x Mudanza — el primero que llega, se lo lleva" />
 
