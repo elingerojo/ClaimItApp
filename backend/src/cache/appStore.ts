@@ -161,7 +161,7 @@ let users: Map<string, StoreUser> = new Map();
 let events: Map<string, StoreEvent> = new Map();
 let eventMembers: Map<string, StoreEventMember[]> = new Map(); // userUuid -> memberships
 let trustSettings: Map<string, any> = new Map(); // level id -> trust_levels_settings row
-/** Fila única de event_config (id=1): plantilla de agenda + visibilidad de caridad. */
+/** Fila única de event_config (id=1): agenda + visibilidad de objetos terminales. */
 let eventConfig: any | null = null;
 
 // Índice por estatus de evento de los items (lazy). Ver getItemsByEventStatus.
@@ -330,7 +330,7 @@ export async function rehydrateAll(): Promise<boolean> {
     trustSettings = new Map(trustResult.rows.map((r: any) => [r.id, r]));
 
     // 6b. Plantilla de agenda global (event_config id=1): agenda + ventana de
-    // visibilidad de los objetos enviados a caridad. El feed lee de aquí (RAM).
+    // visibilidad de los objetos terminales. El feed lee de aquí (RAM).
     const eventConfigResult = await pool.query('SELECT * FROM event_config WHERE id = 1');
     eventConfig = eventConfigResult.rows[0] ?? null;
 

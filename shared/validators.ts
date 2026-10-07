@@ -16,7 +16,7 @@
  * los cambia).
  */
 
-import { CHARITY_VISIBILITY_HOURS_MAX } from './eventConfig.js';
+import { TERMINAL_VISIBILITY_HOURS_MAX } from './eventConfig.js';
 import {
   CONDITION_ACCESSORIES_VALUES,
   CONDITION_FUNCTIONALITY_VALUES,
@@ -479,7 +479,7 @@ export function validateEventConfig(data: any): ValidationResult {
     'open_after_publish_hours',
     'claims_window_hours',
     'closing_window_hours',
-    'charity_visibility_hours'
+    'terminal_visibility_hours'
   ] as const;
   for (const key of keys) {
     const v = data?.[key];
@@ -488,10 +488,10 @@ export function validateEventConfig(data: any): ValidationResult {
     }
   }
   if (
-    Number.isInteger(data?.charity_visibility_hours) &&
-    data.charity_visibility_hours > CHARITY_VISIBILITY_HOURS_MAX
+    Number.isInteger(data?.terminal_visibility_hours) &&
+    data.terminal_visibility_hours > TERMINAL_VISIBILITY_HOURS_MAX
   ) {
-    errors.push(`charity_visibility_hours: must be 0-${CHARITY_VISIBILITY_HOURS_MAX}`);
+    errors.push(`terminal_visibility_hours: must be 0-${TERMINAL_VISIBILITY_HOURS_MAX}`);
   }
   if (data?.pickup_schedule_info !== undefined && data.pickup_schedule_info !== null) {
     if (typeof data.pickup_schedule_info !== 'string') {

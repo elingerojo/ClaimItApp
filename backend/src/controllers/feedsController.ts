@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 import {
-  CHARITY_VISIBILITY_HOURS_DEFAULT,
+  TERMINAL_VISIBILITY_HOURS_DEFAULT,
   dailyClaimStatus,
   HOUR_MS,
-  isCharityItemExpiredForVisitor,
+  isTerminalItemExpiredForVisitor,
   ROLE_HIERARCHY,
   type ItemPhase,
   type Role,
@@ -122,10 +122,11 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
     const now = Date.now();
     const itemsSnapshot = getItems();
 
-    // Ventana de visibilidad de los objetos enviados a caridad (event_config):
-    // horas desde `charity_at` que siguen mostrándose en el feed del visitante.
-    const charityVisibilityHours = Number(
-      getEventConfig()?.charity_visibility_hours ?? CHARITY_VISIBILITY_HOURS_DEFAULT
+    // Ventana de visibilidad de los objetos TERMINALES (event_config): horas
+    // desde su cierre (`delivered_at` / `charity_at`) que siguen mostrándose en
+    // el feed del visitante.
+    const terminalVisibilityHours = Number(
+      getEventConfig()?.terminal_visibility_hours ?? TERMINAL_VISIBILITY_HOURS_DEFAULT
     );
 
     // Apartados activos del usuario por evento (límite simultáneo real).
@@ -160,19 +161,26 @@ export const getInventoryFeed = async (req: Request, res: Response): Promise<voi
         // no publicado) ⇒ sus items NO son visibles en el feed público.
         if (!event?.published_at) return null;
 
-        // 1c. Objetos enviados a caridad: solo se muestran mientras no superen
-        // `charity_visibility_hours` desde `charity_at` (fallback defensivo al
-        // pickup_deadline del evento). Sin marca temporal = se conserva visible.
-        if (
-          isCharityItemExpiredForVisitor(
-            item.phase,
-            item.charityAt,
-            event.pickup_deadline,
-            charityVisibilityHours,
-            now
-          )
-        ) {
-          return null;
+        // 1c. Objetos TERMINALES: solo se muestran mientras no superen
+        // `terminal_visibility_hours` desde su cierre. `entregado` mide desde
+        // `delivered_at`; `enviado_a_caridad` desde `charity_at` (fallback
+        // defensivo al pickup_deadline del evento). Sin marca temporal = se
+        // conserva visible.
+        if (item.phase === 'entregado' || item.phase === 'enviado_a_caridad') {
+          const closedAt =
+            item.phase === 'entregado'
+              ? item.deliveredAt
+              : item.charityAt ?? event.pickup_deadline ?? null;
+          if (
+            isTerminalItemExpiredForVisitor(
+              item.phase,
+              closedAt,
+              terminalVisibilityHours,
+              now
+            )
+          ) {
+            return null;
+          }
         }
 
         // 2. Visibilidad temporal por rol (cero columnas por evento — dinámico;

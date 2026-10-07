@@ -88,7 +88,7 @@ export const updateEventConfig = async (req: Request, res: Response): Promise<vo
          claims_window_hours       = $3,
          closing_window_hours      = $4,
          pickup_schedule_info      = $5,
-         charity_visibility_hours  = $6,
+         terminal_visibility_hours = $6,
          updated_at                = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -98,7 +98,7 @@ export const updateEventConfig = async (req: Request, res: Response): Promise<vo
         Number(body.claims_window_hours),
         Number(body.closing_window_hours),
         body.pickup_schedule_info ?? null,
-        Number(body.charity_visibility_hours)
+        Number(body.terminal_visibility_hours)
       ]
     );
     if (upd.rows.length === 0) {
@@ -115,7 +115,7 @@ export const updateEventConfig = async (req: Request, res: Response): Promise<vo
       claims_window_hours: Number(body.claims_window_hours),
       closing_window_hours: Number(body.closing_window_hours),
       pickup_schedule_info: body.pickup_schedule_info ?? null,
-      charity_visibility_hours: Number(body.charity_visibility_hours)
+      terminal_visibility_hours: Number(body.terminal_visibility_hours)
     });
 
     await logAudit({
@@ -125,7 +125,7 @@ export const updateEventConfig = async (req: Request, res: Response): Promise<vo
         open_after_publish_hours: Number(body.open_after_publish_hours),
         claims_window_hours: Number(body.claims_window_hours),
         closing_window_hours: Number(body.closing_window_hours),
-        charity_visibility_hours: Number(body.charity_visibility_hours),
+        terminal_visibility_hours: Number(body.terminal_visibility_hours),
         timestamp: new Date().toISOString()
       }
     });

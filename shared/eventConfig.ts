@@ -21,13 +21,13 @@ import type { Role } from './types.js';
 export const HOUR_MS = 60 * 60 * 1000;
 
 /**
- * Horas por defecto que un objeto `enviado_a_caridad` permanece visible en el
- * catálogo del visitante tras `items.charity_at` (3 días).
+ * Horas por defecto que un objeto TERMINAL (`entregado` / `enviado_a_caridad`)
+ * permanece visible en el catálogo del visitante tras su cierre (3 días).
  */
-export const CHARITY_VISIBILITY_HOURS_DEFAULT = 72;
+export const TERMINAL_VISIBILITY_HOURS_DEFAULT = 72;
 
-/** Tope del campo `charity_visibility_hours` (1 año). */
-export const CHARITY_VISIBILITY_HOURS_MAX = 8760;
+/** Tope del campo `terminal_visibility_hours` (1 año). */
+export const TERMINAL_VISIBILITY_HOURS_MAX = 8760;
 
 /** Fila de la plantilla de agenda global (event_config id=1). */
 export interface EventConfig {
@@ -38,10 +38,11 @@ export interface EventConfig {
   /** pickup_deadline = claims_close_at + esto (horas de ventana de recogida tras el corte). */
   closing_window_hours: number;
   /**
-   * Horas, desde `items.charity_at`, que un objeto `enviado_a_caridad` sigue
-   * visible en el catálogo del visitante. 0 = ocultar de inmediato.
+   * Horas que un objeto TERMINAL (`entregado` desde `delivered_at`,
+   * `enviado_a_caridad` desde `charity_at`) sigue visible en el catálogo del
+   * visitante. 0 = ocultar de inmediato.
    */
-  charity_visibility_hours: number;
+  terminal_visibility_hours: number;
   /** Nota de recogida (texto informativo). */
   pickup_schedule_info: string | null;
 }
@@ -159,28 +160,28 @@ export function dailyClaimStatus(dailyLimit: number, dailyUsed: number): DailyCl
 }
 
 /**
- * ¿Debe ocultarse del catálogo del visitante un objeto enviado a caridad?
+ * ¿Debe ocultarse del catálogo del visitante un objeto TERMINAL?
  *
- * `true` cuando el objeto está en fase `enviado_a_caridad` y han transcurrido
- * MÁS de `charityVisibilityHours` desde `charityAt` (fallback defensivo a
- * `pickupDeadline`). Sin marca temporal válida NO se oculta (evita sobre-ocultar
- * datos incompletos). Función PURA con reloj inyectable (`nowMs`), reutilizada
- * por el feed del visitante (`feedsController`) y sus pruebas.
+ * Aplica a `entregado` (con `at = items.delivered_at`) y a `enviado_a_caridad`
+ * (con `at = items.charity_at`; el fallback defensivo al `pickup_deadline` del
+ * evento lo resuelve el llamador). `true` cuando han transcurrido MÁS de
+ * `terminalVisibilityHours` desde `at`. Sin marca temporal válida, o para fases
+ * no terminales, devuelve `false` (no se oculta). Función PURA con reloj
+ * inyectable (`nowMs`), reutilizada por el feed del visitante
+ * (`feedsController`) y sus pruebas.
  */
-export function isCharityItemExpiredForVisitor(
+export function isTerminalItemExpiredForVisitor(
   phase: string | null | undefined,
-  charityAt: string | null | undefined,
-  pickupDeadline: string | null | undefined,
-  charityVisibilityHours: number,
+  at: string | null | undefined,
+  terminalVisibilityHours: number,
   nowMs: number
 ): boolean {
-  if (phase !== 'enviado_a_caridad') return false;
-  const ts = charityAt ?? pickupDeadline ?? null;
-  if (!ts) return false;
-  const tsMs = new Date(ts).getTime();
-  if (Number.isNaN(tsMs)) return false;
-  const hours = Number.isFinite(charityVisibilityHours)
-    ? charityVisibilityHours
-    : CHARITY_VISIBILITY_HOURS_DEFAULT;
-  return nowMs - tsMs > hours * HOUR_MS;
+  if (phase !== 'entregado' && phase !== 'enviado_a_caridad') return false;
+  if (!at) return false;
+  const atMs = new Date(at).getTime();
+  if (Number.isNaN(atMs)) return false;
+  const hours = Number.isFinite(terminalVisibilityHours)
+    ? terminalVisibilityHours
+    : TERMINAL_VISIBILITY_HOURS_DEFAULT;
+  return nowMs - atMs > hours * HOUR_MS;
 }
